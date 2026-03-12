@@ -18,6 +18,7 @@ jobs:
             target: x86_64-pc-windows-msvc
           - platform: macos-latest
             target: universal-apple-darwin
+            rustTargets: aarch64-apple-darwin,x86_64-apple-darwin
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
 
@@ -32,10 +33,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install macOS targets
-        if: matrix.platform == 'macos-latest'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> $GITHUB_ENV
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,7 +44,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.rustTargets || matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -65,7 +63,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           tauriScript: npx @tauri-apps/cli
           tagName: ${{ github.ref_name }}
