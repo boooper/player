@@ -57,14 +57,12 @@ jobs:
         env:
           DATABASE_URL: "file:./prisma/dev.db"
 
-      - name: Remove dev dependencies
-        run: npm prune --omit=dev
-
       - name: Build and bundle
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tauriScript: npx @tauri-apps/cli
           tagName: ${{ github.ref_name }}
           releaseName: Naviarr ${{ github.ref_name }}
           releaseBody: |
