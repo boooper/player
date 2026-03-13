@@ -1,18 +1,16 @@
-name: Desktop
+name: publish
 
 on:
   push:
     branches:
-      - main
-    tags:
-      - 'v*'
+      - release
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build-desktop:
+  publish-tauri:
     permissions:
       contents: write
     strategy:
@@ -20,19 +18,19 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
+            args: ''
             sidecar-script: sidecar:build:win
 
-          - platform: macos-latest        # arm64 (M-series runner)
-            target: aarch64-apple-darwin
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
             sidecar-script: sidecar:build:mac-arm
 
-          - platform: macos-latest        # cross-compile x86_64 on ARM runner
-            target: x86_64-apple-darwin
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
             sidecar-script: sidecar:build:mac-x64
 
           - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
+            args: ''
             sidecar-script: sidecar:build:linux
 
     runs-on: ${{ matrix.platform }}
@@ -60,7 +58,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
@@ -73,30 +71,16 @@ jobs:
       - name: Build API sidecar
         run: npm run ${{ matrix.sidecar-script }} --workspace @player/api
 
-      - name: Build desktop artifacts
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
-          args: --config src-tauri/tauri.build.conf.json --target ${{ matrix.target }} --ci
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: naviarr-[platform]-[arch]-[bundle]
-
-      - name: Build and publish desktop release
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Naviarr ${{ github.ref_name }}'
-          releaseBody: 'See the workflow artifacts and release assets for this build.'
-          releaseDraft: false
+          tagName: app-v__VERSION__
+          releaseName: 'Naviarr v__VERSION__'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
           prerelease: false
-          args: --config src-tauri/tauri.build.conf.json --target ${{ matrix.target }} --ci
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: naviarr-[platform]-[arch]-[bundle]
+          args: --config src-tauri/tauri.build.conf.json --ci ${{ matrix.args }}
 
