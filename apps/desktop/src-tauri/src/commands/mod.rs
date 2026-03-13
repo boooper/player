@@ -1,8 +1,10 @@
 pub mod health;
+pub mod jellyfin;
 pub mod lastfm;
+pub mod library;
 pub mod liked_artists;
 pub mod lyrics;
+pub mod media;
 pub mod profiles;
 pub mod settings;
 pub mod stats;
-pub mod subsonic;

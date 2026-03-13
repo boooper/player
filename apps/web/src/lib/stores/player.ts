@@ -1,8 +1,8 @@
 import { writable, get } from 'svelte/store';
 
-import type { SubsonicSong, SubsonicPlaylist } from '$lib/api';
+import type { Song, Playlist } from '$lib/api';
 
-export const queue = writable<SubsonicSong[]>([]);
+export const queue = writable<Song[]>([]);
 export const currentIndex = writable(0);
 export const shouldAutoplay = writable(false);
 export const isPlaying = writable(false);
@@ -16,7 +16,7 @@ export const focusTrack = writable<{
   title: string;
   artist: string;
   imageUrl: string;
-  source: 'lastfm' | 'subsonic';
+  source: 'lastfm' | 'library';
   album?: string;
 } | null>(null);
 
@@ -24,13 +24,13 @@ export function setFocusTrack(track: {
   title: string;
   artist: string;
   imageUrl: string;
-  source: 'lastfm' | 'subsonic';
+  source: 'lastfm' | 'library';
   album?: string;
 } | null): void {
   focusTrack.set(track);
 }
 
-export function playQueue(items: SubsonicSong[], startIndex = 0): void {
+export function playQueue(items: Song[], startIndex = 0): void {
   if (!items.length) return;
 
   queue.set(items);
@@ -112,12 +112,12 @@ export const upNextEnabled = writable(true);
 export const smartShuffleMode = writable(false);
 export const showLyrics = writable(false);
 export const seekRequest = writable<number | null>(null);
-export const subsonicPlaylists = writable<SubsonicPlaylist[]>([]);
+export const subsonicPlaylists = writable<Playlist[]>([]);
 export const starredSongIds = writable<Set<string>>(new Set());
 export const showQueue = writable(false);
 
 export type PlayingFrom = {
-  type: 'playlist' | 'favorites' | 'artist' | 'album' | null;
+  type: 'playlist' | 'favorites' | 'artist' | 'album' | 'search' | null;
   name: string;
   href: string;
 };
@@ -155,7 +155,7 @@ export function addRecentlyPlayed(item: RecentItem): void {
   });
 }
 
-export function playNextInQueue(song: SubsonicSong): void {
+export function playNextInQueue(song: Song): void {
   const items = get(queue);
   if (!items.length) {
     playQueue([song], 0);
@@ -169,7 +169,7 @@ export function playNextInQueue(song: SubsonicSong): void {
   });
 }
 
-export function appendToQueue(items: SubsonicSong[]): void {
+export function appendToQueue(items: Song[]): void {
   if (!items.length) return;
   queue.update((current) => [...current, ...items]);
 }
@@ -188,7 +188,7 @@ export function pruneQueueHistory(keepPrev = 1): void {
 }
 
 export async function startRadio(
-  song: SubsonicSong,
+  song: Song,
   apiKey: string,
   limit = 25
 ): Promise<{ queued: number }> {

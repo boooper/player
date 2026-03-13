@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -46,13 +47,20 @@
     starredSongIds,
     playQueue
   } from '$lib/stores/player';
-  import { fetchUpNextSongs, fetchSubsonicSimilar, starSubsonicSong, unstarSubsonicSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchSubsonicArtistAlbums, fetchSubsonicAlbumSongs } from '$lib/api';
+  import { fetchUpNextSongs, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs } from '$lib/api';
   import { fetchLikedArtists, saveVolume } from '$lib/api';
   import { toast } from 'svelte-sonner';
   import { Button, Slider } from '$lib/components/ui';
   import { appSettings } from '$lib/stores/settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import { goto } from '$app/navigation';
+
+  onMount(() => {
+    function handleTogglePlay() { togglePlay(); }
+    window.addEventListener('player:toggle-play', handleTogglePlay);
+    return () => window.removeEventListener('player:toggle-play', handleTogglePlay);
+  });
+
   import { showQueue } from '$lib/stores/player';
 
   const lastFmApiKey = $derived($appSettings.lastFmApiKey);
@@ -94,7 +102,7 @@
     if (isStarred) {
       starredSongIds.update((ids) => { const s = new Set(ids); s.delete(id); return s; });
       try {
-        await unstarSubsonicSong(id, currentTrack.artist, currentTrack.title);
+        await unstarSong(id, currentTrack.artist, currentTrack.title);
       } catch {
         starredSongIds.update((ids) => new Set([...ids, id]));
         toast.error('Failed to remove from favorites');
@@ -102,7 +110,7 @@
     } else {
       starredSongIds.update((ids) => new Set([...ids, id]));
       try {
-        await starSubsonicSong(id, currentTrack.artist, currentTrack.title);
+        await starSong(id, currentTrack.artist, currentTrack.title);
       } catch {
         starredSongIds.update((ids) => { const s = new Set(ids); s.delete(id); return s; });
         toast.error('Failed to add to favorites');
@@ -176,8 +184,8 @@
     const artist = currentTrack.artist;
     const toastId = toast.loading(`Loading ${artist}…`);
     try {
-      const albums = await fetchSubsonicArtistAlbums(artist, 50);
-      const allSongs = (await Promise.all(albums.map(a => fetchSubsonicAlbumSongs(a.id)))).flat();
+      const albums = await fetchArtistAlbums(artist, 50);
+      const allSongs = (await Promise.all(albums.map(a => fetchAlbumSongs(a.id)))).flat();
       if (!allSongs.length) throw new Error('No songs found');
       // Fisher-Yates shuffle
       for (let i = allSongs.length - 1; i > 0; i--) {
@@ -198,7 +206,7 @@
     const albumName = currentTrack.album;
     const toastId = toast.loading(`Loading ${albumName}…`);
     try {
-      const songs = await fetchSubsonicAlbumSongs(currentTrack.albumId);
+      const songs = await fetchAlbumSongs(currentTrack.albumId);
       if (!songs.length) throw new Error('No songs found');
       for (let i = songs.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -254,7 +262,7 @@
     const capturedIdx = idx;
     const { artist, title, id } = track;
 
-    const doFetch: Promise<import('$lib/api').SubsonicSong[]> = lastFmApiKey
+    const doFetch: Promise<import('$lib/api').Song[]> = lastFmApiKey
       ? Promise.all([
           fetchLikedArtists().then(stored => stored.map(a => a.name)).catch((): string[] => []),
           lfmUserTaste().catch((): string[] => [])
@@ -263,7 +271,7 @@
           const merged = [...new Set([...liked, ...taste])];
           return fetchUpNextSongs({ apiKey: lastFmApiKey, artist, title, likedArtists: merged, limit: 3 });
         })
-      : fetchSubsonicSimilar(id, 3);
+      : fetchSimilarSongs(id, 3);
 
     doFetch
       .then(songs => {
@@ -601,7 +609,7 @@
           {/if}
           <Slider
             type="multiple"
-            value={seekVal}
+            bind:value={seekVal}
             min={0}
             max={isFinite($duration) && $duration > 0 ? $duration : 1}
             step={1}
@@ -643,7 +651,7 @@
         {/if}
         <Slider
           type="multiple"
-          value={volVal}
+          bind:value={volVal}
           min={0}
           max={100}
           step={1}

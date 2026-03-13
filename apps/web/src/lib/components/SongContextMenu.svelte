@@ -12,15 +12,15 @@
     starredSongIds
   } from '$lib/stores/player';
   import {
-    starSubsonicSong,
-    unstarSubsonicSong,
-    addSongToSubsonicPlaylist,
-    type SubsonicSong
+    starSong,
+    unstarSong,
+    addSongToPlaylist,
+    type Song
   } from '$lib/api';
   import { appSettings } from '$lib/stores/settings';
 
   let { song, onplay, children, triggerClass }: {
-    song: SubsonicSong;
+    song: Song;
     onplay?: () => void;
     children: Snippet;
     triggerClass?: string;
@@ -52,7 +52,7 @@
     if (isStarred) {
       starredSongIds.update((ids) => { const s = new Set(ids); s.delete(song.id); return s; });
       try {
-        await unstarSubsonicSong(song.id, song.artist, song.title);
+        await unstarSong(song.id, song.artist, song.title);
         toast.success('Removed from favorites', { description: song.title });
       } catch {
         starredSongIds.update((ids) => new Set([...ids, song.id]));
@@ -61,7 +61,7 @@
     } else {
       starredSongIds.update((ids) => new Set([...ids, song.id]));
       try {
-        await starSubsonicSong(song.id, song.artist, song.title);
+        await starSong(song.id, song.artist, song.title);
         toast.success('Added to favorites', { description: song.title });
       } catch {
         starredSongIds.update((ids) => { const s = new Set(ids); s.delete(song.id); return s; });
@@ -72,7 +72,7 @@
 
   async function addToPlaylist(playlistId: string, playlistName: string) {
     try {
-      await addSongToSubsonicPlaylist(playlistId, song.id);
+      await addSongToPlaylist(playlistId, song.id);
       // Optimistically update the sidebar playlist song count
       subsonicPlaylists.update(lists =>
         lists.map(pl => pl.id === playlistId ? { ...pl, songCount: pl.songCount + 1 } : pl)

@@ -10,7 +10,7 @@ pub struct Profile {
     pub name: String,
     pub url: String,
     pub username: String,
-    pub use_password_auth: bool,
+    pub server_type: String,
     pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -23,7 +23,7 @@ pub struct ProfileDraft {
     pub url: String,
     pub username: String,
     pub password: Option<String>,
-    pub use_password_auth: bool,
+    pub server_type: String,
 }
 
 fn row_to_profile(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
@@ -32,7 +32,7 @@ fn row_to_profile(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
         name: row.get(1)?,
         url: row.get(2)?,
         username: row.get(3)?,
-        use_password_auth: row.get::<_, i64>(4)? != 0,
+        server_type: row.get::<_, String>(4).unwrap_or_else(|_| "subsonic".to_string()),
         is_active: row.get::<_, i64>(5)? != 0,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
@@ -40,7 +40,7 @@ fn row_to_profile(row: &rusqlite::Row) -> rusqlite::Result<Profile> {
 }
 
 const SELECT: &str =
-    "SELECT id, name, url, username, use_password_auth, is_active, created_at, updated_at FROM profiles";
+    "SELECT id, name, url, username, server_type, is_active, created_at, updated_at FROM profiles";
 
 #[tauri::command]
 pub fn get_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, String> {
@@ -70,10 +70,18 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
         .map_err(|e| e.to_string())?;
     let is_active = count == 0;
 
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby"]
+        .contains(&data.server_type.as_str())
+    {
+        data.server_type.clone()
+    } else {
+        "subsonic".to_string()
+    };
+
     db.execute(
-        "INSERT INTO profiles (name, url, username, password, use_password_auth, is_active, updated_at)
+        "INSERT INTO profiles (name, url, username, password, server_type, is_active, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
-        rusqlite::params![name, url, username, password, data.use_password_auth as i64, is_active as i64],
+        rusqlite::params![name, url, username, password, server_type, is_active as i64],
     )
     .map_err(|e| e.to_string())?;
 
@@ -139,9 +147,16 @@ pub fn update_profile(
             .map_err(|e| e.to_string())?;
         }
     }
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby"]
+        .contains(&data.server_type.as_str())
+    {
+        data.server_type.clone()
+    } else {
+        "subsonic".to_string()
+    };
     db.execute(
-        "UPDATE profiles SET use_password_auth = ?1, updated_at = datetime('now') WHERE id = ?2",
-        rusqlite::params![data.use_password_auth as i64, id],
+        "UPDATE profiles SET server_type = ?1, updated_at = datetime('now') WHERE id = ?2",
+        rusqlite::params![server_type, id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -206,24 +221,24 @@ pub fn activate_profile(state: State<'_, AppState>, id: i64) -> Result<(), Strin
     Ok(())
 }
 
-/// Internal helper used by subsonic commands.
+/// Internal helper used by subsonic / jellyfin commands.
 pub struct ActiveProfile {
     pub url: String,
     pub username: String,
     pub password: String,
-    pub use_password_auth: bool,
+    pub server_type: String,
 }
 
 pub fn get_active_profile(db: &rusqlite::Connection) -> Result<ActiveProfile, String> {
     db.query_row(
-        "SELECT url, username, password, use_password_auth FROM profiles WHERE is_active = 1 LIMIT 1",
+        "SELECT url, username, password, COALESCE(server_type, 'subsonic') FROM profiles WHERE is_active = 1 LIMIT 1",
         [],
         |row| {
             Ok(ActiveProfile {
                 url: row.get::<_, String>(0)?.trim_end_matches('/').to_string(),
                 username: row.get(1)?,
                 password: row.get(2)?,
-                use_password_auth: row.get::<_, i64>(3)? != 0,
+                server_type: row.get(3)?,
             })
         },
     )

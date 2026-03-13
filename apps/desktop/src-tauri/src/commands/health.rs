@@ -39,6 +39,12 @@ pub async fn get_service_health(state: State<'_, AppState>) -> Result<ServiceHea
     // ── Subsonic: ping the active profile ────────────────────────────────────
     let subsonic = match profile {
         None => "missing".to_string(),
+        Some(p) if p.server_type == "jellyfin" || p.server_type == "emby" => {
+            match crate::commands::jellyfin::ping(&state.http, &p).await {
+                Ok(true) => "online".to_string(),
+                _ => "offline".to_string(),
+            }
+        }
         Some(p) => {
             let salt: String = rand::thread_rng()
                 .sample_iter(&rand::distributions::Alphanumeric)
@@ -55,7 +61,7 @@ pub async fn get_service_health(state: State<'_, AppState>) -> Result<ServiceHea
                 q.append_pair("v", "1.16.1");
                 q.append_pair("c", "naviarr");
                 q.append_pair("f", "json");
-                if p.use_password_auth {
+                if p.server_type == "subsonic_legacy" || p.password.starts_with("enc:") {
                     q.append_pair("p", &p.password);
                 } else {
                     q.append_pair("t", &token);

@@ -19,6 +19,7 @@
     "bits-ui": "^2.16.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "embla-carousel-svelte": "^8.6.0",
     "mode-watcher": "^1.1.0",
     "svelte": "^5.0.0",
     "svelte-sonner": "^1.1.0",
@@ -33,7 +34,9 @@
   "dependencies": {
     "@player/shared": "file:../../packages/shared",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2.5.3",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "tauri-plugin-drpc": "^1.0.3"
   }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { fetchSubsonicPlaylistDetail, type SubsonicSong } from '$lib/api';
+  import { fetchPlaylistDetail, type Song } from '$lib/api';
   import { Play, Shuffle, Sparkles } from '@lucide/svelte';
   import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled } from '$lib/stores/player';
   import { Button } from '$lib/components/ui';
@@ -20,13 +20,13 @@
   let playlistName = $state('');
   let coverArtUrl = $state('');
   let songCount = $state(0);
-  let songs = $state<SubsonicSong[]>([]);
+  let songs = $state<Song[]>([])
 
   $effect(() => {
     const id = data.id;
     loading = true;
     error = '';
-    fetchSubsonicPlaylistDetail(id)
+    fetchPlaylistDetail(id)
       .then((detail) => {
         playlistName = detail.playlist.name;
         coverArtUrl = detail.playlist.coverArtUrl;
@@ -69,7 +69,7 @@
       title: song.title,
       artist: song.artist,
       imageUrl: song.coverArtUrl,
-      source: 'subsonic',
+      source: 'library',
       album: song.album
     });
     playingFrom.set({ type: 'playlist', name: playlistName, href: `/playlist/${encodeURIComponent(data.id)}` });
@@ -79,7 +79,7 @@
   function playAll() {
     if (!songs.length) return;
     const list = ($shuffleEnabled || $smartShuffleMode) ? [...songs].sort(() => Math.random() - 0.5) : songs;
-    focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'subsonic', album: list[0].album });
+    focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'library', album: list[0].album });
     playingFrom.set({ type: 'playlist', name: playlistName, href: `/playlist/${encodeURIComponent(data.id)}` });
     playQueue(list, 0);
   }

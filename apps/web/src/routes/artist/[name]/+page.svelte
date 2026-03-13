@@ -2,22 +2,23 @@
   import { Play, Shuffle, ChevronLeft, ChevronRight, Sparkles, Mic2 } from '@lucide/svelte';
 
   import {
-    fetchSubsonicArtistAlbums,
-    fetchSubsonicAlbumSongs,
-    searchSubsonicSongs,
-    type SubsonicAlbum,
-    type SubsonicSong
+    fetchArtistAlbums,
+    fetchAlbumSongs,
+    searchSongs,
+    type Album,
+    type Song
   } from '$lib/api';
   import {
     getArtistInfo,
     getArtistTopTracks,
     type ArtistInfo,
-    type Song
+    type Song as LastFmSong
   } from '$lib/metadata';
   import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode } from '$lib/stores/player';
   import { appSettings } from '$lib/stores/settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -32,12 +33,12 @@
   let error = $state('');
 
   let artistInfo = $state<ArtistInfo | null>(null);
-  let topTracks = $state<Song[]>([]);
-  let subsonicSongs = $state<SubsonicSong[]>([]);
-  let albums = $state<SubsonicAlbum[]>([]);
+  let topTracks = $state<LastFmSong[]>([]);
+  let subsonicSongs = $state<Song[]>([]);
+  let albums = $state<Album[]>([])
   let showAllTracks = $state(false);
 
-  let albumSongs = $state<Record<string, SubsonicSong[]>>({});
+  let albumSongs = $state<Record<string, Song[]>>({});
   let albumLoading = $state<Record<string, boolean>>({});
 
   let carouselEl = $state<HTMLDivElement | null>(null);
@@ -56,8 +57,8 @@
       const [info, top, sub, albs] = await Promise.all([
         getArtistInfo(name),
         getArtistTopTracks(name, 10),
-        searchSubsonicSongs(name, 30),
-        fetchSubsonicArtistAlbums(name, 24)
+        searchSongs(name, 30),
+        fetchArtistAlbums(name, 24)
       ]);
       artistInfo = info;
       topTracks = top;
@@ -74,7 +75,7 @@
     loadArtist(data.name);
   });
 
-  function findSubsonicMatch(title: string): SubsonicSong | null {
+  function findSubsonicMatch(title: string): Song | null {
     const needle = title.toLowerCase();
     return subsonicSongs.find((s) => s.title.toLowerCase() === needle) ?? null;
   }
@@ -82,7 +83,7 @@
   const playableTopTracks = $derived(
     topTracks
       .map((t) => ({ lfm: t, sub: findSubsonicMatch(t.title) }))
-      .filter((r) => r.sub !== null) as Array<{ lfm: Song; sub: SubsonicSong }>
+      .filter((r) => r.sub !== null) as Array<{ lfm: LastFmSong; sub: Song }>
   );
 
   const visibleTopTracks = $derived(
@@ -92,7 +93,7 @@
   function playTopTrack(index: number) {
     const list = playableTopTracks.map((r) => r.sub!);
     const song = list[index];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'subsonic', album: song.album });
+    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
     playQueue(list, index);
     playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
   }
@@ -101,7 +102,7 @@
     const list = playableTopTracks.map((r) => r.sub!);
     if (!list.length) return;
     const ordered = ($shuffleEnabled || $smartShuffleMode) ? [...list].sort(() => Math.random() - 0.5) : list;
-    focusTrack.set({ title: ordered[0].title, artist: ordered[0].artist, imageUrl: ordered[0].coverArtUrl, source: 'subsonic', album: ordered[0].album });
+    focusTrack.set({ title: ordered[0].title, artist: ordered[0].artist, imageUrl: ordered[0].coverArtUrl, source: 'library', album: ordered[0].album });
     playQueue(ordered, 0);
     playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
   }
@@ -110,7 +111,7 @@
     if (!albumSongs[albumId]) {
       albumLoading = { ...albumLoading, [albumId]: true };
       try {
-        albumSongs = { ...albumSongs, [albumId]: await fetchSubsonicAlbumSongs(albumId) };
+        albumSongs = { ...albumSongs, [albumId]: await fetchAlbumSongs(albumId) };
       } catch {
         albumSongs = { ...albumSongs, [albumId]: [] };
       } finally {
@@ -120,7 +121,7 @@
     const songs = albumSongs[albumId];
     if (!songs?.length) return;
     const song = songs[startIndex];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'subsonic', album: song.album });
+    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
     playQueue(songs, startIndex);
     const album = albums.find((a) => a.id === albumId);
     if (album) {
@@ -164,7 +165,7 @@
     if (shuffleAllArtist) {
       const toastId = toast.loading(`Loading all ${data.name} songs…`);
       try {
-        const allSongs = (await Promise.all(albums.map(a => fetchSubsonicAlbumSongs(a.id)))).flat();
+        const allSongs = (await Promise.all(albums.map(a => fetchAlbumSongs(a.id)))).flat();
         if (!allSongs.length) throw new Error('No songs found');
         for (let i = allSongs.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -370,6 +371,7 @@
     </div>
     <div bind:this={carouselEl} class="flex gap-4 overflow-x-auto pb-3" style="scrollbar-width:none;-ms-overflow-style:none">
       {#each albums as album (album.id)}
+        <AlbumContextMenu {album} onplay={() => loadAndPlayAlbum(album.id)}>
         <div class="group relative flex w-44 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 text-left transition hover:bg-accent">
           <a
             href="/album/{encodeURIComponent(album.id)}"
@@ -401,6 +403,7 @@
             <p class="text-xs text-muted-foreground">{album.year ? `${album.year} · ` : ''}{album.songCount} songs</p>
           </div>
         </div>
+        </AlbumContextMenu>
       {/each}
     </div>
   </section>

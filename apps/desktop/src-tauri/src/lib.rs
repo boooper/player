@@ -19,6 +19,12 @@ unsafe impl Sync for AppState {}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Show a message then bring the existing window to front
+            use tauri_plugin_dialog::DialogExt;
+            app.dialog()
+                .message("Player is already running.")
+                .title("Already Running")
+                .blocking_show();
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
@@ -43,6 +49,9 @@ pub fn run() {
                 )?;
             }
             app.handle().plugin(tauri_plugin_opener::init())?;
+            app.handle().plugin(tauri_plugin_dialog::init())?;
+            app.handle().plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))?;
+            app.handle().plugin(tauri_plugin_os::init())?;
             app.handle().plugin(tauri_plugin_drpc::init())?;
             Ok(())
         })
@@ -50,6 +59,7 @@ pub fn run() {
             // settings
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::settings::clear_database,
             // profiles
             commands::profiles::get_profiles,
             commands::profiles::create_profile,
@@ -71,18 +81,18 @@ pub fn run() {
             commands::lastfm::lfm_scrobble,
             commands::lastfm::lfm_user_taste,
             commands::lastfm::lfm_status,
-            // subsonic
-            commands::subsonic::subsonic_search,
-            commands::subsonic::subsonic_similar,
-            commands::subsonic::subsonic_playlists,
-            commands::subsonic::subsonic_playlist,
-            commands::subsonic::subsonic_artist_albums,
-            commands::subsonic::subsonic_album_songs,
-            commands::subsonic::subsonic_album,
-            commands::subsonic::subsonic_album_list,
-            commands::subsonic::subsonic_starred,
-            commands::subsonic::subsonic_star,
-            commands::subsonic::subsonic_add_to_playlist,
+            // library (provider-agnostic — dispatches to Subsonic or Jellyfin)
+            commands::library::library_search,
+            commands::library::library_similar,
+            commands::library::library_playlists,
+            commands::library::library_playlist,
+            commands::library::library_artist_albums,
+            commands::library::library_album_songs,
+            commands::library::library_album,
+            commands::library::library_album_list,
+            commands::library::library_starred,
+            commands::library::library_star,
+            commands::library::library_add_to_playlist,
             // lyrics
             commands::lyrics::fetch_lyrics,
         ])

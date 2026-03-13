@@ -3,9 +3,9 @@
   import { afterNavigate, goto } from '$app/navigation';
 
   import { Clock, X } from '@lucide/svelte';
-  import { searchSongs, type Song } from '$lib/metadata';
+  import { searchSongs as searchLastFmSongs, type Song as LastFmSong } from '$lib/metadata';
   import { getRecommendations, getTrackTopGenre, type TrackRecommendation } from '$lib/recommendation';
-  import { fetchLikedArtists, fetchSubsonicSimilar, searchSubsonicSongs, type SubsonicSong } from '$lib/api';
+  import { fetchLikedArtists, fetchSimilarSongs, searchSongs, type Song } from '$lib/api';
   import { focusTrack, playQueue } from '$lib/stores/player';
   import { appSettings } from '$lib/stores/settings';
   import { Badge, Button } from '$lib/components/ui';
@@ -21,21 +21,10 @@
   let error = $state('');
 
   let likedArtists = $state<string[]>([]);
-  let lastfmSongs = $state<Song[]>([]);
-  let subsonicSongs = $state<SubsonicSong[]>([]);
-  let subsonicSimilar = $state<SubsonicSong[]>([]);
+  let lastfmSongs = $state<LastFmSong[]>([]);
+  let subsonicSongs = $state<Song[]>([]);
+  let subsonicSimilar = $state<Song[]>([])
 
-  let selected = $state<{
-    title: string;
-    artist: string;
-    imageUrl: string;
-    source: 'lastfm' | 'subsonic';
-    id: string;
-  } | null>(null);
-
-  let recLoading = $state(false);
-  let recError = $state('');
-  let recs = $state<TrackRecommendation[]>([]);
   type HybridRecommendation = {
     id: string;
     title: string;
@@ -45,10 +34,24 @@
     genreScore: number;
     combinedScore: number;
     playable: boolean;
-    subsonicSong: SubsonicSong | null;
-    source: 'hybrid' | 'subsonic-similar';
+    subsonicSong: Song | null;
+    source: 'hybrid';
   };
-  let hybridRecs = $state<HybridRecommendation[]>([]);
+
+  type SelectedItem = {
+    id: string;
+    title: string;
+    artist: string;
+    imageUrl: string;
+    source: 'lastfm' | 'library';
+    subsonicSong?: Song | null;
+  };
+
+  let selected = $state<SelectedItem | null>(null);
+  let recs = $state<TrackRecommendation[]>([]);
+  let recError = $state('');
+  let recLoading = $state(false);
+  let hybridRecs = $state<HybridRecommendation[]>([])
   let lastExecutedQuery = '';
 
   const RECENT_KEY = 'naviarr_recent_searches';
@@ -74,8 +77,8 @@
       title: string;
       artist: string;
       imageUrl: string;
-      source: 'lastfm' | 'subsonic';
-      subsonicSong: SubsonicSong | null;
+      source: 'lastfm' | 'library';
+      subsonicSong: Song | null;
     }> = [];
     const seen: Record<string, boolean> = {};
 
@@ -88,7 +91,7 @@
         title: song.title,
         artist: song.artist,
         imageUrl: song.coverArtUrl,
-        source: 'subsonic',
+        source: 'library',
         subsonicSong: song
       });
     });
@@ -152,8 +155,8 @@
 
     try {
       const [lfm, sub] = await Promise.all([
-        hasLastFmKey ? searchSongs(queryText, 24) : Promise.resolve([]),
-        searchSubsonicSongs(queryText, 24)
+        hasLastFmKey ? searchLastFmSongs(queryText, 24) : Promise.resolve([]),
+        searchSongs(queryText, 24)
       ]);
 
       lastfmSongs = lfm;
@@ -183,7 +186,7 @@
     }
   }
 
-  function findBestMatch(candidates: SubsonicSong[], recArtist: string, recTitle: string): SubsonicSong | null {
+  function findBestMatch(candidates: Song[], recArtist: string, recTitle: string): Song | null {
     if (!candidates.length) return null;
     const norm = (s: string) => s.toLowerCase().trim().replace(/^the\s+/, '');
 
@@ -228,7 +231,7 @@
       // the seed artist.
       const subMatches = await Promise.all(
         lastfmRecs.map((rec) =>
-          searchSubsonicSongs(`${rec.artist} ${rec.title}`, 5)
+          searchSongs(`${rec.artist} ${rec.title}`, 5)
             .then((songs) => findBestMatch(songs, rec.artist, rec.title))
             .catch(() => null)
         )
@@ -262,7 +265,7 @@
     }
   }
 
-  async function pick(item: { id: string; title: string; artist: string; imageUrl: string; source: 'lastfm' | 'subsonic' }) {
+  async function pick(item: { id: string; title: string; artist: string; imageUrl: string; source: 'lastfm' | 'library' }) {
     selected = item;
     focusTrack.set({
       title: item.title,
@@ -271,7 +274,7 @@
       source: item.source
     });
 
-    if (item.source === 'subsonic') {
+    if (item.source === 'library') {
       const id = item.id.replace('sub-', '');
       const startIndex = subsonicSongs.findIndex((song) => song.id === id);
       if (startIndex >= 0) {
@@ -279,7 +282,7 @@
       }
 
       try {
-        subsonicSimilar = await fetchSubsonicSimilar(id, 16);
+        subsonicSimilar = await fetchSimilarSongs(id, 16);
       } catch {
         subsonicSimilar = [];
       }
@@ -299,7 +302,7 @@
         title: rec.subsonicSong.title,
         artist: rec.subsonicSong.artist,
         imageUrl: rec.subsonicSong.coverArtUrl,
-        source: 'subsonic',
+        source: 'library',
         album: rec.subsonicSong.album
       });
       playQueue([rec.subsonicSong], 0);

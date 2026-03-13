@@ -12,6 +12,10 @@
     "./contracts": {
       "types": "./src/contracts.d.ts",
       "default": "./src/contracts.js"
+    },
+    "./media": {
+      "types": "./src/media.d.ts",
+      "default": "./src/media.js"
     }
   }
 }

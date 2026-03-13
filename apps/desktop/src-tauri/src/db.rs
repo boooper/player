@@ -18,6 +18,7 @@ pub fn open(path: &Path) -> Result<Connection> {
             password          TEXT NOT NULL,
             use_password_auth INTEGER NOT NULL DEFAULT 0,
             is_active         INTEGER NOT NULL DEFAULT 0,
+            server_type       TEXT NOT NULL DEFAULT 'subsonic',
             created_at        TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -28,7 +29,17 @@ pub fn open(path: &Path) -> Result<Connection> {
             external_id TEXT,
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );",
+        );"
+    )?;
+    // Migrate: add server_type column to existing DBs (ignored if already present)
+    conn.execute(
+        "ALTER TABLE profiles ADD COLUMN server_type TEXT NOT NULL DEFAULT 'subsonic'",
+        [],
+    ).ok();
+    // Migrate: populate server_type from legacy use_password_auth flag
+    conn.execute(
+        "UPDATE profiles SET server_type = 'subsonic_legacy' WHERE use_password_auth = 1 AND server_type = 'subsonic'",
+        [],
     )?;
     Ok(conn)
 }

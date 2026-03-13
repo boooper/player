@@ -13,9 +13,9 @@
   }
 
   import {
-    fetchSubsonicAlbumDetail,
-    type SubsonicAlbum,
-    type SubsonicSong
+    fetchAlbumDetail,
+    type Album,
+    type Song
   } from '$lib/api';
   import { focusTrack, playQueue, playingFrom, toggleShuffle, shuffleEnabled, smartShuffleMode } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -32,14 +32,14 @@
 
   let loading = $state(true);
   let error = $state('');
-  let album = $state<(SubsonicAlbum & { genre?: string }) | null>(null);
-  let songs = $state<SubsonicSong[]>([]);
+  let album = $state<(Album & { genre?: string }) | null>(null);
+  let songs = $state<Song[]>([])
 
   onMount(async () => {
     loading = true;
     error = '';
     try {
-      const detail = await fetchSubsonicAlbumDetail(data.id);
+      const detail = await fetchAlbumDetail(data.id);
       album = detail.album;
       songs = detail.songs;
     } catch (err) {
@@ -56,7 +56,7 @@
       title: song.title,
       artist: song.artist,
       imageUrl: song.coverArtUrl,
-      source: 'subsonic',
+      source: 'library',
       album: song.album
     });
     playQueue(songs, index);

@@ -15,9 +15,6 @@ export default defineConfig({
     // Tauri uses a fixed port and requires HMR to work over the same host
     hmr: host ? { protocol: 'ws', host, port: 5174 } : undefined,
     // Don't watch Rust source files — let Tauri handle that
-    watch: { ignored: ['**/src-tauri/**'] },
-    proxy: {
-      '/api': 'http://localhost:8787'
-    }
+    watch: { ignored: ['**/src-tauri/**'] }
   }
 });

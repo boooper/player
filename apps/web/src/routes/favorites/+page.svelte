@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { Play, Shuffle, Heart, Sparkles } from '@lucide/svelte';
 
-  import { fetchSubsonicStarredSongs, fetchSubsonicSimilar, type SubsonicSong } from '$lib/api';
+  import { fetchStarredSongs, type Song } from '$lib/api';
   import { focusTrack, playQueue, playingFrom, starredSongIds, smartShuffleMode, shuffleEnabled } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import {
@@ -20,13 +20,13 @@
   // by filtering against the live starredSongIds store. This avoids the
   // race condition where a server re-fetch fires before the star/unstar
   // API call completes and returns stale data.
-  let allStarredSongs = $state<SubsonicSong[]>([]);
+  let allStarredSongs = $state<Song[]>([])
   let songs = $derived(allStarredSongs.filter(s => $starredSongIds.has(s.id)));
 
   onMount(() => {
     loading = true;
     error = '';
-    fetchSubsonicStarredSongs()
+    fetchStarredSongs()
       .then((s) => {
         allStarredSongs = s;
         // If the layout hasn't populated starredSongIds yet (initial direct load),
@@ -67,7 +67,7 @@
       title: song.title,
       artist: song.artist,
       imageUrl: song.coverArtUrl,
-      source: 'subsonic',
+      source: 'library',
       album: song.album
     });
     playQueue(songs, index);
@@ -77,7 +77,7 @@
   function playAll() {
     if (!songs.length) return;
     const list = ($shuffleEnabled || $smartShuffleMode) ? [...songs].sort(() => Math.random() - 0.5) : songs;
-    focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'subsonic', album: list[0].album });
+    focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'library', album: list[0].album });
     playQueue(list, 0);
     playingFrom.set({ type: 'favorites', name: 'Favorite Songs', href: '/favorites' });
   }

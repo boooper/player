@@ -8,6 +8,8 @@
   "permissions": [
     "core:default",
     "opener:allow-open-url",
-    "drpc:default"
+    "drpc:default",
+    "autostart:default",
+    "os:default"
   ]
 }

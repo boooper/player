@@ -4,8 +4,8 @@
 
   import {
     fetchLikedArtists, saveLikedArtist, removeLikedArtist,
-    fetchSubsonicStarredSongs, fetchSubsonicAlbumList, fetchSubsonicAlbumSongs,
-    type SubsonicSong, type SubsonicAlbum
+    fetchStarredSongs, fetchAlbumList, fetchAlbumSongs,
+    type Song, type Album
   } from '$lib/api';
   import { getTopArtists, type Artist } from '$lib/metadata';
   import {
@@ -15,9 +15,9 @@
 
   let liked = $state<string[]>([]);
   let top = $state<Artist[]>([]);
-  let starredSongs = $state<SubsonicSong[]>([]);
-  let newestAlbums = $state<SubsonicAlbum[]>([]);
-  let randomAlbums = $state<SubsonicAlbum[]>([]);
+  let starredSongs = $state<Song[]>([]);
+  let newestAlbums = $state<Album[]>([]);
+  let randomAlbums = $state<Album[]>([])
   let loading = $state(false);
   let error = $state('');
   let togglingArtist = $state<string | null>(null);
@@ -54,12 +54,12 @@
     }
   }
 
-  async function playAlbum(album: SubsonicAlbum) {
+  async function playAlbum(album: Album) {
     albumLoadingId = album.id;
     try {
-      const songs = await fetchSubsonicAlbumSongs(album.id);
+      const songs = await fetchAlbumSongs(album.id);
       if (!songs.length) return;
-      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'subsonic', album: songs[0].album });
+      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
       playQueue(songs, 0);
       playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
       addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
@@ -68,9 +68,9 @@
     }
   }
 
-  function playSong(songs: SubsonicSong[], index: number) {
+  function playSong(songs: Song[], index: number) {
     const song = songs[index];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'subsonic', album: song.album });
+    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
     playingFrom.set({ type: 'album', name: song.album, href: `/album/${encodeURIComponent(song.albumId)}` });
     playQueue(songs, index);
   }
@@ -85,9 +85,9 @@
       const [stored, topArtists, starred, newest, random] = await Promise.all([
         fetchLikedArtists(),
         getTopArtists(24),
-        fetchSubsonicStarredSongs(),
-        fetchSubsonicAlbumList('newest', 20),
-        fetchSubsonicAlbumList('random', 20)
+        fetchStarredSongs(),
+        fetchAlbumList('newest', 20),
+        fetchAlbumList('random', 20)
       ]);
       liked = stored.map((entry) => entry.name);
       top = topArtists;

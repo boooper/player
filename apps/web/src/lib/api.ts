@@ -1,7 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ServiceStatus } from '@player/shared/contracts';
+import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart';
+import type { ServiceStatus } from '@player/shared';
 
-// ── Exported types (unchanged so all callers stay compatible) ─────────────────
+// ── Canonical media types (provider-agnostic) ─────────────────────────────────
+export type { Song, Album, Playlist, AlbumDetail, PlaylistDetail } from '@player/shared';
+import type { Song, Album, Playlist, AlbumDetail, PlaylistDetail } from '@player/shared';
+
+// ── App-level types ───────────────────────────────────────────────────────────
 
 export type StoredLikedArtist = {
   id: number;
@@ -10,39 +15,6 @@ export type StoredLikedArtist = {
   externalId: string | null;
   createdAt: string;
   updatedAt: string;
-};
-
-export type SubsonicSong = {
-  id: string;
-  title: string;
-  artist: string;
-  album: string;
-  albumId: string;
-  coverArt: string;
-  coverArtUrl: string;
-  streamUrl: string;
-  duration: number;
-};
-
-export type SubsonicAlbum = {
-  id: string;
-  name: string;
-  artist: string;
-  artistId: string;
-  coverArt: string;
-  coverArtUrl: string;
-  songCount: number;
-  duration: number;
-  year?: number;
-};
-
-export type SubsonicPlaylist = {
-  id: string;
-  name: string;
-  songCount: number;
-  duration: number;
-  coverArt: string;
-  coverArtUrl: string;
 };
 
 export type AppSettingsPayload = {
@@ -61,7 +33,7 @@ export type ProfilePayload = {
   name: string;
   url: string;
   username: string;
-  usePasswordAuth: boolean;
+  serverType: string;
   isActive: boolean;
 };
 
@@ -70,7 +42,7 @@ export type ProfileDraftPayload = {
   url: string;
   username: string;
   password?: string;
-  usePasswordAuth: boolean;
+  serverType: string;
 };
 
 export type LibraryStatsPayload = {
@@ -79,16 +51,6 @@ export type LibraryStatsPayload = {
   totalPlaylistSongs: number | null;
   starredSongs: number | null;
   lastFmConfigured: boolean;
-};
-
-export type SubsonicPlaylistDetail = {
-  playlist: { id: string; name: string; songCount: number; duration: number; coverArtUrl: string };
-  songs: SubsonicSong[];
-};
-
-export type SubsonicAlbumDetail = {
-  album: SubsonicAlbum & { genre?: string };
-  songs: SubsonicSong[];
 };
 
 export type LyricsResult = {
@@ -190,62 +152,82 @@ export async function removeLikedArtist(name: string): Promise<void> {
   await invoke('remove_liked_artist', { name });
 }
 
-// ── Subsonic ──────────────────────────────────────────────────────────────────
+// ── Library — routed by the active profile's server type ─────────────────────
+// These functions are provider-agnostic. The Rust backend dispatches to the
+// correct implementation (Subsonic, Jellyfin, etc.) based on the active profile.
 
-export async function searchSubsonicSongs(query: string, count = 20): Promise<SubsonicSong[]> {
-  return invoke<SubsonicSong[]>('subsonic_search', { query, count });
+export async function searchSongs(query: string, count = 20): Promise<Song[]> {
+  return invoke<Song[]>('library_search', { query, count });
 }
 
-export async function fetchSubsonicSimilar(songId: string, count = 20): Promise<SubsonicSong[]> {
-  return invoke<SubsonicSong[]>('subsonic_similar', { songId, count });
+export async function fetchSimilarSongs(songId: string, count = 20): Promise<Song[]> {
+  return invoke<Song[]>('library_similar', { songId, count });
 }
 
-export async function fetchSubsonicPlaylists(): Promise<SubsonicPlaylist[]> {
-  return invoke<SubsonicPlaylist[]>('subsonic_playlists');
+export async function fetchPlaylists(): Promise<Playlist[]> {
+  return invoke<Playlist[]>('library_playlists');
 }
 
-export async function fetchSubsonicPlaylistDetail(playlistId: string): Promise<SubsonicPlaylistDetail> {
-  return invoke<SubsonicPlaylistDetail>('subsonic_playlist', { id: playlistId });
+export async function fetchPlaylistDetail(playlistId: string): Promise<PlaylistDetail> {
+  return invoke<PlaylistDetail>('library_playlist', { id: playlistId });
 }
 
-export async function fetchSubsonicPlaylistSongs(playlistId: string): Promise<SubsonicSong[]> {
-  const result = await invoke<SubsonicPlaylistDetail>('subsonic_playlist', { id: playlistId });
+export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
+  const result = await invoke<PlaylistDetail>('library_playlist', { id: playlistId });
   return result.songs;
 }
 
-export async function fetchSubsonicArtistAlbums(query: string, count = 20): Promise<SubsonicAlbum[]> {
-  return invoke<SubsonicAlbum[]>('subsonic_artist_albums', { query, count });
+export async function fetchArtistAlbums(query: string, count = 20): Promise<Album[]> {
+  return invoke<Album[]>('library_artist_albums', { query, count });
 }
 
-export async function fetchSubsonicAlbumSongs(albumId: string): Promise<SubsonicSong[]> {
-  return invoke<SubsonicSong[]>('subsonic_album_songs', { id: albumId });
+export async function fetchAlbumSongs(albumId: string): Promise<Song[]> {
+  return invoke<Song[]>('library_album_songs', { id: albumId });
 }
 
-export async function fetchSubsonicAlbumDetail(albumId: string): Promise<SubsonicAlbumDetail> {
-  return invoke<SubsonicAlbumDetail>('subsonic_album', { id: albumId });
+export async function fetchAlbumDetail(albumId: string): Promise<AlbumDetail> {
+  return invoke<AlbumDetail>('library_album', { id: albumId });
 }
 
-export async function fetchSubsonicAlbumList(
+export async function fetchAlbumList(
   type: 'newest' | 'random' | 'frequent' | 'recent' | 'highest' = 'newest',
   count = 20
-): Promise<SubsonicAlbum[]> {
-  return invoke<SubsonicAlbum[]>('subsonic_album_list', { kind: type, count });
+): Promise<Album[]> {
+  return invoke<Album[]>('library_album_list', { kind: type, count });
 }
 
-export async function fetchSubsonicStarredSongs(): Promise<SubsonicSong[]> {
-  return invoke<SubsonicSong[]>('subsonic_starred');
+export async function fetchStarredSongs(): Promise<Song[]> {
+  return invoke<Song[]>('library_starred');
 }
 
-export async function starSubsonicSong(id: string, artist?: string, title?: string): Promise<void> {
-  await invoke('subsonic_star', { id, unstar: false, artist: artist ?? null, title: title ?? null });
+export async function starSong(id: string, artist?: string, title?: string): Promise<void> {
+  await invoke('library_star', { id, unstar: false, artist: artist ?? null, title: title ?? null });
 }
 
-export async function unstarSubsonicSong(id: string, artist?: string, title?: string): Promise<void> {
-  await invoke('subsonic_star', { id, unstar: true, artist: artist ?? null, title: title ?? null });
+export async function unstarSong(id: string, artist?: string, title?: string): Promise<void> {
+  await invoke('library_star', { id, unstar: true, artist: artist ?? null, title: title ?? null });
 }
 
-export async function addSongToSubsonicPlaylist(playlistId: string, songId: string): Promise<void> {
-  await invoke('subsonic_add_to_playlist', { playlistId, songId });
+export async function addSongToPlaylist(playlistId: string, songId: string): Promise<void> {
+  await invoke('library_add_to_playlist', { playlistId, songId });
+}
+
+// ── Autostart ─────────────────────────────────────────────────────────────────
+
+export async function getAutostart(): Promise<boolean> {
+  return autostartIsEnabled();
+}
+
+export async function setAutostart(enabled: boolean): Promise<void> {
+  if (enabled) {
+    await autostartEnable();
+  } else {
+    await autostartDisable();
+  }
+}
+
+export async function clearDatabase(): Promise<void> {
+  await invoke('clear_database');
 }
 
 // ── Lyrics ────────────────────────────────────────────────────────────────────
@@ -310,7 +292,7 @@ export async function fetchUpNextSongs({
   title: string;
   likedArtists?: string[];
   limit?: number;
-}): Promise<SubsonicSong[]> {
+}): Promise<Song[]> {
   if (!apiKey || !artist.trim() || !title.trim()) return [];
 
   const { fetchLastFmRecommendations } = await import('./lastfm');
@@ -327,10 +309,10 @@ export async function fetchUpNextSongs({
   const key = (a: string, t: string) => `${normalize(a)}::${normalize(t)}`;
 
   const matchingSong = (
-    candidates: SubsonicSong[],
+    candidates: Song[],
     recArtist: string,
     recTitle: string
-  ): SubsonicSong | null => {
+  ): Song | null => {
     const exact = candidates.find((s) => key(s.artist, s.title) === key(recArtist, recTitle));
     if (exact) return exact;
     const byArtist = candidates.filter((s) => normalize(s.artist) === normalize(recArtist));
@@ -343,12 +325,12 @@ export async function fetchUpNextSongs({
     );
   };
 
-  const results: SubsonicSong[] = [];
+  const results: Song[] = [];
   const seen = new Set<string>();
 
   for (const rec of recs) {
     if (results.length >= limit) break;
-    const candidates = await searchSubsonicSongs(`${rec.artist} ${rec.title}`, 10).catch(() => []);
+    const candidates = await searchSongs(`${rec.artist} ${rec.title}`, 10).catch(() => []);
     const match = matchingSong(candidates, rec.artist, rec.title);
     if (match && !seen.has(match.id)) {
       seen.add(match.id);

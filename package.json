@@ -7,10 +7,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "yarn workspace @player/web run dev",
-    "dev:desktop": "yarn workspace @player/desktop run dev",
-    "build:web": "yarn workspace @player/web run build",
-    "build:desktop": "yarn workspace @player/desktop run build"
+    "dev:web": "bun run --cwd apps/web dev",
+    "dev:desktop": "bun run --cwd apps/desktop dev",
+    "build:web": "bun run --cwd apps/web build",
+    "build:desktop": "bun run --cwd apps/desktop build"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
@@ -32,5 +32,5 @@
     "lightningcss-linux-x64-gnu": "*",
     "lightningcss-win32-x64-msvc": "*"
   },
-  "packageManager": "yarn@4.13.0"
+  "packageManager": "bun@1.0.25"
 }

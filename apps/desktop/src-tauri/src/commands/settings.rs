@@ -13,6 +13,10 @@ const ALLOWED_KEYS: &[&str] = &[
     "SUBSONIC_PASSWORD",
     "LASTFM_SESSION_KEY",
     "LASTFM_USERNAME",
+    "VOLUME",
+    "SHUFFLE",
+    "SMART_SHUFFLE",
+    "REPEAT",
 ];
 
 #[tauri::command]
@@ -84,4 +88,15 @@ pub fn upsert(db: &rusqlite::Connection, key: &str, value: &str) -> Result<(), S
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn clear_database(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.execute_batch(
+        "DELETE FROM settings;
+         DELETE FROM profiles;
+         DELETE FROM liked_artists;"
+    )
+    .map_err(|e| e.to_string())
 }

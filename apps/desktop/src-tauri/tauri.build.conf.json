@@ -1,5 +1,5 @@
 {
   "build": {
-    "beforeBuildCommand": "yarn --cwd ../.. build:web"
+    "beforeBuildCommand": "bun run --cwd ../.. build:web"
   }
 }
