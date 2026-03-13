@@ -7,11 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy only manifests first for better layer caching
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/api/package.json ./apps/api/
 
-RUN npm ci --ignore-scripts
+RUN npm install --ignore-scripts
 
 # ── Stage 2: copy source + generate Prisma client ────────────────────────────
 FROM deps AS builder

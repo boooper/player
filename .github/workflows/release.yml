@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-desktop:
     permissions:
@@ -63,9 +66,7 @@ jobs:
           workspaces: apps/desktop/src-tauri -> target
 
       - name: Install npm dependencies
-        run: |
-          rm -f package-lock.json
-          npm install
+        run: npm install
 
       - name: Build web app
         run: npm run build --workspace @player/web
