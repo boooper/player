@@ -21,18 +21,22 @@ jobs:
           - platform: windows-latest
             args: ''
             sidecar-script: sidecar:build:win
+            tauri-cli-package: '@tauri-apps/cli-win32-x64-msvc@2.10.1'
 
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
             sidecar-script: sidecar:build:mac-arm
+            tauri-cli-package: '@tauri-apps/cli-darwin-arm64@2.10.1'
 
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
             sidecar-script: sidecar:build:mac-x64
+            tauri-cli-package: '@tauri-apps/cli-darwin-arm64@2.10.1'
 
           - platform: ubuntu-22.04
             args: ''
             sidecar-script: sidecar:build:linux
+            tauri-cli-package: '@tauri-apps/cli-linux-x64-gnu@2.10.1'
 
     runs-on: ${{ matrix.platform }}
 
@@ -53,8 +57,8 @@ jobs:
       - name: setup node
         uses: actions/setup-node@v4
         with:
-          node-version: lts/*
-          cache: 'npm' # Set this to npm, yarn or pnp
+          node-version: '22'
+          cache: 'npm'
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable # Set this to dtolnay/rust-toolchain@nightly
@@ -68,8 +72,13 @@ jobs:
           workspaces: apps/desktop/src-tauri -> target
 
       - name: install frontend dependencies
-       # If you don't have `beforeBuildCommand` configured you may want to build your frontend here too.
-        run: npm install # change this to npm or pnpm depending on which one you use.
+        run: npm ci
+
+      - name: install Tauri CLI native binding
+        run: npm install --no-save ${{ matrix.tauri-cli-package }}
+
+      - name: Build API sidecar
+        run: npm run ${{ matrix.sidecar-script }} --workspace @player/api
 
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0
@@ -83,4 +92,3 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --config src-tauri/tauri.build.conf.json --ci ${{ matrix.args }}
-
