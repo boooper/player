@@ -1,8 +1,0 @@
-node_modules
-apps/desktop
-apps/web
-legacy
-build
-.git
-*.md
-.env
