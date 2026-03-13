@@ -1,69 +1,39 @@
-use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+mod db;
+mod commands;
 
-/// Holds the API sidecar process handle so it can be killed on exit.
-struct ApiServerProcess(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
+use std::sync::Mutex;
+use tauri::Manager;
+
+pub struct AppState {
+    pub db: Mutex<rusqlite::Connection>,
+    pub http: reqwest::Client,
+}
+
+// AppState is Send + Sync because:
+//   - Mutex<rusqlite::Connection>: Connection is Send, Mutex makes it Sync
+//   - reqwest::Client: Send + Sync
+unsafe impl Send for AppState {}
+unsafe impl Sync for AppState {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // Focus the existing window when a second instance is launched
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            // In production, spawn the bundled API server sidecar.
-            // In dev, beforeDevCommand already starts the API via `npm run dev:web+api`.
-            #[cfg(not(debug_assertions))]
-            {
-                use tauri_plugin_shell::ShellExt;
+            // Initialise SQLite database in app data directory
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            let db_path = data_dir.join("player.db");
+            let conn = db::open(&db_path).expect("failed to open database");
 
-                let app_data_dir = app.path().app_data_dir()?;
-                std::fs::create_dir_all(&app_data_dir)?;
-                let db_url = format!(
-                    "file:{}/player.db",
-                    app_data_dir.to_string_lossy().replace('\\', "/")
-                );
-
-                use tauri_plugin_shell::process::CommandEvent;
-
-                let (mut rx, child) = app
-                    .shell()
-                    .sidecar("api-server")?
-                    .env("DATABASE_URL", db_url)
-                    .env("PORT", "8787")
-                    .spawn()?;
-
-                // Forward sidecar stdout/stderr to the Tauri log and emit
-                // an event to the frontend once the server is ready.
-                let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    while let Some(event) = rx.recv().await {
-                        match event {
-                            CommandEvent::Stdout(line) => {
-                                let text = String::from_utf8_lossy(&line);
-                                log::info!("[sidecar] {}", text.trim());
-                                if text.contains("listening") {
-                                    let _ = app_handle.emit("api://ready", ());
-                                }
-                            }
-                            CommandEvent::Stderr(line) => {
-                                log::error!("[sidecar] {}", String::from_utf8_lossy(&line).trim());
-                            }
-                            CommandEvent::Terminated(status) => {
-                                log::warn!("[sidecar] terminated: {:?}", status);
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                });
-
-                app.manage(ApiServerProcess(Mutex::new(Some(child))));
-            }
+            app.manage(AppState {
+                db: Mutex::new(conn),
+                http: reqwest::Client::new(),
+            });
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -74,20 +44,48 @@ pub fn run() {
             }
             app.handle().plugin(tauri_plugin_opener::init())?;
             app.handle().plugin(tauri_plugin_drpc::init())?;
-
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Some(state) = window.try_state::<ApiServerProcess>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(child) = guard.take() {
-                            let _ = child.kill();
-                        }
-                    }
-                }
-            }
-        })
+        .invoke_handler(tauri::generate_handler![
+            // settings
+            commands::settings::get_settings,
+            commands::settings::update_settings,
+            // profiles
+            commands::profiles::get_profiles,
+            commands::profiles::create_profile,
+            commands::profiles::update_profile,
+            commands::profiles::delete_profile,
+            commands::profiles::activate_profile,
+            // liked artists
+            commands::liked_artists::get_liked_artists,
+            commands::liked_artists::save_liked_artist,
+            commands::liked_artists::remove_liked_artist,
+            // stats + health
+            commands::stats::get_library_stats,
+            commands::health::get_service_health,
+            // last.fm
+            commands::lastfm::lfm_begin_auth,
+            commands::lastfm::lfm_complete_auth,
+            commands::lastfm::lfm_disconnect,
+            commands::lastfm::lfm_now_playing,
+            commands::lastfm::lfm_scrobble,
+            commands::lastfm::lfm_user_taste,
+            commands::lastfm::lfm_status,
+            // subsonic
+            commands::subsonic::subsonic_search,
+            commands::subsonic::subsonic_similar,
+            commands::subsonic::subsonic_playlists,
+            commands::subsonic::subsonic_playlist,
+            commands::subsonic::subsonic_artist_albums,
+            commands::subsonic::subsonic_album_songs,
+            commands::subsonic::subsonic_album,
+            commands::subsonic::subsonic_album_list,
+            commands::subsonic::subsonic_starred,
+            commands::subsonic::subsonic_star,
+            commands::subsonic::subsonic_add_to_playlist,
+            // lyrics
+            commands::lyrics::fetch_lyrics,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -47,7 +47,7 @@
     playQueue
   } from '$lib/stores/player';
   import { fetchUpNextSongs, fetchSubsonicSimilar, starSubsonicSong, unstarSubsonicSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchSubsonicArtistAlbums, fetchSubsonicAlbumSongs } from '$lib/api';
-  import { fetchLikedArtists } from '$lib/api';
+  import { fetchLikedArtists, saveVolume } from '$lib/api';
   import { toast } from 'svelte-sonner';
   import { Button, Slider } from '$lib/components/ui';
   import { appSettings } from '$lib/stores/settings';
@@ -350,6 +350,12 @@
     }
   }
 
+  let volSaveTimer = 0;
+  function debounceSaveVolume(value: number) {
+    clearTimeout(volSaveTimer);
+    volSaveTimer = window.setTimeout(() => saveVolume(value), 500);
+  }
+
   function onVolumeWheel(e: WheelEvent) {
     e.preventDefault();
     // deltaY < 0 = scroll up = louder; deltaY > 0 = scroll down = quieter
@@ -357,6 +363,7 @@
     const next = Math.max(0, Math.min(1, $volume + delta));
     volume.set(next);
     if (audioEl) audioEl.volume = next;
+    debounceSaveVolume(next);
   }
 
   function seek(values: number[]) {
@@ -378,6 +385,7 @@
   function commitVolume(values: number[]) {
     changeVolume(values);
     volDragging = false;
+    saveVolume(Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100)));
   }
 
   let premuteVolume = $state(0.8);
@@ -386,6 +394,7 @@
       const restore = premuteVolume > 0.01 ? premuteVolume : 0.8;
       volume.set(restore);
       if (audioEl) audioEl.volume = restore;
+      saveVolume(restore);
     } else {
       premuteVolume = $volume;
       volume.set(0);

@@ -9,10 +9,11 @@
   import PlayerBar from '$lib/components/PlayerBar.svelte';
   import { fetchAudioDbArtistPhoto } from '$lib/audiodb';
   import { openUrl } from '$lib/tauri';
-  import { apiFetch } from '$lib/http';
   import { initDrpc } from '$lib/drpc';
   import {
     fetchAppSettings,
+    saveVolume,
+    savePlaybackPrefs,
     fetchLikedArtists,
     fetchServiceHealth,
     fetchSubsonicPlaylistSongs,
@@ -28,7 +29,7 @@
     type SubsonicSong
   } from '$lib/api';
   import { getArtistInfo, type ArtistInfo } from '$lib/metadata';
-  import { currentIndex, focusTrack, isPlaying, playQueue, queue, shouldAutoplay, subsonicPlaylists, starredSongIds, addRecentlyPlayed, showQueue, playingFrom, showLyrics, currentTime, seekRequest } from '$lib/stores/player';
+  import { currentIndex, focusTrack, isPlaying, playQueue, queue, shouldAutoplay, subsonicPlaylists, starredSongIds, addRecentlyPlayed, showQueue, playingFrom, showLyrics, currentTime, seekRequest, volume, shuffleEnabled, smartShuffleMode, repeatMode } from '$lib/stores/player';
   import { appSettings, libraryRefresh } from '$lib/stores/settings';
   import * as Dialog from '$lib/components/ui/dialog';
   import { Badge, Button, Input, ScrollArea, Toaster, SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarRail, SidebarInset, SidebarSeparator, SidebarTrigger } from '$lib/components/ui';
@@ -144,18 +145,8 @@
   let subsonicStatus = $state<'checking' | 'online' | 'offline' | 'missing'>('checking');
   let apiStatus = $state<'checking' | 'online' | 'offline'>('checking');
 
-  async function checkApiHealth({ retries = 0, retryDelay = 1000 } = {}) {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const res = await apiFetch('/api/health', { signal: AbortSignal.timeout(3000) });
-        if (res.ok) { apiStatus = 'online'; return; }
-      } catch {
-        // retry
-      }
-      if (attempt < retries) await new Promise<void>((r) => setTimeout(r, retryDelay));
-    }
-    apiStatus = 'offline';
-  }
+  // All API calls go through Tauri invoke — there is no separate HTTP server.
+  function checkApiHealth() { apiStatus = 'online'; }
   const upNext = $derived.by(() => {
     const items = $queue;
     if (!items.length || $currentIndex >= items.length - 1) return [];
@@ -255,6 +246,8 @@
     }
   }
 
+  let playbackPrefsReady = $state(false);
+
   async function bootstrapAppSettings() {
     try {
       const settings = await fetchAppSettings();
@@ -264,10 +257,27 @@
         recommendationProvider: settings.recommendationProvider,
         metadataProvider: settings.metadataProvider
       }));
+      volume.set(settings.volume);
+      shuffleEnabled.set(settings.shuffleEnabled);
+      smartShuffleMode.set(settings.smartShuffleMode);
+      repeatMode.set(settings.repeatMode);
     } catch {
       // Keep store defaults when settings API is unavailable.
+    } finally {
+      playbackPrefsReady = true;
     }
   }
+
+  // Persist shuffle/repeat whenever they change (skips the initial bootstrap write).
+  let _prefsSaveTimer = 0;
+  $effect(() => {
+    if (!playbackPrefsReady) return;
+    const s = $shuffleEnabled;
+    const sm = $smartShuffleMode;
+    const rm = $repeatMode;
+    clearTimeout(_prefsSaveTimer);
+    _prefsSaveTimer = window.setTimeout(() => savePlaybackPrefs(s, sm, rm), 300);
+  });
 
   // Re-load library data whenever settings are saved (Subsonic profile activated,
   // Last.fm key saved, etc.). The store starts at 0 so the initial run is a no-op;
@@ -282,16 +292,7 @@
     topSearch = new URL(window.location.href).searchParams.get('q') ?? '';
     loadRecentSearches();
 
-    // Retry for up to 30s while sidecar boots. In Tauri we also listen for
-    // the `api://ready` event so the badge flips the moment the server is up.
-    checkApiHealth({ retries: 30, retryDelay: 1000 });
-    const apiHealthInterval = setInterval(checkApiHealth, 10_000);
-
-    let unlistenApiReady: (() => void) | undefined;
-    if (isTauri()) {
-      const { listen } = await import('@tauri-apps/api/event');
-      unlistenApiReady = await listen('api://ready', () => { apiStatus = 'online'; });
-    }
+    checkApiHealth();
 
     const cleanupDrpc = initDrpc();
 
@@ -315,8 +316,6 @@
     await Promise.all([bootstrapAppSettings(), reloadLibraryData()]);
 
     return () => {
-      clearInterval(apiHealthInterval);
-      unlistenApiReady?.();
       document.removeEventListener('click', handleExternalLink);
       cleanupDrpc();
     };

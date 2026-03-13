@@ -1,5 +1,7 @@
-import { apiFetch } from './http';
+import { invoke } from '@tauri-apps/api/core';
 import type { ServiceStatus } from '@player/shared/contracts';
+
+// ── Exported types (unchanged so all callers stay compatible) ─────────────────
 
 export type StoredLikedArtist = {
   id: number;
@@ -43,30 +45,15 @@ export type SubsonicPlaylist = {
   coverArtUrl: string;
 };
 
-async function request<T>(input: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(input, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {})
-    },
-    ...init
-  });
-
-  if (!response.ok) {
-    const json = await response.json().catch(() => ({}));
-    const message = typeof json?.error === 'string' ? json.error : `Request failed (${response.status})`;
-    throw new Error(message);
-  }
-
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
-}
-
 export type AppSettingsPayload = {
   lastFmApiKey: string;
   lastFmSharedSecretConfigured: boolean;
   recommendationProvider: string;
   metadataProvider: string;
+  volume: number;
+  shuffleEnabled: boolean;
+  smartShuffleMode: boolean;
+  repeatMode: 'off' | 'all' | 'one';
 };
 
 export type ProfilePayload = {
@@ -94,99 +81,46 @@ export type LibraryStatsPayload = {
   lastFmConfigured: boolean;
 };
 
-type SettingsProfilesPlatformApi = {
-  fetchAppSettings: () => Promise<AppSettingsPayload>;
-  updateAppSettings: (data: {
-    lastFmApiKey: string;
-    recommendationProvider: string;
-    metadataProvider: string;
-    lastFmSharedSecret?: string;
-  }) => Promise<void>;
-  fetchProfiles: () => Promise<ProfilePayload[]>;
-  createProfile: (data: ProfileDraftPayload) => Promise<ProfilePayload>;
-  updateProfile: (id: number, data: ProfileDraftPayload) => Promise<ProfilePayload>;
-  deleteProfile: (id: number) => Promise<void>;
-  activateProfile: (id: number) => Promise<void>;
-  fetchServiceHealth: () => Promise<{ subsonic: ServiceStatus; lastfm: ServiceStatus }>;
-  fetchLibraryStats: () => Promise<LibraryStatsPayload>;
-  fetchLastFmStatus: () => Promise<{ connected: boolean; username: string }>;
+export type SubsonicPlaylistDetail = {
+  playlist: { id: string; name: string; songCount: number; duration: number; coverArtUrl: string };
+  songs: SubsonicSong[];
 };
 
-const httpSettingsProfilesApi: SettingsProfilesPlatformApi = {
-  async fetchAppSettings() {
-    const payload = await request<{
-      LASTFM_API_KEY?: string;
-      LASTFM_SHARED_SECRET_CONFIGURED?: string;
-      RECOMMENDATION_PROVIDER?: string;
-      METADATA_PROVIDER?: string;
-    }>('/api/settings');
-
-    return {
-      lastFmApiKey: payload.LASTFM_API_KEY ?? '',
-      lastFmSharedSecretConfigured: payload.LASTFM_SHARED_SECRET_CONFIGURED === 'true',
-      recommendationProvider: payload.RECOMMENDATION_PROVIDER || 'lastfm',
-      metadataProvider: payload.METADATA_PROVIDER || 'both'
-    };
-  },
-  async updateAppSettings(data) {
-    const body: Record<string, string> = {
-      LASTFM_API_KEY: data.lastFmApiKey,
-      RECOMMENDATION_PROVIDER: data.recommendationProvider,
-      METADATA_PROVIDER: data.metadataProvider
-    };
-    if (data.lastFmSharedSecret?.trim()) {
-      body.LASTFM_SHARED_SECRET = data.lastFmSharedSecret.trim();
-    }
-    await request<{ updated: string[] }>('/api/settings', {
-      method: 'PUT',
-      body: JSON.stringify(body)
-    });
-  },
-  async fetchProfiles() {
-    const payload = await request<{ profiles: ProfilePayload[] }>('/api/profiles');
-    return payload.profiles;
-  },
-  async createProfile(data) {
-    const payload = await request<{ profile: ProfilePayload }>('/api/profiles', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-    return payload.profile;
-  },
-  async updateProfile(id, data) {
-    const payload = await request<{ profile: ProfilePayload }>(`/api/profiles/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-    return payload.profile;
-  },
-  async deleteProfile(id) {
-    await request<{ success: boolean }>(`/api/profiles/${id}`, { method: 'DELETE' });
-  },
-  async activateProfile(id) {
-    await request<{ success: boolean }>(`/api/profiles/${id}/activate`, { method: 'POST' });
-  },
-  async fetchServiceHealth() {
-    return request<{ subsonic: ServiceStatus; lastfm: ServiceStatus }>('/api/health/services');
-  },
-  async fetchLibraryStats() {
-    return request<LibraryStatsPayload>('/api/stats');
-  },
-  async fetchLastFmStatus() {
-    const payload = await request<{ connected?: boolean; username?: string }>('/api/lastfm/user-taste');
-    return {
-      connected: Boolean(payload.connected),
-      username: payload.username ?? ''
-    };
-  }
+export type SubsonicAlbumDetail = {
+  album: SubsonicAlbum & { genre?: string };
+  songs: SubsonicSong[];
 };
 
-async function settingsProfilesApi(): Promise<SettingsProfilesPlatformApi> {
-  return httpSettingsProfilesApi;
-}
+export type LyricsResult = {
+  plainLyrics: string | null;
+  syncedLyrics: string | null;
+  instrumental: boolean;
+};
+
+// ── Settings ──────────────────────────────────────────────────────────────────
 
 export async function fetchAppSettings(): Promise<AppSettingsPayload> {
-  return (await settingsProfilesApi()).fetchAppSettings();
+  const s = await invoke<Record<string, string>>('get_settings');
+  const rawVol = parseFloat(s.VOLUME ?? '');
+  const rawRepeat = s.REPEAT;
+  return {
+    lastFmApiKey: s.LASTFM_API_KEY ?? '',
+    lastFmSharedSecretConfigured: Boolean(s.LASTFM_SHARED_SECRET),
+    recommendationProvider: s.RECOMMENDATION_PROVIDER || 'lastfm',
+    metadataProvider: s.METADATA_PROVIDER || 'both',
+    volume: isNaN(rawVol) ? 0.8 : Math.max(0, Math.min(1, rawVol)),
+    shuffleEnabled: s.SHUFFLE === 'true',
+    smartShuffleMode: s.SMART_SHUFFLE === 'true',
+    repeatMode: (rawRepeat === 'all' || rawRepeat === 'one') ? rawRepeat : 'off'
+  };
+}
+
+export async function saveVolume(value: number): Promise<void> {
+  await invoke('update_settings', { updates: { VOLUME: String(value) } });
+}
+
+export async function savePlaybackPrefs(shuffle: boolean, smartShuffle: boolean, repeat: string): Promise<void> {
+  await invoke('update_settings', { updates: { SHUFFLE: String(shuffle), SMART_SHUFFLE: String(smartShuffle), REPEAT: repeat } });
 }
 
 export async function updateAppSettings(data: {
@@ -195,153 +129,175 @@ export async function updateAppSettings(data: {
   metadataProvider: string;
   lastFmSharedSecret?: string;
 }): Promise<void> {
-  return (await settingsProfilesApi()).updateAppSettings(data);
+  const updates: Record<string, string> = {
+    LASTFM_API_KEY: data.lastFmApiKey,
+    RECOMMENDATION_PROVIDER: data.recommendationProvider,
+    METADATA_PROVIDER: data.metadataProvider
+  };
+  if (data.lastFmSharedSecret?.trim()) {
+    updates.LASTFM_SHARED_SECRET = data.lastFmSharedSecret.trim();
+  }
+  await invoke('update_settings', { updates });
 }
 
+// ── Profiles ──────────────────────────────────────────────────────────────────
+
 export async function fetchProfiles(): Promise<ProfilePayload[]> {
-  return (await settingsProfilesApi()).fetchProfiles();
+  return invoke<ProfilePayload[]>('get_profiles');
 }
 
 export async function createProfile(data: ProfileDraftPayload): Promise<ProfilePayload> {
-  return (await settingsProfilesApi()).createProfile(data);
+  return invoke<ProfilePayload>('create_profile', { data });
 }
 
 export async function updateProfile(id: number, data: ProfileDraftPayload): Promise<ProfilePayload> {
-  return (await settingsProfilesApi()).updateProfile(id, data);
+  return invoke<ProfilePayload>('update_profile', { id, data });
 }
 
 export async function deleteProfile(id: number): Promise<void> {
-  return (await settingsProfilesApi()).deleteProfile(id);
+  await invoke('delete_profile', { id });
 }
 
 export async function activateProfile(id: number): Promise<void> {
-  return (await settingsProfilesApi()).activateProfile(id);
+  await invoke('activate_profile', { id });
 }
 
+// ── Stats & Health ────────────────────────────────────────────────────────────
+
 export async function fetchServiceHealth(): Promise<{ subsonic: ServiceStatus; lastfm: ServiceStatus }> {
-  return (await settingsProfilesApi()).fetchServiceHealth();
+  return invoke('get_service_health');
 }
 
 export async function fetchLibraryStats(): Promise<LibraryStatsPayload> {
-  return (await settingsProfilesApi()).fetchLibraryStats();
+  return invoke('get_library_stats');
 }
 
 export async function fetchLastFmStatus(): Promise<{ connected: boolean; username: string }> {
-  return (await settingsProfilesApi()).fetchLastFmStatus();
+  return invoke('lfm_status');
 }
 
+// ── Liked Artists ─────────────────────────────────────────────────────────────
+
 export async function fetchLikedArtists(): Promise<StoredLikedArtist[]> {
-  const payload = await request<{ artists: StoredLikedArtist[] }>('/api/liked-artists');
-  return payload.artists;
+  return invoke<StoredLikedArtist[]>('get_liked_artists');
 }
 
 export async function saveLikedArtist(name: string): Promise<StoredLikedArtist> {
-  const payload = await request<{ artist: StoredLikedArtist }>('/api/liked-artists', {
-    method: 'POST',
-    body: JSON.stringify({
-      name,
-      source: 'lastfm'
-    })
-  });
-  return payload.artist;
+  return invoke<StoredLikedArtist>('save_liked_artist', { name, source: 'lastfm', externalId: null });
 }
 
 export async function removeLikedArtist(name: string): Promise<void> {
-  await request<void>(`/api/liked-artists/${encodeURIComponent(name)}`, {
-    method: 'DELETE'
-  });
+  await invoke('remove_liked_artist', { name });
 }
 
+// ── Subsonic ──────────────────────────────────────────────────────────────────
+
 export async function searchSubsonicSongs(query: string, count = 20): Promise<SubsonicSong[]> {
-  const payload = await request<{ songs: SubsonicSong[] }>(
-    `/api/subsonic/search?q=${encodeURIComponent(query)}&count=${count}`
-  );
-  return payload.songs;
+  return invoke<SubsonicSong[]>('subsonic_search', { query, count });
 }
 
 export async function fetchSubsonicSimilar(songId: string, count = 20): Promise<SubsonicSong[]> {
-  const payload = await request<{ songs: SubsonicSong[] }>(
-    `/api/subsonic/similar?songId=${encodeURIComponent(songId)}&count=${count}`
-  );
-  return payload.songs;
+  return invoke<SubsonicSong[]>('subsonic_similar', { songId, count });
 }
 
 export async function fetchSubsonicPlaylists(): Promise<SubsonicPlaylist[]> {
-  const payload = await request<{ playlists: SubsonicPlaylist[] }>('/api/subsonic/playlists');
-  return payload.playlists;
+  return invoke<SubsonicPlaylist[]>('subsonic_playlists');
 }
 
-export type SubsonicPlaylistDetail = {
-  playlist: { id: string; name: string; songCount: number; duration: number; coverArtUrl: string };
-  songs: SubsonicSong[];
-};
-
-export async function starSubsonicSong(id: string, artist?: string, title?: string): Promise<void> {
-  await request<{ ok: boolean }>('/api/subsonic/star', { method: 'POST', body: JSON.stringify({ id, artist, title }) });
+export async function fetchSubsonicPlaylistDetail(playlistId: string): Promise<SubsonicPlaylistDetail> {
+  return invoke<SubsonicPlaylistDetail>('subsonic_playlist', { id: playlistId });
 }
 
-export async function unstarSubsonicSong(id: string, artist?: string, title?: string): Promise<void> {
-  await request<{ ok: boolean }>('/api/subsonic/star', { method: 'POST', body: JSON.stringify({ id, unstar: true, artist, title }) });
-}
-
-export async function addSongToSubsonicPlaylist(playlistId: string, songId: string): Promise<void> {
-  await request<{ ok: boolean }>('/api/subsonic/playlist-song', { method: 'POST', body: JSON.stringify({ playlistId, songId }) });
-}
-
-export async function fetchSubsonicStarredSongs(): Promise<SubsonicSong[]> {
-  const payload = await request<{ songs: SubsonicSong[] }>('/api/subsonic/starred');
-  return payload.songs;
+export async function fetchSubsonicPlaylistSongs(playlistId: string): Promise<SubsonicSong[]> {
+  const result = await invoke<SubsonicPlaylistDetail>('subsonic_playlist', { id: playlistId });
+  return result.songs;
 }
 
 export async function fetchSubsonicArtistAlbums(query: string, count = 20): Promise<SubsonicAlbum[]> {
-  const payload = await request<{ albums: SubsonicAlbum[] }>(
-    `/api/subsonic/artist-albums?q=${encodeURIComponent(query)}&count=${count}`
-  );
-  return payload.albums;
+  return invoke<SubsonicAlbum[]>('subsonic_artist_albums', { query, count });
 }
 
 export async function fetchSubsonicAlbumSongs(albumId: string): Promise<SubsonicSong[]> {
-  const payload = await request<{ songs: SubsonicSong[] }>(
-    `/api/subsonic/album-songs?id=${encodeURIComponent(albumId)}`
-  );
-  return payload.songs;
+  return invoke<SubsonicSong[]>('subsonic_album_songs', { id: albumId });
 }
 
-export type SubsonicAlbumDetail = {
-  album: SubsonicAlbum & { genre?: string };
-  songs: SubsonicSong[];
-};
-
 export async function fetchSubsonicAlbumDetail(albumId: string): Promise<SubsonicAlbumDetail> {
-  return request<SubsonicAlbumDetail>(`/api/subsonic/album?id=${encodeURIComponent(albumId)}`);
+  return invoke<SubsonicAlbumDetail>('subsonic_album', { id: albumId });
 }
 
 export async function fetchSubsonicAlbumList(
   type: 'newest' | 'random' | 'frequent' | 'recent' | 'highest' = 'newest',
   count = 20
 ): Promise<SubsonicAlbum[]> {
-  const payload = await request<{ albums: SubsonicAlbum[] }>(
-    `/api/subsonic/album-list?type=${type}&count=${count}`
-  );
-  return payload.albums;
+  return invoke<SubsonicAlbum[]>('subsonic_album_list', { kind: type, count });
 }
 
-export async function fetchSubsonicPlaylistSongs(playlistId: string): Promise<SubsonicSong[]> {
-  const payload = await request<SubsonicPlaylistDetail>(
-    `/api/subsonic/playlist?id=${encodeURIComponent(playlistId)}`
-  );
-  return payload.songs;
+export async function fetchSubsonicStarredSongs(): Promise<SubsonicSong[]> {
+  return invoke<SubsonicSong[]>('subsonic_starred');
 }
 
-export async function fetchSubsonicPlaylistDetail(playlistId: string): Promise<SubsonicPlaylistDetail> {
-  return request<SubsonicPlaylistDetail>(`/api/subsonic/playlist?id=${encodeURIComponent(playlistId)}`);
+export async function starSubsonicSong(id: string, artist?: string, title?: string): Promise<void> {
+  await invoke('subsonic_star', { id, unstar: false, artist: artist ?? null, title: title ?? null });
 }
 
-/**
- * Fetch up-next songs by combining Last.fm similar track recommendations with
- * Subsonic/octo-fiesta search (which proxies Deezer). Returns only tracks that
- * are actually streamable via the configured octo-fiesta instance.
- */
+export async function unstarSubsonicSong(id: string, artist?: string, title?: string): Promise<void> {
+  await invoke('subsonic_star', { id, unstar: true, artist: artist ?? null, title: title ?? null });
+}
+
+export async function addSongToSubsonicPlaylist(playlistId: string, songId: string): Promise<void> {
+  await invoke('subsonic_add_to_playlist', { playlistId, songId });
+}
+
+// ── Lyrics ────────────────────────────────────────────────────────────────────
+
+export async function fetchLyrics(
+  artist: string,
+  title: string,
+  album: string,
+  duration: number
+): Promise<LyricsResult | null> {
+  return invoke<LyricsResult | null>('fetch_lyrics', { artist, title, album, duration });
+}
+
+// ── Last.fm account ───────────────────────────────────────────────────────────
+
+export async function lfmBeginAuth(): Promise<{ token: string; authUrl: string }> {
+  return invoke('lfm_begin_auth');
+}
+
+export async function lfmCompleteAuth(token: string): Promise<{ username: string }> {
+  return invoke('lfm_complete_auth', { token });
+}
+
+export async function lfmDisconnect(): Promise<void> {
+  await invoke('lfm_disconnect');
+}
+
+export function lfmNowPlaying(artist: string, track: string, album?: string, duration?: number): void {
+  invoke('lfm_now_playing', { artist, track, album: album ?? null, duration: duration ?? null })
+    .catch(() => undefined);
+}
+
+export function lfmScrobble(
+  artist: string,
+  track: string,
+  timestamp: number,
+  album?: string,
+  duration?: number
+): void {
+  invoke('lfm_scrobble', { artist, track, timestamp, album: album ?? null, duration: duration ?? null })
+    .catch(() => undefined);
+}
+
+export async function lfmUserTaste(): Promise<string[]> {
+  const result = await invoke<{ connected: boolean; username: string; artists: string[] }>(
+    'lfm_user_taste'
+  ).catch(() => null);
+  return result?.artists ?? [];
+}
+
+// ── Up-next recommendation (unchanged — combines Last.fm + Subsonic search) ──
+
 export async function fetchUpNextSongs({
   apiKey,
   artist,
@@ -375,13 +331,9 @@ export async function fetchUpNextSongs({
     recArtist: string,
     recTitle: string
   ): SubsonicSong | null => {
-    const exact = candidates.find(
-      (s) => key(s.artist, s.title) === key(recArtist, recTitle)
-    );
+    const exact = candidates.find((s) => key(s.artist, s.title) === key(recArtist, recTitle));
     if (exact) return exact;
-    const byArtist = candidates.filter(
-      (s) => normalize(s.artist) === normalize(recArtist)
-    );
+    const byArtist = candidates.filter((s) => normalize(s.artist) === normalize(recArtist));
     return (
       byArtist.find(
         (s) =>
@@ -396,10 +348,7 @@ export async function fetchUpNextSongs({
 
   for (const rec of recs) {
     if (results.length >= limit) break;
-    const candidates = await searchSubsonicSongs(
-      `${rec.artist} ${rec.title}`,
-      10
-    ).catch(() => []);
+    const candidates = await searchSubsonicSongs(`${rec.artist} ${rec.title}`, 10).catch(() => []);
     const match = matchingSong(candidates, rec.artist, rec.title);
     if (match && !seen.has(match.id)) {
       seen.add(match.id);
@@ -409,91 +358,3 @@ export async function fetchUpNextSongs({
 
   return results;
 }
-
-export type LyricsResult = {
-  plainLyrics: string | null;
-  syncedLyrics: string | null;
-  instrumental: boolean;
-};
-
-export async function fetchLyrics(
-  artist: string,
-  title: string,
-  album: string,
-  duration: number
-): Promise<LyricsResult | null> {
-  const params = new URLSearchParams({
-    artist,
-    title,
-    album,
-    duration: Math.round(duration).toString()
-  });
-  const resp = await apiFetch(`/api/lyrics?${params}`);
-  if (!resp.ok) return null;
-  const data = await resp.json();
-  if (!data) return null;
-  return {
-    plainLyrics: data.plainLyrics ?? null,
-    syncedLyrics: data.syncedLyrics ?? null,
-    instrumental: data.instrumental ?? false
-  };
-}
-
-// ─── Last.fm account ──────────────────────────────────────────────────────────
-
-/** Begin OAuth — returns the token and URL the user should open in their browser */
-export async function lfmBeginAuth(): Promise<{ token: string; authUrl: string }> {
-  const res = await apiFetch('/api/lastfm/auth');
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? 'Failed to start Last.fm auth');
-  return json as { token: string; authUrl: string };
-}
-
-/** Complete OAuth — exchange the authorized token for a session key */
-export async function lfmCompleteAuth(token: string): Promise<{ username: string }> {
-  const res = await apiFetch('/api/lastfm/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token })
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? 'Failed to complete Last.fm auth');
-  return json as { username: string };
-}
-
-export async function lfmDisconnect(): Promise<void> {
-  await apiFetch('/api/lastfm/disconnect', { method: 'POST' });
-}
-
-/** Fire-and-forget: update Last.fm "now playing" — never throws */
-export function lfmNowPlaying(artist: string, track: string, album?: string, duration?: number): void {
-  apiFetch('/api/lastfm/now-playing', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist, track, album, duration })
-  }).catch(() => undefined);
-}
-
-/** Fire-and-forget: scrobble a track — never throws */
-export function lfmScrobble(
-  artist: string,
-  track: string,
-  timestamp: number,
-  album?: string,
-  duration?: number
-): void {
-  apiFetch('/api/lastfm/scrobble', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist, track, timestamp, album, duration })
-  }).catch(() => undefined);
-}
-
-/** Returns the user's top artists from Last.fm (empty array if not connected) */
-export async function lfmUserTaste(): Promise<string[]> {
-  const res = await apiFetch('/api/lastfm/user-taste');
-  if (!res.ok) return [];
-  const json = await res.json();
-  return Array.isArray(json?.artists) ? json.artists : [];
-}
-

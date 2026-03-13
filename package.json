@@ -7,28 +7,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:api": "yarn workspace @player/api run dev",
     "dev:web": "yarn workspace @player/web run dev",
-    "dev:web+api": "concurrently -n api,web -c cyan,magenta \"yarn dev:api\" \"yarn dev:web\"",
     "dev:desktop": "yarn workspace @player/desktop run dev",
-
     "build:web": "yarn workspace @player/web run build",
-
-    "sidecar:build": "node scripts/build-sidecar.mjs",
-    "sidecar:build:mac-arm": "yarn workspace @player/api run sidecar:build:mac-arm",
-    "sidecar:build:mac-x64": "yarn workspace @player/api run sidecar:build:mac-x64",
-    "sidecar:build:linux": "yarn workspace @player/api run sidecar:build:linux",
-    "sidecar:build:win": "yarn workspace @player/api run sidecar:build:win",
-
-    "build:desktop": "yarn sidecar:build && yarn workspace @player/desktop run build",
-    "build:desktop:mac-arm": "yarn sidecar:build:mac-arm && yarn workspace @player/desktop run build",
-    "build:desktop:mac-x64": "yarn sidecar:build:mac-x64 && yarn workspace @player/desktop run build",
-    "build:desktop:linux": "yarn sidecar:build:linux && yarn workspace @player/desktop run build",
-    "build:desktop:win": "yarn sidecar:build:win && yarn workspace @player/desktop run build"
+    "build:desktop": "yarn workspace @player/desktop run build"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
-    "prisma": "^7.5.0"
+    "concurrently": "^9.2.1"
   },
   "optionalDependencies": {
     "@rollup/rollup-darwin-arm64": "*",

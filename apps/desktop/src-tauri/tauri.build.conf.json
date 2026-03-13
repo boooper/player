@@ -1,10 +1,5 @@
 {
   "build": {
     "beforeBuildCommand": "yarn --cwd ../.. build:web"
-  },
-  "bundle": {
-    "externalBin": [
-      "binaries/api-server"
-    ]
   }
 }
