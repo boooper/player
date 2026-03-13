@@ -94,7 +94,7 @@
       toast.success('Settings saved');
       statsRefreshKey += 1;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save settings');
+      toast.error(err instanceof Error ? err.message : String(err) || 'Failed to save settings');
     } finally {
       saving = false;
     }

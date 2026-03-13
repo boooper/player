@@ -2,6 +2,7 @@
   import { Music2, Eye, EyeOff, User, Unlink, Link, ExternalLink, Loader2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import { appSettings } from '$lib/stores/settings';
+  import { openUrl } from '$lib/tauri';
   import {
     lfmBeginAuth,
     lfmCompleteAuth,
@@ -53,10 +54,9 @@
       const { token, authUrl } = await lfmBeginAuth();
       lfmPendingToken = token;
       lfmAuthState = 'pending';
-      const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl(authUrl).catch(() => window.open(authUrl, '_blank'));
+      await openUrl(authUrl);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start Last.fm auth');
+      toast.error(err instanceof Error ? err.message : String(err) || 'Failed to start Last.fm auth');
     } finally {
       lfmConnecting = false;
     }
@@ -75,7 +75,7 @@
       onHealthChange();
     } catch (err) {
       lfmAuthState = 'pending';
-      toast.error(err instanceof Error ? err.message : 'Authorization failed — make sure you approved the app on Last.fm');
+      toast.error(err instanceof Error ? err.message : String(err) || 'Authorization failed — make sure you approved the app on Last.fm');
     }
   }
 
