@@ -50,15 +50,16 @@ jobs:
             patchelf
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> $GITHUB_ENV
 
-      - name: Setup Node.js
+      - name: setup node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: npm
+          node-version: lts/*
+          cache: 'npm' # Set this to npm, yarn or pnp
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable # Set this to dtolnay/rust-toolchain@nightly
         with:
+          # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust build cache
@@ -66,11 +67,9 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri -> target
 
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Build API sidecar
-        run: npm run ${{ matrix.sidecar-script }} --workspace @player/api
+      - name: install frontend dependencies
+       # If you don't have `beforeBuildCommand` configured you may want to build your frontend here too.
+        run: npm install # change this to npm or pnpm depending on which one you use.
 
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0
