@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build:web --prefix ../..."
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/api-server"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@player/web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@internationalized/date": "^3.12.0",
+    "@lucide/svelte": "^0.561.0",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.14.4",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tailwindcss/vite": "^4.1.13",
+    "@tsconfig/svelte": "^5.0.5",
+    "bits-ui": "^2.16.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "mode-watcher": "^1.1.0",
+    "svelte": "^5.0.0",
+    "svelte-sonner": "^1.1.0",
+    "tailwind-merge": "^3.5.0",
+    "tailwind-variants": "^3.2.2",
+    "tailwindcss": "^4.1.13",
+    "tailwindcss-animate": "^1.0.7",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^5.9.2",
+    "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "@player/shared": "file:../../packages/shared",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "tauri-plugin-drpc": "^1.0.3"
+  }
+}
