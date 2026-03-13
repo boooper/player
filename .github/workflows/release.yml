@@ -22,7 +22,7 @@ jobs:
             target: aarch64-apple-darwin
             sidecar-script: sidecar:build:mac-arm
 
-          - platform: macos-13            # x86_64 (Intel runner)
+          - platform: macos-latest        # cross-compile x86_64 on ARM runner
             target: x86_64-apple-darwin
             sidecar-script: sidecar:build:mac-x64
 
@@ -64,6 +64,9 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Build web app
+        run: npm run build --workspace @player/web
 
       - name: Build API sidecar
         run: npm run ${{ matrix.sidecar-script }} --workspace @player/api
