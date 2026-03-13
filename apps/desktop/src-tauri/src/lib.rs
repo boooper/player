@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Holds the API sidecar process handle so it can be killed on exit.
 struct ApiServerProcess(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
@@ -28,12 +28,39 @@ pub fn run() {
                     app_data_dir.to_string_lossy().replace('\\', "/")
                 );
 
-                let (_, child) = app
+                use tauri_plugin_shell::process::CommandEvent;
+
+                let (mut rx, child) = app
                     .shell()
                     .sidecar("api-server")?
                     .env("DATABASE_URL", db_url)
                     .env("PORT", "8787")
                     .spawn()?;
+
+                // Forward sidecar stdout/stderr to the Tauri log and emit
+                // an event to the frontend once the server is ready.
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                let text = String::from_utf8_lossy(&line);
+                                log::info!("[sidecar] {}", text.trim());
+                                if text.contains("listening") {
+                                    let _ = app_handle.emit("api://ready", ());
+                                }
+                            }
+                            CommandEvent::Stderr(line) => {
+                                log::error!("[sidecar] {}", String::from_utf8_lossy(&line).trim());
+                            }
+                            CommandEvent::Terminated(status) => {
+                                log::warn!("[sidecar] terminated: {:?}", status);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                });
 
                 app.manage(ApiServerProcess(Mutex::new(Some(child))));
             }

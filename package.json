@@ -7,33 +7,45 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "npm run dev --workspace @player/web",
-    "dev:desktop": "npm run dev --workspace @player/desktop",
-    "dev:api": "npm run dev --workspace @player/api",
-    "build:web": "npm run build --workspace @player/web",
-    "build:desktop": "npm run build --workspace @player/desktop",
-    "build:api": "npm run build --workspace @player/api",
-    "dev:web+api": "concurrently -n api,web -c cyan,magenta \"npm run dev:api\" \"npm run dev:web\"",
-    "dev:desktop+api": "concurrently -n api,desktop -c cyan,yellow \"npm run dev:api\" \"npm run dev:desktop\""
+    "dev:api": "yarn workspace @player/api run dev",
+    "dev:web": "yarn workspace @player/web run dev",
+    "dev:web+api": "concurrently -n api,web -c cyan,magenta \"yarn dev:api\" \"yarn dev:web\"",
+    "dev:desktop": "yarn workspace @player/desktop run dev",
+
+    "build:web": "yarn workspace @player/web run build",
+
+    "sidecar:build": "node scripts/build-sidecar.mjs",
+    "sidecar:build:mac-arm": "yarn workspace @player/api run sidecar:build:mac-arm",
+    "sidecar:build:mac-x64": "yarn workspace @player/api run sidecar:build:mac-x64",
+    "sidecar:build:linux": "yarn workspace @player/api run sidecar:build:linux",
+    "sidecar:build:win": "yarn workspace @player/api run sidecar:build:win",
+
+    "build:desktop": "yarn sidecar:build && yarn workspace @player/desktop run build",
+    "build:desktop:mac-arm": "yarn sidecar:build:mac-arm && yarn workspace @player/desktop run build",
+    "build:desktop:mac-x64": "yarn sidecar:build:mac-x64 && yarn workspace @player/desktop run build",
+    "build:desktop:linux": "yarn sidecar:build:linux && yarn workspace @player/desktop run build",
+    "build:desktop:win": "yarn sidecar:build:win && yarn workspace @player/desktop run build"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "prisma": "^7.5.0"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "*",
-    "@rollup/rollup-linux-arm64-gnu": "*",
-    "@rollup/rollup-darwin-x64": "*",
     "@rollup/rollup-darwin-arm64": "*",
+    "@rollup/rollup-darwin-x64": "*",
+    "@rollup/rollup-linux-arm64-gnu": "*",
+    "@rollup/rollup-linux-x64-gnu": "*",
     "@rollup/rollup-win32-x64-msvc": "*",
-    "lightningcss-darwin-arm64": "*",
-    "lightningcss-darwin-x64": "*",
-    "lightningcss-linux-x64-gnu": "*",
-    "lightningcss-linux-arm64-gnu": "*",
-    "lightningcss-win32-x64-msvc": "*",
     "@tailwindcss/oxide-darwin-arm64": "*",
     "@tailwindcss/oxide-darwin-x64": "*",
-    "@tailwindcss/oxide-linux-x64-gnu": "*",
     "@tailwindcss/oxide-linux-arm64-gnu": "*",
-    "@tailwindcss/oxide-win32-x64-msvc": "*"
-  }
+    "@tailwindcss/oxide-linux-x64-gnu": "*",
+    "@tailwindcss/oxide-win32-x64-msvc": "*",
+    "lightningcss-darwin-arm64": "*",
+    "lightningcss-darwin-x64": "*",
+    "lightningcss-linux-arm64-gnu": "*",
+    "lightningcss-linux-x64-gnu": "*",
+    "lightningcss-win32-x64-msvc": "*"
+  },
+  "packageManager": "yarn@4.13.0"
 }

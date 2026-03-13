@@ -9,6 +9,7 @@
   import PlayerBar from '$lib/components/PlayerBar.svelte';
   import { fetchAudioDbArtistPhoto } from '$lib/audiodb';
   import { openUrl } from '$lib/tauri';
+  import { apiFetch } from '$lib/http';
   import { initDrpc } from '$lib/drpc';
   import {
     fetchAppSettings,
@@ -141,6 +142,20 @@
     rightOpen = $showQueue;
   });
   let subsonicStatus = $state<'checking' | 'online' | 'offline' | 'missing'>('checking');
+  let apiStatus = $state<'checking' | 'online' | 'offline'>('checking');
+
+  async function checkApiHealth({ retries = 0, retryDelay = 1000 } = {}) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await apiFetch('/api/health', { signal: AbortSignal.timeout(3000) });
+        if (res.ok) { apiStatus = 'online'; return; }
+      } catch {
+        // retry
+      }
+      if (attempt < retries) await new Promise<void>((r) => setTimeout(r, retryDelay));
+    }
+    apiStatus = 'offline';
+  }
   const upNext = $derived.by(() => {
     const items = $queue;
     if (!items.length || $currentIndex >= items.length - 1) return [];
@@ -267,6 +282,17 @@
     topSearch = new URL(window.location.href).searchParams.get('q') ?? '';
     loadRecentSearches();
 
+    // Retry for up to 30s while sidecar boots. In Tauri we also listen for
+    // the `api://ready` event so the badge flips the moment the server is up.
+    checkApiHealth({ retries: 30, retryDelay: 1000 });
+    const apiHealthInterval = setInterval(checkApiHealth, 10_000);
+
+    let unlistenApiReady: (() => void) | undefined;
+    if (isTauri()) {
+      const { listen } = await import('@tauri-apps/api/event');
+      unlistenApiReady = await listen('api://ready', () => { apiStatus = 'online'; });
+    }
+
     const cleanupDrpc = initDrpc();
 
     // In Tauri, intercept external links so they open in the system browser
@@ -289,6 +315,8 @@
     await Promise.all([bootstrapAppSettings(), reloadLibraryData()]);
 
     return () => {
+      clearInterval(apiHealthInterval);
+      unlistenApiReady?.();
       document.removeEventListener('click', handleExternalLink);
       cleanupDrpc();
     };
@@ -582,6 +610,10 @@
   </div>
   <!-- Right: status badges -->
   <div class="hidden shrink-0 items-center gap-2 pl-3 md:flex">
+    <Badge class="{apiStatus === 'online' ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200' : apiStatus === 'offline' ? 'border-rose-500/40 bg-rose-500/15 text-rose-200' : 'border-border bg-secondary text-muted-foreground'} flex items-center gap-1.5">
+      <span class="size-1.5 rounded-full {apiStatus === 'online' ? 'bg-emerald-400' : apiStatus === 'offline' ? 'bg-rose-400 animate-pulse' : 'bg-muted-foreground animate-pulse'}"></span>
+      API
+    </Badge>
     <Badge class={statusClass(subsonicStatus)}>Subsonic: {subsonicStatus}</Badge>
     <Badge class={statusClass(lastfmStatus)}>Last.fm: {lastfmStatus}</Badge>
   </div>

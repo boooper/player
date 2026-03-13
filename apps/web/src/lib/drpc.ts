@@ -1,8 +1,3 @@
-/**
- * Discord Rich Presence integration.
- * Only active when running inside Tauri (desktop).
- * Reacts to player store changes to keep activity in sync.
- */
 import { derived } from 'svelte/store';
 import { queue, currentIndex, isPlaying } from './stores/player';
 import { isTauri } from './tauri';
