@@ -14,7 +14,8 @@ import {
   fetchLastFmRecommendations,
   fetchTrackTopGenre as lfmTrackTopGenre
 } from '$lib/lastfm';
-import { getLastFmApiKey, getRecommendationProviderSetting } from '$lib/stores/settings';
+import { fetchListenBrainzRecommendations } from '$lib/listenbrainz';
+import { getLastFmApiKey, getRecommendationProviderSetting, getListenBrainzUsername } from '$lib/stores/settings';
 
 // ---------------------------------------------------------------------------
 // Config helpers
@@ -26,6 +27,10 @@ function getLfmKey(): string {
 
 function hasLfm(): boolean {
   return Boolean(getLfmKey());
+}
+
+function getLbzUsername(): string {
+  return getListenBrainzUsername();
 }
 
 // ---------------------------------------------------------------------------
@@ -78,14 +83,27 @@ const lastfmProvider: RecommendationProvider = {
   }
 };
 
+const listenbrainzProvider: RecommendationProvider = {
+  name: 'listenbrainz',
+  async getRecommendations(params) {
+    return fetchListenBrainzRecommendations({
+      username: getLbzUsername(),
+      likedArtists: params.likedArtists,
+      limit: params.limit
+    });
+  },
+  async getTrackTopGenre(_artist, _track) {
+    return '';
+  }
+};
+
 /**
  * Registry of all available recommendation providers.
  * Add new providers here once their module is implemented.
  */
 const RECOMMENDATION_PROVIDERS: Record<string, RecommendationProvider> = {
-  lastfm: lastfmProvider
-  // spotify: spotifyProvider,
-  // deezer: deezerProvider,
+  lastfm: lastfmProvider,
+  listenbrainz: listenbrainzProvider
 };
 
 function getRecommendationProvider(): RecommendationProvider {

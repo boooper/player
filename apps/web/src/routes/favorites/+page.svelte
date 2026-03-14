@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { Play, Shuffle, Heart, Sparkles } from '@lucide/svelte';
+  import { Play, Pause, Shuffle, Heart, Sparkles } from '@lucide/svelte';
 
   import { fetchStarredSongs, type Song } from '$lib/api';
-  import { focusTrack, playQueue, playingFrom, starredSongIds, smartShuffleMode, shuffleEnabled } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, starredSongIds, smartShuffleMode, shuffleEnabled, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import {
     DropdownMenu,
@@ -81,6 +81,8 @@
     playQueue(list, 0);
     playingFrom.set({ type: 'favorites', name: 'Favorite Songs', href: '/favorites' });
   }
+
+  const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
 </script>
 
 <div class="mb-6 flex gap-4">
@@ -103,7 +105,7 @@
         class="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all duration-150 hover:scale-105 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
         aria-label="Play all"
       >
-        <Play class="size-6 translate-x-0.5" fill="currentColor" />
+        <Play class="size-6 translate-x-0.5 text-muted-foreground" fill="currentColor" />
       </button>
 
       <!-- Shuffle mode selector -->
@@ -169,18 +171,34 @@
     <!-- Rows -->
     <div class="mt-1 space-y-0.5">
       {#each songs as song, index (song.id + '-' + index)}
+        {@const isCurrentTrack = song.id === currentTrackId}
         <SongContextMenu {song} onplay={() => playSong(index)}>
           <button
-            class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
+            class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
             style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
-            onclick={() => playSong(index)}
+            onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playSong(index)}
           >
             <!-- Track # / Play icon crossfade -->
             <span class="relative flex h-7 w-7 shrink-0 items-center justify-center mx-auto">
-              <span class="absolute inset-0 flex items-center justify-center text-sm tabular-nums text-muted-foreground transition-all duration-150 group-hover:scale-50 group-hover:opacity-0">{index + 1}</span>
-              <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
-                <Play class="size-4" fill="currentColor" />
-              </span>
+              {#if isCurrentTrack}
+                <span class="flex items-end gap-[2px] transition-all duration-150 group-hover:opacity-0 group-hover:scale-50">
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 12px; animation: equalizer 0.8s ease-in-out infinite 0s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 8px; animation: equalizer 0.8s ease-in-out infinite 0.25s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 12px; animation: equalizer 0.8s ease-in-out infinite 0.5s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                </span>
+                <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100 text-primary">
+                  {#if $isPlaying}
+                    <Pause class="size-4" fill="currentColor" />
+                  {:else}
+                    <Play class="size-4" fill="currentColor" />
+                  {/if}
+                </span>
+              {:else}
+                <span class="absolute inset-0 flex items-center justify-center text-sm tabular-nums text-muted-foreground transition-all duration-150 group-hover:scale-50 group-hover:opacity-0">{index + 1}</span>
+                <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
+                  <Play class="size-4" fill="currentColor" />
+                </span>
+              {/if}
             </span>
 
             <!-- Title + cover art -->
@@ -193,7 +211,7 @@
                 </div>
               {/if}
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground">{song.title}</p>
+                <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
                 <span
                   role="link"
                   tabindex="0"
@@ -205,7 +223,13 @@
             </div>
 
             <!-- Album -->
-            <span class="hidden truncate text-sm text-muted-foreground md:block">{song.album}</span>
+            <span
+              role="link"
+              tabindex="0"
+              class="hidden truncate text-sm text-muted-foreground hover:underline hover:text-foreground transition-colors duration-150 cursor-pointer md:block"
+              onclick={(e) => { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); }}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); } }}
+            >{song.album}</span>
 
             <!-- Duration -->
             <span class="text-right text-xs tabular-nums text-muted-foreground">{formatDuration(song.duration ?? 0)}</span>

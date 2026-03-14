@@ -112,6 +112,7 @@ export const upNextEnabled = writable(true);
 export const smartShuffleMode = writable(false);
 export const showLyrics = writable(false);
 export const seekRequest = writable<number | null>(null);
+export const togglePlayRequest = writable(0);
 export const subsonicPlaylists = writable<Playlist[]>([]);
 export const starredSongIds = writable<Set<string>>(new Set());
 export const showQueue = writable(false);
@@ -151,6 +152,30 @@ export function addRecentlyPlayed(item: RecentItem): void {
     const filtered = list.filter((i) => i.id !== item.id);
     const next = [item, ...filtered].slice(0, 8);
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch {}
+    return next;
+  });
+}
+
+// ─── Recently Played Songs ────────────────────────────────────────────────────
+
+const RECENT_SONGS_KEY = 'naviarr_recently_played_songs';
+
+function loadRecentSongs(): Song[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_SONGS_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+
+export const recentlyPlayedSongs = writable<Song[]>(loadRecentSongs());
+
+export function addRecentlyPlayedSong(song: Song): void {
+  recentlyPlayedSongs.update((list) => {
+    const filtered = list.filter((s) => s.id !== song.id);
+    const next = [song, ...filtered].slice(0, 20);
+    try { localStorage.setItem(RECENT_SONGS_KEY, JSON.stringify(next)); } catch {}
     return next;
   });
 }

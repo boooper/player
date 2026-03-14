@@ -35,3 +35,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 url = "2"
 md5 = "0.7"
 rand = "0.8"
+prost = "0.13"
+tokio-native-tls = "0.3"
+mdns = "3"
+futures-util = "0.3"

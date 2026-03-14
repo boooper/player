@@ -1,3 +1,4 @@
+pub mod cast;
 pub mod health;
 pub mod jellyfin;
 pub mod lastfm;

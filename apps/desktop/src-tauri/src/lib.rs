@@ -4,9 +4,22 @@ mod commands;
 use std::sync::Mutex;
 use tauri::Manager;
 
+/// Serialisable state kept for an active Chromecast session.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CastSessionInfo {
+    pub device_name: String,
+    pub device_addr: String,
+    pub device_port: u16,
+    pub transport_id: String,
+    pub session_id: String,
+    pub media_session_id: i32,
+}
+
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub http: reqwest::Client,
+    pub cast_session: Mutex<Option<CastSessionInfo>>,
 }
 
 // AppState is Send + Sync because:
@@ -39,6 +52,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 http: reqwest::Client::new(),
+                cast_session: Mutex::new(None),
             });
 
             if cfg!(debug_assertions) {
@@ -95,6 +109,16 @@ pub fn run() {
             commands::library::library_add_to_playlist,
             // lyrics
             commands::lyrics::fetch_lyrics,
+            // chromecast
+            commands::cast::cast_discover,
+            commands::cast::cast_play,
+            commands::cast::cast_pause,
+            commands::cast::cast_resume,
+            commands::cast::cast_stop,
+            commands::cast::cast_get_session,
+            commands::cast::cast_set_volume,
+            commands::cast::cast_seek,
+            commands::cast::cast_get_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

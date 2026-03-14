@@ -15,6 +15,7 @@
   import { initDrpc } from '$lib/drpc';
   import {
     fetchAppSettings,
+    fetchListenBrainzToken,
     savePlaybackPrefs,
     fetchLikedArtists,
     fetchServiceHealth,
@@ -120,12 +121,17 @@
 
   async function bootstrapAppSettings() {
     try {
-      const settings = await fetchAppSettings();
+      const [settings, lbzToken] = await Promise.all([
+        fetchAppSettings(),
+        fetchListenBrainzToken().catch(() => '')
+      ]);
       appSettings.update((current) => ({
         ...current,
         lastFmApiKey: settings.lastFmApiKey,
         recommendationProvider: settings.recommendationProvider,
         metadataProvider: settings.metadataProvider,
+        listenBrainzUsername: settings.listenBrainzUsername,
+        listenBrainzToken: lbzToken,
       }));
       volume.set(settings.volume);
       shuffleEnabled.set(settings.shuffleEnabled);

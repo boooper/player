@@ -1,17 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play, Plus, Check, ChevronLeft, ChevronRight, Disc3, ListMusic } from '@lucide/svelte';
+  import { Play, Pause, Plus, Check, ChevronLeft, ChevronRight, Disc3, ListMusic } from '@lucide/svelte';
 
   import {
     fetchLikedArtists, saveLikedArtist, removeLikedArtist,
-    fetchStarredSongs, fetchAlbumList, fetchAlbumSongs,
-    type Song, type Album
+    fetchStarredSongs, fetchAlbumList, fetchAlbumSongs, fetchPlaylistSongs,
+    type Song, type Album, type Playlist
   } from '$lib/api';
   import { getTopArtists, type Artist } from '$lib/metadata';
   import {
     recentlyPlayed, subsonicPlaylists, focusTrack, playQueue, playingFrom,
-    addRecentlyPlayed, type RecentItem
+    addRecentlyPlayed, isPlaying, togglePlayRequest, type RecentItem
   } from '$lib/stores/player';
+  import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
+  import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
+  import PlaylistContextMenu from '$lib/components/PlaylistContextMenu.svelte';
+  import { goto } from '$app/navigation';
 
   let liked = $state<string[]>([]);
   let top = $state<Artist[]>([]);
@@ -22,6 +27,10 @@
   let error = $state('');
   let togglingArtist = $state<string | null>(null);
   let albumLoadingId = $state<string | null>(null);
+  let recentLoadingId = $state<string | null>(null);
+  let playlistLoadingId = $state<string | null>(null);
+
+  const activeHref = $derived($playingFrom.href);
 
   let likedCarouselEl = $state<HTMLDivElement | null>(null);
   let trendingCarouselEl = $state<HTMLDivElement | null>(null);
@@ -51,6 +60,43 @@
       liked = liked.includes(name) ? liked.filter((a) => a !== name) : [...liked, name];
     } finally {
       togglingArtist = null;
+    }
+  }
+
+  async function playRecentItem(item: RecentItem) {
+    if (recentLoadingId) return;
+    recentLoadingId = item.id;
+    try {
+      if (item.type === 'album') {
+        const songs = await fetchAlbumSongs(item.id);
+        if (!songs.length) return;
+        focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
+        playQueue(songs, 0);
+        playingFrom.set({ type: 'album', name: item.name, href: item.href });
+      } else if (item.type === 'playlist') {
+        const songs = await fetchPlaylistSongs(item.id);
+        if (!songs.length) return;
+        focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
+        playQueue(songs, 0);
+        playingFrom.set({ type: 'playlist', name: item.name, href: item.href });
+      }
+    } finally {
+      recentLoadingId = null;
+    }
+  }
+
+  async function playPlaylist(pl: Playlist) {
+    if (playlistLoadingId) return;
+    playlistLoadingId = pl.id;
+    try {
+      const songs = await fetchPlaylistSongs(pl.id);
+      if (!songs.length) return;
+      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
+      playQueue(songs, 0);
+      playingFrom.set({ type: 'playlist', name: pl.name, href: `/playlist/${encodeURIComponent(pl.id)}` });
+      addRecentlyPlayed({ id: pl.id, name: pl.name, coverArtUrl: pl.coverArtUrl, href: `/playlist/${encodeURIComponent(pl.id)}`, type: 'playlist' });
+    } finally {
+      playlistLoadingId = null;
     }
   }
 
@@ -117,7 +163,7 @@
       {#each $recentlyPlayed as item (item.id)}
         <a
           href={item.href}
-          class="flex items-center gap-3 overflow-hidden rounded-md bg-secondary/80 transition hover:bg-accent"
+          class="group relative flex items-center gap-3 overflow-hidden rounded-md bg-secondary/80 transition hover:bg-accent"
         >
           {#if item.coverArtUrl}
             <img class="size-16 shrink-0 object-cover" src={item.coverArtUrl} alt={item.name} loading="lazy" />
@@ -126,7 +172,20 @@
               {item.name.slice(0, 2).toUpperCase()}
             </div>
           {/if}
-          <span class="min-w-0 flex-1 truncate pr-3 text-sm font-semibold">{item.name}</span>
+          <span class="min-w-0 flex-1 truncate text-sm font-semibold">{item.name}</span>
+          <button
+            class="z-10 mr-3 grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-150 hover:scale-105 group-hover:opacity-100"
+            onclick={(e) => { e.preventDefault(); activeHref === item.href ? togglePlayRequest.update(n => n + 1) : playRecentItem(item); }}
+            aria-label="{activeHref === item.href && $isPlaying ? 'Pause' : 'Play'} {item.name}"
+          >
+            {#if recentLoadingId === item.id}
+              <span class="block size-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+            {:else if activeHref === item.href && $isPlaying}
+              <Pause class="size-3.5" fill="currentColor" />
+            {:else}
+              <Play class="size-3.5 translate-x-px" fill="currentColor" />
+            {/if}
+          </button>
         </a>
       {/each}
     </div>
@@ -145,22 +204,39 @@
     </div>
     <div bind:this={playlistCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
       {#each $subsonicPlaylists as pl (pl.id)}
-        <a
-          href={`/playlist/${encodeURIComponent(pl.id)}`}
-          class="group flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent"
-        >
-          {#if pl.coverArtUrl}
-            <img class="aspect-square w-full rounded-md object-cover shadow-md" src={pl.coverArtUrl} alt={pl.name} loading="lazy" />
-          {:else}
-            <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-violet-600 to-indigo-800 shadow-md">
-              <ListMusic class="size-10 text-white/70" />
+        <PlaylistContextMenu playlist={pl} triggerClass="contents">
+          <a
+            href={`/playlist/${encodeURIComponent(pl.id)}`}
+            class="group flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent"
+          >
+            <div class="relative">
+              {#if pl.coverArtUrl}
+                <img class="aspect-square w-full rounded-md object-cover shadow-md" src={pl.coverArtUrl} alt={pl.name} loading="lazy" />
+              {:else}
+                <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-violet-600 to-indigo-800 shadow-md">
+                  <ListMusic class="size-10 text-white/70" />
+                </div>
+              {/if}
+              <button
+                class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
+                onclick={(e) => { e.preventDefault(); activeHref === `/playlist/${encodeURIComponent(pl.id)}` ? togglePlayRequest.update(n => n + 1) : playPlaylist(pl); }}
+                aria-label="{activeHref === `/playlist/${encodeURIComponent(pl.id)}` && $isPlaying ? 'Pause' : 'Play'} {pl.name}"
+              >
+                {#if playlistLoadingId === pl.id}
+                  <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+                {:else if activeHref === `/playlist/${encodeURIComponent(pl.id)}` && $isPlaying}
+                  <Pause class="size-4" fill="currentColor" />
+                {:else}
+                  <Play class="size-4 translate-x-px" fill="currentColor" />
+                {/if}
+              </button>
             </div>
-          {/if}
-          <div>
-            <p class="truncate text-sm font-semibold">{pl.name}</p>
-            <p class="text-xs text-muted-foreground">{pl.songCount} songs</p>
-          </div>
-        </a>
+            <div>
+              <p class="truncate text-sm font-semibold">{pl.name}</p>
+              <p class="text-xs text-muted-foreground">{pl.songCount} songs</p>
+            </div>
+          </a>
+        </PlaylistContextMenu>
       {/each}
     </div>
   </section>
@@ -186,7 +262,8 @@
         {/each}
       {:else}
         {#each newestAlbums as album (album.id)}
-          <div class="group relative flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
+          <AlbumContextMenu {album} onplay={() => playAlbum(album)} triggerClass="contents">
+            <div class="group relative flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
             <a href={`/album/${encodeURIComponent(album.id)}`} class="absolute inset-0 rounded-lg" aria-label={album.name}></a>
             <div class="relative">
               {#if album.coverArtUrl}
@@ -197,12 +274,12 @@
                 </div>
               {/if}
               <button
-                class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-background opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
+                class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
                 onclick={(e) => { e.preventDefault(); playAlbum(album); }}
                 aria-label="Play {album.name}"
               >
                 {#if albumLoadingId === album.id}
-                  <span class="block size-4 animate-spin rounded-full border-2 border-background border-t-transparent"></span>
+                  <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
                 {:else}
                   <Play class="size-4 translate-x-px" fill="currentColor" />
                 {/if}
@@ -213,6 +290,7 @@
               <p class="truncate text-xs text-muted-foreground">{album.artist}{album.year ? ` · ${album.year}` : ''}</p>
             </div>
           </div>
+          </AlbumContextMenu>
         {/each}
       {/if}
     </div>
@@ -236,35 +314,43 @@
     </div>
     <div class="mt-1 space-y-0.5">
       {#each starredSongs.slice(0, 6) as song, i (song.id)}
-        <button
-          class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
-          style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
-          onclick={() => playSong(starredSongs, i)}
-        >
-          <!-- Track # / Play icon crossfade -->
-          <span class="relative flex h-7 w-7 shrink-0 items-center justify-center mx-auto">
-            <span class="absolute inset-0 flex items-center justify-center text-sm tabular-nums text-muted-foreground transition-all duration-150 group-hover:scale-50 group-hover:opacity-0">{i + 1}</span>
-            <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
-              <Play class="size-4" fill="currentColor" />
+        <SongContextMenu {song} onplay={() => playSong(starredSongs, i)}>
+          <button
+            class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
+            style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
+            onclick={() => playSong(starredSongs, i)}
+          >
+            <!-- Track # / Play icon crossfade -->
+            <span class="relative flex h-7 w-7 shrink-0 items-center justify-center mx-auto">
+              <span class="absolute inset-0 flex items-center justify-center text-sm tabular-nums text-muted-foreground transition-all duration-150 group-hover:scale-50 group-hover:opacity-0">{i + 1}</span>
+              <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
+                <Play class="size-4" fill="currentColor" />
+              </span>
             </span>
-          </span>
-          <!-- Title + cover art -->
-          <div class="flex min-w-0 items-center gap-3">
-            {#if song.coverArtUrl}
-              <img class="size-10 shrink-0 rounded-md object-cover shadow-md" src={song.coverArtUrl} alt={song.title} loading="lazy" />
-            {:else}
-              <div class="grid size-10 shrink-0 place-items-center rounded-md bg-secondary text-xs font-bold">{song.title.slice(0, 2).toUpperCase()}</div>
-            {/if}
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium group-hover:text-foreground transition-colors duration-150">{song.title}</p>
-              <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
+            <!-- Title + cover art -->
+            <div class="flex min-w-0 items-center gap-3">
+              {#if song.coverArtUrl}
+                <img class="size-10 shrink-0 rounded-md object-cover shadow-md" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+              {:else}
+                <div class="grid size-10 shrink-0 place-items-center rounded-md bg-secondary text-xs font-bold">{song.title.slice(0, 2).toUpperCase()}</div>
+              {/if}
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium group-hover:text-foreground transition-colors duration-150">{song.title}</p>
+                <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
+              </div>
             </div>
-          </div>
-          <!-- Album -->
-          <span class="hidden truncate text-sm text-muted-foreground md:block">{song.album}</span>
-          <!-- Duration -->
-          <span class="text-right text-xs tabular-nums text-muted-foreground">{song.duration ? `${Math.floor(song.duration / 60)}:${String(song.duration % 60).padStart(2, '0')}` : '—'}</span>
-        </button>
+            <!-- Album -->
+            <span
+              role="link"
+              tabindex="0"
+              class="hidden truncate text-sm text-muted-foreground hover:underline hover:text-foreground transition-colors duration-150 cursor-pointer md:block"
+              onclick={(e) => { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); }}
+              onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); } }}
+            >{song.album}</span>
+            <!-- Duration -->
+            <span class="text-right text-xs tabular-nums text-muted-foreground">{song.duration ? `${Math.floor(song.duration / 60)}:${String(song.duration % 60).padStart(2, '0')}` : '—'}</span>
+          </button>
+        </SongContextMenu>
       {/each}
     </div>
   </section>
@@ -282,7 +368,8 @@
     </div>
     <div bind:this={randomCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
       {#each randomAlbums as album (album.id)}
-        <div class="group relative flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
+        <AlbumContextMenu {album} onplay={() => playAlbum(album)} triggerClass="contents">
+          <div class="group relative flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
           <a href={`/album/${encodeURIComponent(album.id)}`} class="absolute inset-0 rounded-lg" aria-label={album.name}></a>
           <div class="relative">
             {#if album.coverArtUrl}
@@ -293,12 +380,12 @@
               </div>
             {/if}
             <button
-              class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-background opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
+              class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
               onclick={(e) => { e.preventDefault(); playAlbum(album); }}
               aria-label="Play {album.name}"
             >
               {#if albumLoadingId === album.id}
-                <span class="block size-4 animate-spin rounded-full border-2 border-background border-t-transparent"></span>
+                <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
               {:else}
                 <Play class="size-4 translate-x-px" fill="currentColor" />
               {/if}
@@ -309,6 +396,7 @@
             <p class="truncate text-xs text-muted-foreground">{album.artist}{album.year ? ` · ${album.year}` : ''}</p>
           </div>
         </div>
+        </AlbumContextMenu>
       {/each}
     </div>
   </section>
@@ -326,16 +414,18 @@
     </div>
     <div bind:this={likedCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
       {#each liked as artist (artist)}
-        <a
-          href={`/artist/${encodeURIComponent(artist)}`}
-          class="group flex w-36 shrink-0 flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent"
-        >
+        <ArtistContextMenu name={artist} triggerClass="contents">
+          <a
+            href={`/artist/${encodeURIComponent(artist)}`}
+            class="group flex w-36 shrink-0 flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent"
+          >
           <div class="grid size-20 place-items-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-lg font-bold">
             {artist.slice(0, 2).toUpperCase()}
           </div>
           <p class="w-full truncate text-xs font-semibold">{artist}</p>
           <p class="text-[11px] text-muted-foreground">Artist</p>
         </a>
+        </ArtistContextMenu>
       {/each}
     </div>
   </section>
@@ -353,7 +443,8 @@
     </div>
     <div bind:this={trendingCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
       {#each top as artist (artist.id)}
-        <div class="group relative flex w-36 shrink-0 flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent">
+        <ArtistContextMenu name={artist.name} triggerClass="contents">
+          <div class="group relative flex w-36 shrink-0 flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent">
           <a href={`/artist/${encodeURIComponent(artist.name)}`} class="absolute inset-0 rounded-lg" aria-label={artist.name}></a>
           {#if artist.imageUrl}
             <img class="size-20 rounded-full object-cover" src={artist.imageUrl} alt={artist.name} loading="lazy" />
@@ -381,6 +472,7 @@
             {/if}
           </button>
         </div>
+        </ArtistContextMenu>
       {/each}
     </div>
   </section>

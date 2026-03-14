@@ -127,12 +127,12 @@
               </div>
             {/if}
             <button
-              class="absolute bottom-2 right-2 z-10 grid size-9 translate-y-1 place-items-center rounded-full bg-primary text-background opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
+              class="absolute bottom-2 right-2 z-10 grid size-9 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
               onclick={(e) => { e.preventDefault(); playAlbum(album); }}
               aria-label="Play {album.name}"
             >
               {#if albumLoadingId === album.id}
-                <span class="block size-4 animate-spin rounded-full border-2 border-background border-t-transparent"></span>
+                <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
               {:else}
                 <Play class="size-4 translate-x-px" fill="currentColor" />
               {/if}

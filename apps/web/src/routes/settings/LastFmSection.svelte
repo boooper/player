@@ -15,7 +15,7 @@
     lastfm: 'Last.fm only',
     audiodb: 'TheAudioDB only',
   };
-  const REC_LABELS: Record<string, string> = { lastfm: 'Last.fm' };
+  const REC_LABELS: Record<string, string> = { lastfm: 'Last.fm', listenbrainz: 'ListenBrainz' };
 
   let {
     lastFmApiKey = $bindable(''),
@@ -23,6 +23,9 @@
     lastFmSharedSecretConfigured = $bindable(false),
     lfmConnected = $bindable(false),
     lfmUsername = $bindable(''),
+    listenBrainzUsername = $bindable(''),
+    listenBrainzToken = $bindable(''),
+    listenBrainzTokenConfigured = $bindable(false),
     metadataProvider = $bindable('both'),
     recommendationProvider = $bindable('lastfm'),
     onHealthChange,
@@ -32,6 +35,9 @@
     lastFmSharedSecretConfigured: boolean;
     lfmConnected: boolean;
     lfmUsername: string;
+    listenBrainzUsername: string;
+    listenBrainzToken: string;
+    listenBrainzTokenConfigured: boolean;
     metadataProvider: string;
     recommendationProvider: string;
     onHealthChange: () => void;
@@ -273,8 +279,43 @@
         </Select.Trigger>
         <Select.Content>
           <Select.Item value="lastfm" label="Last.fm" />
+          <Select.Item value="listenbrainz" label="ListenBrainz" />
         </Select.Content>
       </Select.Root>
     </div>
   </div>
+
+  {#if recommendationProvider === 'listenbrainz'}
+  <div class="border-t border-border/60 px-5 py-5">
+    <div class="space-y-4">
+      <div class="space-y-1.5">
+        <label class="text-sm font-medium" for="lbz-username">ListenBrainz Username</label>
+        <p class="text-xs text-muted-foreground">Your <a href="https://listenbrainz.org" class="text-primary underline-offset-2 hover:underline">listenbrainz.org</a> username. Used to fetch personalised recommendations.</p>
+        <input
+          id="lbz-username"
+          type="text"
+          bind:value={listenBrainzUsername}
+          placeholder="e.g. your_listenbrainz_username"
+          autocomplete="off"
+          class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
+      <div class="space-y-1.5">
+        <label class="text-sm font-medium" for="lbz-token">
+          User Token
+          <span class="ml-1.5 text-xs font-normal text-muted-foreground">Required for scrobbling</span>
+        </label>
+        <p class="text-xs text-muted-foreground">Find your token at <a href="https://listenbrainz.org/profile/" class="text-primary underline-offset-2 hover:underline">listenbrainz.org/profile</a>. Scrobbles are submitted alongside any Last.fm scrobbles.</p>
+        <input
+          id="lbz-token"
+          type="password"
+          bind:value={listenBrainzToken}
+          placeholder={listenBrainzTokenConfigured ? 'Already configured — enter to replace' : 'Paste your ListenBrainz user token'}
+          autocomplete="off"
+          class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 font-mono text-sm placeholder:font-sans placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
+    </div>
+  </div>
+  {/if}
 </section>

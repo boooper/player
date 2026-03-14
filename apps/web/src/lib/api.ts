@@ -22,6 +22,8 @@ export type AppSettingsPayload = {
   lastFmSharedSecretConfigured: boolean;
   recommendationProvider: string;
   metadataProvider: string;
+  listenBrainzUsername: string;
+  listenBrainzTokenConfigured: boolean;
   volume: number;
   shuffleEnabled: boolean;
   smartShuffleMode: boolean;
@@ -70,6 +72,8 @@ export async function fetchAppSettings(): Promise<AppSettingsPayload> {
     lastFmSharedSecretConfigured: Boolean(s.LASTFM_SHARED_SECRET),
     recommendationProvider: s.RECOMMENDATION_PROVIDER || 'lastfm',
     metadataProvider: s.METADATA_PROVIDER || 'both',
+    listenBrainzUsername: s.LISTENBRAINZ_USERNAME ?? '',
+    listenBrainzTokenConfigured: Boolean(s.LISTENBRAINZ_TOKEN),
     volume: isNaN(rawVol) ? 0.8 : Math.max(0, Math.min(1, rawVol)),
     shuffleEnabled: s.SHUFFLE === 'true',
     smartShuffleMode: s.SMART_SHUFFLE === 'true',
@@ -89,15 +93,21 @@ export async function updateAppSettings(data: {
   lastFmApiKey: string;
   recommendationProvider: string;
   metadataProvider: string;
+  listenBrainzUsername: string;
+  listenBrainzToken?: string;
   lastFmSharedSecret?: string;
 }): Promise<void> {
   const updates: Record<string, string> = {
     LASTFM_API_KEY: data.lastFmApiKey,
     RECOMMENDATION_PROVIDER: data.recommendationProvider,
-    METADATA_PROVIDER: data.metadataProvider
+    METADATA_PROVIDER: data.metadataProvider,
+    LISTENBRAINZ_USERNAME: data.listenBrainzUsername
   };
   if (data.lastFmSharedSecret?.trim()) {
     updates.LASTFM_SHARED_SECRET = data.lastFmSharedSecret.trim();
+  }
+  if (data.listenBrainzToken?.trim()) {
+    updates.LISTENBRAINZ_TOKEN = data.listenBrainzToken.trim();
   }
   await invoke('update_settings', { updates });
 }
@@ -136,6 +146,11 @@ export async function fetchLibraryStats(): Promise<LibraryStatsPayload> {
 
 export async function fetchLastFmStatus(): Promise<{ connected: boolean; username: string }> {
   return invoke('lfm_status');
+}
+
+export async function fetchListenBrainzToken(): Promise<string> {
+  const s = await invoke<Record<string, string>>('get_settings');
+  return s.LISTENBRAINZ_TOKEN ?? '';
 }
 
 // ── Liked Artists ─────────────────────────────────────────────────────────────
@@ -339,4 +354,80 @@ export async function fetchUpNextSongs({
   }
 
   return results;
+}
+
+// ── Chromecast ────────────────────────────────────────────────────────────────
+
+export type CastDeviceInfo = {
+  name: string;
+  addr: string;
+  port: number;
+};
+
+export type CastSessionInfo = {
+  deviceName: string;
+  deviceAddr: string;
+  devicePort: number;
+  transportId: string;
+  sessionId: string;
+  mediaSessionId: number;
+};
+
+/** Scan the local network for Cast devices (~5 s). */
+export async function castDiscover(): Promise<CastDeviceInfo[]> {
+  return invoke<CastDeviceInfo[]>('cast_discover');
+}
+
+/** Start casting the given stream URL to a Cast device. */
+export async function castPlay(params: {
+  deviceName: string;
+  deviceAddr: string;
+  devicePort: number;
+  streamUrl: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+}): Promise<void> {
+  return invoke<void>('cast_play', {
+    deviceName: params.deviceName,
+    deviceAddr: params.deviceAddr,
+    devicePort: params.devicePort,
+    streamUrl: params.streamUrl,
+    title: params.title,
+    artist: params.artist,
+    coverUrl: params.coverUrl,
+  });
+}
+
+export async function castPause(): Promise<void> {
+  return invoke<void>('cast_pause');
+}
+
+export async function castResume(): Promise<void> {
+  return invoke<void>('cast_resume');
+}
+
+export async function castStop(): Promise<void> {
+  return invoke<void>('cast_stop');
+}
+
+export async function castGetSession(): Promise<CastSessionInfo | null> {
+  return invoke<CastSessionInfo | null>('cast_get_session');
+}
+
+export async function castSetVolume(level: number): Promise<void> {
+  return invoke<void>('cast_set_volume', { level });
+}
+
+export async function castSeek(position: number): Promise<void> {
+  return invoke<void>('cast_seek', { position });
+}
+
+export type CastPlaybackStatus = {
+  currentTime: number;
+  playerState: 'PLAYING' | 'PAUSED' | 'IDLE' | 'BUFFERING';
+};
+
+export async function castGetStatus(): Promise<CastPlaybackStatus> {
+  return invoke<CastPlaybackStatus>('cast_get_status');
 }

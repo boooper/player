@@ -26,6 +26,9 @@
   let lastFmSharedSecretConfigured = $state(false);
   let lfmConnected = $state(false);
   let lfmUsername = $state('');
+  let listenBrainzUsername = $state('');
+  let listenBrainzToken = $state('');
+  let listenBrainzTokenConfigured = $state(false);
   let metadataProvider = $state('both');
   let recommendationProvider = $state('lastfm');
   let isMobile = $state(false);
@@ -59,6 +62,8 @@
         lastFmSharedSecretConfigured = settings.lastFmSharedSecretConfigured;
         recommendationProvider = settings.recommendationProvider;
         metadataProvider = settings.metadataProvider;
+        listenBrainzUsername = settings.listenBrainzUsername;
+        listenBrainzTokenConfigured = settings.listenBrainzTokenConfigured;
         lfmConnected = lfmStatus.connected;
         lfmUsername = lfmStatus.username;
         appSettings.set({
@@ -67,6 +72,8 @@
           metadataProvider,
           lastFmConnected: lfmConnected,
           lastFmUsername: lfmUsername,
+          listenBrainzUsername,
+          listenBrainzToken: '',
         });
       } catch {
         toast.error('Failed to load settings');
@@ -83,13 +90,19 @@
         lastFmApiKey,
         recommendationProvider,
         metadataProvider,
+        listenBrainzUsername,
+        listenBrainzToken,
         lastFmSharedSecret,
       });
-      appSettings.set({ lastFmApiKey, recommendationProvider, metadataProvider, lastFmConnected: lfmConnected, lastFmUsername: lfmUsername });
+      appSettings.set({ lastFmApiKey, recommendationProvider, metadataProvider, lastFmConnected: lfmConnected, lastFmUsername: lfmUsername, listenBrainzUsername, listenBrainzToken });
       libraryRefresh.update((n) => n + 1);
       if (lastFmSharedSecret.trim()) {
         lastFmSharedSecretConfigured = true;
         lastFmSharedSecret = '';
+      }
+      if (listenBrainzToken.trim()) {
+        listenBrainzTokenConfigured = true;
+        listenBrainzToken = '';
       }
       toast.success('Settings saved');
       statsRefreshKey += 1;
@@ -106,6 +119,9 @@
     lastFmSharedSecretConfigured = false;
     lfmConnected = false;
     lfmUsername = '';
+    listenBrainzUsername = '';
+    listenBrainzToken = '';
+    listenBrainzTokenConfigured = false;
     recommendationProvider = 'lastfm';
     metadataProvider = 'both';
     statsRefreshKey += 1;
@@ -139,6 +155,9 @@
     bind:lastFmSharedSecretConfigured
     bind:lfmConnected
     bind:lfmUsername
+    bind:listenBrainzUsername
+    bind:listenBrainzToken
+    bind:listenBrainzTokenConfigured
     bind:metadataProvider
     bind:recommendationProvider
     onHealthChange={() => { statsRefreshKey += 1; }}

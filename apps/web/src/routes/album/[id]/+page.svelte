@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play, Shuffle, Clock3, ArrowLeft } from '@lucide/svelte';
+  import { Play, Pause, Shuffle, Clock3, ArrowLeft } from '@lucide/svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
 
@@ -17,7 +17,7 @@
     type Album,
     type Song
   } from '$lib/api';
-  import { focusTrack, playQueue, playingFrom, toggleShuffle, shuffleEnabled, smartShuffleMode } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, toggleShuffle, shuffleEnabled, smartShuffleMode, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import {
     DropdownMenu,
@@ -27,6 +27,8 @@
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
   import { Sparkles } from '@lucide/svelte';
+
+  const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
 
   let { data } = $props<{ data: { id: string } }>();
 
@@ -151,7 +153,7 @@
       {#if !loading}
         <div class="mt-5 flex items-center gap-3">
           <button
-            class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-background shadow-lg transition hover:scale-105 disabled:opacity-40"
+            class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
             onclick={playAll}
             disabled={songs.length === 0}
             aria-label="Play album"
@@ -226,16 +228,34 @@
       {/each}
     {:else}
       {#each songs as song, i (song.id)}
+        {@const isCurrentTrack = song.id === currentTrackId}
         <SongContextMenu {song} onplay={() => playFrom(i)}>
           <button
-            class="group grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent"
+            class="group grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent {isCurrentTrack ? 'bg-primary/5' : ''}"
             style="grid-template-columns: 2rem 1fr 6rem"
-            onclick={() => playFrom(i)}
+            onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playFrom(i)}
           >
-            <span class="text-center text-sm tabular-nums text-muted-foreground group-hover:hidden">{i + 1}</span>
-            <span class="hidden place-items-center group-hover:grid">
-              <Play class="size-3.5" fill="currentColor" />
-            </span>
+            <span class="text-center text-sm tabular-nums text-muted-foreground {isCurrentTrack ? 'hidden' : 'group-hover:hidden'}">{i + 1}</span>
+            {#if isCurrentTrack}
+              <span class="relative flex items-center justify-center">
+                <span class="flex items-end gap-[2px] transition-all duration-150 group-hover:opacity-0 group-hover:scale-50">
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 12px; animation: equalizer 0.8s ease-in-out infinite 0s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 8px; animation: equalizer 0.8s ease-in-out infinite 0.25s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 12px; animation: equalizer 0.8s ease-in-out infinite 0.5s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                </span>
+                <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100 text-primary">
+                  {#if $isPlaying}
+                    <Pause class="size-3.5" fill="currentColor" />
+                  {:else}
+                    <Play class="size-3.5" fill="currentColor" />
+                  {/if}
+                </span>
+              </span>
+            {:else}
+              <span class="hidden place-items-center group-hover:grid">
+                <Play class="size-3.5" fill="currentColor" />
+              </span>
+            {/if}
 
             <div class="flex min-w-0 items-center gap-3">
               {#if song.coverArtUrl}
@@ -251,7 +271,7 @@
                 </div>
               {/if}
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium">{song.title}</p>
+                <p class="truncate text-sm font-medium {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
                 <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
               </div>
             </div>

@@ -6,6 +6,8 @@ export type AppSettings = {
   metadataProvider: string;
   lastFmConnected: boolean;
   lastFmUsername: string;
+  listenBrainzUsername: string;
+  listenBrainzToken: string;
 };
 
 export const appSettings = writable<AppSettings>({
@@ -13,7 +15,9 @@ export const appSettings = writable<AppSettings>({
   recommendationProvider: 'lastfm',
   metadataProvider: 'both',
   lastFmConnected: false,
-  lastFmUsername: ''
+  lastFmUsername: '',
+  listenBrainzUsername: '',
+  listenBrainzToken: ''
 });
 
 export function getLastFmApiKey(): string {
@@ -26,6 +30,14 @@ export function getRecommendationProviderSetting(): string {
 
 export function getMetadataProviderSetting(): string {
   return get(appSettings).metadataProvider;
+}
+
+export function getListenBrainzUsername(): string {
+  return get(appSettings).listenBrainzUsername;
+}
+
+export function getListenBrainzToken(): string {
+  return get(appSettings).listenBrainzToken;
 }
 
 // Increment this to signal to the layout that library data should be reloaded

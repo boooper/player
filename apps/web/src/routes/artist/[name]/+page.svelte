@@ -233,7 +233,7 @@
     {/if}
     <div class="mt-5 flex items-center gap-3">
       <button
-        class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-background shadow-lg transition hover:scale-105 disabled:opacity-40"
+        class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
         onclick={playOrShuffleAll}
         disabled={playableTopTracks.length === 0 && !shuffleAllArtist}
         aria-label="Play"
@@ -384,14 +384,14 @@
             {:else}
               <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
             {/if}
-            <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-background opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
+            <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
               <button
                 onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album.id); }}
                 aria-label="Play {album.name}"
                 class="grid size-full place-items-center rounded-full"
               >
                 {#if albumLoading[album.id]}
-                  <span class="block size-4 animate-spin rounded-full border-2 border-background border-t-transparent"></span>
+                  <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
                 {:else}
                   <Play class="size-4 translate-x-px" fill="currentColor" />
                 {/if}

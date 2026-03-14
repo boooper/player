@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -22,7 +22,8 @@
     Mic2,
     Heart,
     Disc3,
-    User2
+    User2,
+    Cast
   } from '@lucide/svelte';
   import {
     currentIndex,
@@ -44,16 +45,93 @@
     pruneQueueHistory,
     showLyrics,
     seekRequest,
+    togglePlayRequest,
     starredSongIds,
-    playQueue
+    playQueue,
+    addRecentlyPlayedSong
   } from '$lib/stores/player';
-  import { fetchUpNextSongs, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs } from '$lib/api';
+  import { fetchUpNextSongs, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetStatus as castGetStatusCmd, type CastDeviceInfo } from '$lib/api';
   import { fetchLikedArtists, saveVolume } from '$lib/api';
+  import { lbzNowPlaying, lbzScrobble } from '$lib/listenbrainz';
   import { toast } from 'svelte-sonner';
   import { Button, Slider } from '$lib/components/ui';
   import { appSettings } from '$lib/stores/settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import { goto } from '$app/navigation';
+
+  // ── Cast state ──────────────────────────────────────────────────────────────
+  let castDevices = $state<CastDeviceInfo[]>([]);
+  let discovering = $state(false);
+  let castActive = $state(false);
+  let castPlaying = $state(false);
+  let castDevice = $state<CastDeviceInfo | null>(null);
+
+  async function discoverDevices() {
+    if (castActive || discovering) return;
+    discovering = true;
+    castDevices = [];
+    try {
+      castDevices = await castDiscover();
+      if (castDevices.length === 0) toast.info('No Cast devices found on your network');
+    } catch (e) {
+      toast.error(`Cast discovery failed: ${e}`);
+    } finally {
+      discovering = false;
+    }
+  }
+
+  async function startCast(device: CastDeviceInfo) {
+    if (!currentTrack) { toast.warning('No track selected'); return; }
+    const toastId = toast.loading(`Connecting to ${device.name}…`);
+    try {
+      if (audioEl && $isPlaying) audioEl.pause();
+      castDevice = device;
+      castActive = true;
+      castPlaying = false;
+      await castPlayCmd({
+        deviceName: device.name,
+        deviceAddr: device.addr,
+        devicePort: device.port,
+        streamUrl: currentTrack.streamUrl,
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        coverUrl: currentTrack.coverArtUrl ?? '',
+      });
+      castPlaying = true;
+      toast.success(`Casting to ${device.name}`, { id: toastId });
+    } catch (e) {
+      castActive = false;
+      castDevice = null;
+      toast.error(`Cast failed: ${e}`, { id: toastId });
+    }
+  }
+
+  async function stopCast() {
+    const name = castDevice?.name ?? 'device';
+    castActive = false;
+    castPlaying = false;
+    castDevice = null;
+    try { await castStopCmd(); } catch {}
+    toast.success(`Stopped casting to ${name}`);
+  }
+
+  // Poll the Chromecast every second while casting to keep the seek bar in sync
+  $effect(() => {
+    if (!castActive) return;
+    const id = setInterval(async () => {
+      if (!castActive || seekDragging) return;
+      try {
+        const status = await castGetStatusCmd();
+        if (status.playerState === 'PLAYING' || status.playerState === 'PAUSED') {
+          currentTime.set(status.currentTime);
+          castPlaying = status.playerState === 'PLAYING';
+        }
+      } catch {
+        // ignore transient errors — next tick will retry
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  });
 
   onMount(() => {
     function handleTogglePlay() { togglePlay(); }
@@ -65,6 +143,7 @@
 
   const lastFmApiKey = $derived($appSettings.lastFmApiKey);
   const lastFmConnected = $derived($appSettings.lastFmConnected);
+  const lbzToken = $derived($appSettings.listenBrainzToken);
   const shuffleBtnClass = $derived($smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground');
 
   // ── Scrobbling ─────────────────────────────────────────────────────────────
@@ -76,23 +155,26 @@
 
   $effect(() => {
     const track = currentTrack;
-    if (!track || !lastFmConnected) return;
+    if (!track) return;
     // New track started
     scrobbledTrackId = '';
     scrobbleStartTime = Math.floor(Date.now() / 1000);
-    lfmNowPlaying(track.artist, track.title, track.album || undefined, track.duration || undefined);
+    addRecentlyPlayedSong(track);
+    if (lastFmConnected) lfmNowPlaying(track.artist, track.title, track.album || undefined, track.duration || undefined);
+    if (lbzToken) lbzNowPlaying(lbzToken, track.artist, track.title, track.album || undefined, track.duration || undefined);
   });
 
   $effect(() => {
     const t = $currentTime;
     const dur = $duration;
     const track = currentTrack;
-    if (!track || !lastFmConnected || scrobbledTrackId === track.id) return;
+    if (!track || scrobbledTrackId === track.id) return;
     // Scrobble threshold: 50% or 240 seconds, whichever is less
     const threshold = dur > 0 ? Math.min(dur * 0.5, 240) : 240;
     if (t >= threshold) {
       scrobbledTrackId = track.id;
-      lfmScrobble(track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);
+      if (lastFmConnected) lfmScrobble(track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);
+      if (lbzToken) lbzScrobble(lbzToken, track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);
     }
   });
 
@@ -155,14 +237,41 @@
     if (audioEl) audioEl.volume = $volume;
   });
 
-  // Effect 3: trigger autoplay
+  // Effect 3: trigger autoplay (routes through Cast when active)
   $effect(() => {
     if (!audioEl || !$shouldAutoplay) return;
     shouldAutoplay.set(false);
+
+    if (castActive && castDevice) {
+      const track = currentTrack;
+      if (track) {
+        castPlaying = true;
+        castPlayCmd({
+          deviceName: castDevice.name,
+          deviceAddr: castDevice.addr,
+          devicePort: castDevice.port,
+          streamUrl: track.streamUrl,
+          title: track.title,
+          artist: track.artist,
+          coverUrl: track.coverArtUrl ?? '',
+        }).catch((e) => {
+          toast.error(`Cast update failed: ${e}`);
+          castPlaying = false;
+        });
+      }
+      return;
+    }
+
     audioEl
       .play()
       .then(() => isPlaying.set(true))
       .catch(() => isPlaying.set(false));
+  });
+
+  // Effect 4: external toggle-play requests
+  $effect(() => {
+    if ($togglePlayRequest === 0) return;
+    untrack(() => togglePlay());
   });
   function activateShuffle() {
     smartShuffleMode.set(false);
@@ -348,6 +457,16 @@
   }
 
   function togglePlay() {
+    if (castActive) {
+      if (castPlaying) {
+        castPlaying = false;
+        castPauseCmd().catch((e) => { castPlaying = true; toast.error(`Cast pause failed: ${e}`); });
+      } else {
+        castPlaying = true;
+        castResumeCmd().catch((e) => { castPlaying = false; toast.error(`Cast resume failed: ${e}`); });
+      }
+      return;
+    }
     if (!audioEl || !currentTrack) return;
     if ($isPlaying) {
       audioEl.pause();
@@ -366,28 +485,31 @@
 
   function onVolumeWheel(e: WheelEvent) {
     e.preventDefault();
-    // deltaY < 0 = scroll up = louder; deltaY > 0 = scroll down = quieter
     const delta = e.deltaY < 0 ? 0.05 : -0.05;
     const next = Math.max(0, Math.min(1, $volume + delta));
     volume.set(next);
     if (audioEl) audioEl.volume = next;
+    if (castActive) castSetVolumeCmd(next).catch(() => {});
     debounceSaveVolume(next);
   }
 
   function seek(values: number[]) {
     const value = Math.max(0, Number(values[0] ?? 0));
-    // Update store + local val BEFORE releasing the drag lock so the sync
-    // $effect sees the correct value and doesn't snap back to the old position.
     currentTime.set(value);
     seekVal = [value];
     seekDragging = false;
-    if (audioEl) audioEl.currentTime = value;
+    if (castActive) {
+      castSeekCmd(value).catch((e) => toast.error(`Cast seek failed: ${e}`));
+    } else if (audioEl) {
+      audioEl.currentTime = value;
+    }
   }
 
   function changeVolume(values: number[]) {
     const value = Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100));
     volume.set(value);
     if (audioEl) audioEl.volume = value;
+    if (castActive) castSetVolumeCmd(value).catch(() => {});
   }
 
   function commitVolume(values: number[]) {
@@ -402,11 +524,13 @@
       const restore = premuteVolume > 0.01 ? premuteVolume : 0.8;
       volume.set(restore);
       if (audioEl) audioEl.volume = restore;
+      if (castActive) castSetVolumeCmd(restore).catch(() => {});
       saveVolume(restore);
     } else {
       premuteVolume = $volume;
       volume.set(0);
       if (audioEl) audioEl.volume = 0;
+      if (castActive) castSetVolumeCmd(0).catch(() => {});
     }
   }
 
@@ -568,7 +692,7 @@
           disabled={!currentTrack}
           aria-label={$isPlaying ? 'Pause' : 'Play'}
         >
-          {#if $isPlaying}
+          {#if castActive ? castPlaying : $isPlaying}
             <Pause class="size-5" />
           {:else}
             <Play class="size-5" />
@@ -625,6 +749,53 @@
 
     <!-- Volume -->
     <div class="flex items-center justify-end gap-2">
+      <!-- Cast -->
+      <DropdownMenu onOpenChange={(open) => { if (open && !castActive && !discovering) discoverDevices(); }}>
+        <DropdownMenuTrigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              variant="ghost"
+              size="icon-sm"
+              class={castActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+              aria-label="Cast"
+            >
+              <Cast class="size-[18px] {castActive ? 'animate-[cast-pulse_2s_ease-in-out_infinite]' : ''}" />
+            </Button>
+          {/snippet}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="end" class="min-w-48">
+          {#if castActive && castDevice}
+            <div class="px-2 py-1.5">
+              <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Casting to</p>
+              <p class="text-sm font-semibold">{castDevice.name}</p>
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onclick={stopCast} class="text-destructive focus:text-destructive">
+              Stop casting
+            </DropdownMenuItem>
+          {:else if discovering}
+            <div class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+              <span class="block size-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+              Discovering devices…
+            </div>
+          {:else if castDevices.length === 0}
+            <div class="px-3 py-2 text-sm text-muted-foreground">No Cast devices found</div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onclick={discoverDevices}>Scan again</DropdownMenuItem>
+          {:else}
+            <div class="px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground">Cast to device</div>
+            {#each castDevices as device (device.addr)}
+              <DropdownMenuItem onclick={() => startCast(device)} disabled={!currentTrack} class="gap-2">
+                <Cast class="size-4 shrink-0" />
+                {device.name}
+              </DropdownMenuItem>
+            {/each}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onclick={discoverDevices}>Scan again</DropdownMenuItem>
+          {/if}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button
         variant="ghost"
         size="icon-sm"
