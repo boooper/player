@@ -12,7 +12,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: calculate next tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+
+          if [[ -n "$latest_tag" ]]; then
+            base="${latest_tag#v}"
+          else
+            base="$(python3 -c "import json; print(json.load(open('apps/desktop/package.json'))['version'])")"
+          fi
+
+          IFS='.' read -r major minor patch <<< "$base"
+          version="${major}.${minor}.$((patch + 1))"
+          tag="v${version}"
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
   build-tauri:
+    needs: prepare-release
     permissions:
       contents: read
     strategy:
@@ -61,6 +96,50 @@ jobs:
       - name: install frontend dependencies
         run: bun install
 
+      - name: stamp release version
+        env:
+          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+
+          package_json = Path("apps/desktop/package.json")
+          data = json.loads(package_json.read_text())
+          data["version"] = version
+          package_json.write_text(json.dumps(data, indent=2) + "\n")
+
+          tauri_conf = Path("apps/desktop/src-tauri/tauri.conf.json")
+          data = json.loads(tauri_conf.read_text())
+          data["version"] = version
+          tauri_conf.write_text(json.dumps(data, indent=2) + "\n")
+          PY
+
+      - name: stamp cargo version
+        env:
+          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          cargo_toml = Path("apps/desktop/src-tauri/Cargo.toml")
+          text = cargo_toml.read_text()
+          text, count = re.subn(r'^version = ".*?"$', f'version = "{version}"', text, count=1, flags=re.MULTILINE)
+          if count != 1:
+            raise SystemExit("Failed to update Cargo.toml version")
+          cargo_toml.write_text(text)
+          PY
+
       - name: build
         run: bun run --cwd apps/desktop tauri build --config src-tauri/tauri.build.conf.json ${{ matrix.args }}
 
@@ -69,13 +148,27 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            apps/desktop/src-tauri/target/release/bundle/**/*
-            apps/desktop/src-tauri/target/*/release/bundle/**/*
+            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/release/bundle/**/*.app.tar.gz
+            apps/desktop/src-tauri/target/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.AppImage
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.app.tar.gz
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.rpm
           if-no-files-found: error
           retention-days: 7
 
   draft-release:
-    needs: build-tauri
+    needs:
+      - prepare-release
+      - build-tauri
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -92,29 +185,9 @@ jobs:
           pattern: bundle-*
           merge-multiple: false
 
-      - name: calculate next tag
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
-
-          if [[ -n "$latest_tag" ]]; then
-            base="${latest_tag#v}"
-          else
-            base="$(python3 -c "import json; print(json.load(open('apps/desktop/package.json'))['version'])")"
-          fi
-
-          IFS='.' read -r major minor patch <<< "$base"
-          next_tag="v${major}.${minor}.$((patch + 1))"
-
-          echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
-          echo "next_tag=${next_tag}" >> "$GITHUB_OUTPUT"
-
       - name: create and push tag
         env:
-          TAG_NAME: ${{ steps.version.outputs.next_tag }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -136,9 +209,16 @@ jobs:
       - name: publish draft release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.next_tag }}
+          tag_name: ${{ needs.prepare-release.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.version.outputs.next_tag }}
+          name: ${{ needs.prepare-release.outputs.tag }}
           draft: true
           generate_release_notes: true
-          files: dist/**/*
+          files: |
+            dist/**/*.AppImage
+            dist/**/*.app.tar.gz
+            dist/**/*.deb
+            dist/**/*.dmg
+            dist/**/*.exe
+            dist/**/*.msi
+            dist/**/*.rpm
