@@ -114,18 +114,27 @@
     try { await castStopCmd(); } catch {}
     toast.success(`Stopped casting to ${name}`);
   }
-
   // Poll the Chromecast every second while casting to keep the seek bar in sync
+  let _lastPlayerState: string | null = null;
   $effect(() => {
     if (!castActive) return;
     const id = setInterval(async () => {
       if (!castActive || seekDragging) return;
       try {
         const status = await castGetStatusCmd();
+        // Update UI time + playing flag when available
         if (status.playerState === 'PLAYING' || status.playerState === 'PAUSED') {
           currentTime.set(status.currentTime);
           castPlaying = status.playerState === 'PLAYING';
         }
+
+        // If device transitioned to IDLE, advance the queue
+        if (_lastPlayerState !== 'IDLE' && status.playerState === 'IDLE') {
+          // Use store action to advance; this will set shouldAutoplay and
+          // Effect 3 will route playback through Cast when active.
+          nextTrack();
+        }
+        _lastPlayerState = status.playerState;
       } catch {
         // ignore transient errors — next tick will retry
       }
