@@ -292,7 +292,7 @@
     if (isStarred) {
       starredSongIds.update((ids) => { const s = new Set(ids); s.delete(id); return s; });
       try {
-        await unstarSong(id, currentTrack.artist, currentTrack.title);
+        await unstarSong(id, currentTrack.artist, currentTrack.title, currentTrack.album);
       } catch {
         starredSongIds.update((ids) => new Set([...ids, id]));
         toast.error('Failed to remove from favorites');
@@ -300,7 +300,7 @@
     } else {
       starredSongIds.update((ids) => new Set([...ids, id]));
       try {
-        await starSong(id, currentTrack.artist, currentTrack.title);
+        await starSong(id, currentTrack.artist, currentTrack.title, currentTrack.album);
       } catch {
         starredSongIds.update((ids) => { const s = new Set(ids); s.delete(id); return s; });
         toast.error('Failed to add to favorites');

@@ -53,7 +53,7 @@
     if (isStarred) {
       starredSongIds.update((ids) => { const s = new Set(ids); s.delete(song.id); return s; });
       try {
-        await unstarSong(song.id, song.artist, song.title);
+        await unstarSong(song.id, song.artist, song.title, song.album);
         toast.success('Removed from favorites', { description: song.title });
       } catch {
         starredSongIds.update((ids) => new Set([...ids, song.id]));
@@ -62,7 +62,7 @@
     } else {
       starredSongIds.update((ids) => new Set([...ids, song.id]));
       try {
-        await starSong(song.id, song.artist, song.title);
+        await starSong(song.id, song.artist, song.title, song.album);
         toast.success('Added to favorites', { description: song.title });
       } catch {
         starredSongIds.update((ids) => { const s = new Set(ids); s.delete(song.id); return s; });
@@ -73,7 +73,7 @@
 
   async function addToPlaylist(playlistId: string, playlistName: string) {
     try {
-      await addSongToPlaylist(playlistId, song.id);
+      await addSongToPlaylist(playlistId, song);
       // Optimistically update the sidebar playlist song count
       subsonicPlaylists.update(lists =>
         lists.map(pl => pl.id === playlistId ? { ...pl, songCount: pl.songCount + 1 } : pl)

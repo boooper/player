@@ -221,6 +221,33 @@ pub(crate) async fn resolve_playback_song(
     ))
 }
 
+async fn resolve_library_song_id(
+    state: &State<'_, AppState>,
+    id: &str,
+    artist: Option<&str>,
+    title: Option<&str>,
+    album: Option<&str>,
+) -> Result<String, String> {
+    if !id.starts_with("ext-") {
+        return Ok(id.to_string());
+    }
+
+    let lookup_song = Song {
+        id: id.to_string(),
+        title: title.unwrap_or_default().to_string(),
+        artist: artist.unwrap_or_default().to_string(),
+        album: album.unwrap_or_default().to_string(),
+        album_id: String::new(),
+        cover_art: String::new(),
+        cover_art_url: String::new(),
+        stream_url: String::new(),
+        duration: 0.0,
+    };
+
+    let resolved = resolve_playback_song(state, &lookup_song).await?;
+    Ok(resolved.id)
+}
+
 fn map_album(v: &serde_json::Value, p: &ActiveProfile, art_size: u32) -> Album {
     let id = s(v.get("id"));
     let cover = { let c = s(v.get("coverArt")); if c.is_empty() { id.clone() } else { c } };
@@ -417,10 +444,12 @@ pub async fn library_star(
     unstar: Option<bool>,
     artist: Option<String>,
     title: Option<String>,
+    album: Option<String>,
 ) -> Result<(), String> {
     let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let resolved_id = resolve_library_song_id(&state, &id, artist.as_deref(), title.as_deref(), album.as_deref()).await?;
     if is_jf(&p) {
-        crate::commands::jellyfin::star(&state.http, &p, &id, unstar.unwrap_or(false)).await?;
+        crate::commands::jellyfin::star(&state.http, &p, &resolved_id, unstar.unwrap_or(false)).await?;
         // Mirror to Last.fm regardless of server type
         if let (Some(a), Some(t)) = (artist.as_deref(), title.as_deref()) {
             if !a.is_empty() && !t.is_empty() {
@@ -442,9 +471,9 @@ pub async fn library_star(
         }
         return Ok(());
     }
-    if id.is_empty() { return Err("Song id is required.".to_string()); }
+    if resolved_id.is_empty() { return Err("Song id is required.".to_string()); }
     let method = if unstar.unwrap_or(false) { "unstar" } else { "star" };
-    request(&state.http, &p, method, &[("id", &id)]).await?;
+    request(&state.http, &p, method, &[("id", &resolved_id)]).await?;
 
     // Mirror to Last.fm track.love / track.unlove
     if let (Some(a), Some(t)) = (artist.as_deref(), title.as_deref()) {
@@ -478,14 +507,18 @@ pub async fn library_add_to_playlist(
     state: State<'_, AppState>,
     playlist_id: String,
     song_id: String,
+    artist: Option<String>,
+    title: Option<String>,
+    album: Option<String>,
 ) -> Result<(), String> {
     let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
-    if is_jf(&p) { return crate::commands::jellyfin::add_to_playlist(&state.http, &p, &playlist_id, &song_id).await; }
-    if playlist_id.is_empty() || song_id.is_empty() {
+    let resolved_id = resolve_library_song_id(&state, &song_id, artist.as_deref(), title.as_deref(), album.as_deref()).await?;
+    if is_jf(&p) { return crate::commands::jellyfin::add_to_playlist(&state.http, &p, &playlist_id, &resolved_id).await; }
+    if playlist_id.is_empty() || resolved_id.is_empty() {
         return Err("playlistId and songId are required.".to_string());
     }
     request(&state.http, &p, "updatePlaylist", &[
-        ("playlistId", &playlist_id), ("songIdToAdd", &song_id),
+        ("playlistId", &playlist_id), ("songIdToAdd", &resolved_id),
     ]).await?;
     Ok(())
 }

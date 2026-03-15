@@ -295,16 +295,22 @@ export async function fetchStarredSongs(): Promise<Song[]> {
   return invoke<Song[]>('library_starred');
 }
 
-export async function starSong(id: string, artist?: string, title?: string): Promise<void> {
-  await invoke('library_star', { id, unstar: false, artist: artist ?? null, title: title ?? null });
+export async function starSong(id: string, artist?: string, title?: string, album?: string): Promise<void> {
+  await invoke('library_star', { id, unstar: false, artist: artist ?? null, title: title ?? null, album: album ?? null });
 }
 
-export async function unstarSong(id: string, artist?: string, title?: string): Promise<void> {
-  await invoke('library_star', { id, unstar: true, artist: artist ?? null, title: title ?? null });
+export async function unstarSong(id: string, artist?: string, title?: string, album?: string): Promise<void> {
+  await invoke('library_star', { id, unstar: true, artist: artist ?? null, title: title ?? null, album: album ?? null });
 }
 
-export async function addSongToPlaylist(playlistId: string, songId: string): Promise<void> {
-  await invoke('library_add_to_playlist', { playlistId, songId });
+export async function addSongToPlaylist(playlistId: string, song: Song): Promise<void> {
+  await invoke('library_add_to_playlist', {
+    playlistId,
+    songId: song.id,
+    artist: song.artist,
+    title: song.title,
+    album: song.album
+  });
 }
 
 export async function createPlaylist(name: string, songIds: string[]): Promise<Playlist> {
