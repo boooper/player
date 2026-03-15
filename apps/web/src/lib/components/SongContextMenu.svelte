@@ -18,6 +18,7 @@
     type Song
   } from '$lib/api';
   import { appSettings } from '$lib/stores/settings';
+  import { primarySongArtist } from '$lib/song-artists';
 
   let { song, onplay, children, triggerClass }: {
     song: Song;
@@ -96,7 +97,7 @@
     <ContextMenu.Item onclick={() => playNextInQueue(song)}><ListStart />Play next</ContextMenu.Item>
     <ContextMenu.Item onclick={() => appendToQueue([song])}><ListEnd />Add to queue</ContextMenu.Item>
     <ContextMenu.Separator />
-    <ContextMenu.Item onclick={() => goto(`/artist/${encodeURIComponent(song.artist)}`)}><User />Go to artist</ContextMenu.Item>
+    <ContextMenu.Item onclick={() => goto(`/artist/${encodeURIComponent(primarySongArtist(song.artist))}`)}><User />Go to artist</ContextMenu.Item>
     {#if song.albumId}
       <ContextMenu.Item onclick={() => goto(`/album/${encodeURIComponent(song.albumId)}`)}><Disc3 />Go to album</ContextMenu.Item>
     {/if}

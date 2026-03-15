@@ -60,6 +60,8 @@
   import { EQ_FREQUENCIES, normalizeEqBands } from '$lib/audio/equalizer';
   import { lbzNowPlaying, lbzScrobble } from '$lib/listenbrainz';
   import { toast } from 'svelte-sonner';
+  import { formatSongArtists, primarySongArtist } from '$lib/song-artists';
+  import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import { Button, Slider } from '$lib/components/ui';
   import { appSettings } from '$lib/stores/settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -712,7 +714,7 @@
 
   async function shuffleArtist() {
     if (!currentTrack) return;
-    const artist = currentTrack.artist;
+    const artist = primarySongArtist(currentTrack.artist);
     const toastId = toast.loading(`Loading ${artist}…`);
     try {
       const albums = await fetchArtistAlbums(artist, 50);
@@ -1111,11 +1113,11 @@
               <Heart class="size-3.5 {isStarred ? 'fill-rose-500' : ''}" />
             </button>
           </div>
-          <button
-            class="block truncate text-xs text-muted-foreground hover:underline cursor-pointer max-w-full text-left"
-            onclick={() => goto(`/artist/${encodeURIComponent(currentTrack.artist)}`)}
-            title="Go to artist"
-          >{currentTrack.artist}</button>
+            <SongArtistLinks
+              artist={currentTrack.artist}
+              class="block truncate text-xs text-muted-foreground max-w-full text-left"
+              linkClass="hover:underline cursor-pointer"
+            />
         </div>
       {:else}
         <p class="text-sm text-muted-foreground">No track selected</p>
@@ -1172,7 +1174,7 @@
                 <Mic2 class="size-4 shrink-0" />
                 <div>
                   <p class="font-medium">Shuffle Artist</p>
-                  <p class="truncate max-w-36 text-xs text-muted-foreground">{currentTrack.artist}</p>
+                  <p class="truncate max-w-36 text-xs text-muted-foreground">{formatSongArtists(currentTrack.artist)}</p>
                 </div>
               </DropdownMenuItem>
               <DropdownMenuItem onclick={shuffleAlbum} disabled={!currentTrack.albumId} class="gap-3">

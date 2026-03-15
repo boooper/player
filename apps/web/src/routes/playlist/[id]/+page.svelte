@@ -5,6 +5,7 @@
   import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import { Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -200,13 +201,11 @@
               {/if}
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground">{song.title}</p>
-                <span
-                  role="link"
-                  tabindex="0"
-                  class="truncate text-xs text-muted-foreground hover:underline hover:text-foreground transition-colors duration-150 cursor-pointer"
-                  onclick={(e) => { e.stopPropagation(); goto(`/artist/${encodeURIComponent(song.artist)}`); }}
-                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/artist/${encodeURIComponent(song.artist)}`); } }}
-                >{song.artist}</span>
+                <SongArtistLinks
+                  artist={song.artist}
+                  class="truncate text-xs text-muted-foreground"
+                  linkClass="hover:underline hover:text-foreground transition-colors duration-150"
+                />
               </div>
             </div>
 

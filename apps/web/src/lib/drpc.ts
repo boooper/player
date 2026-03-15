@@ -8,14 +8,24 @@ const APPLICATION_ID = '1189808615012450304'; // replace with your Discord app I
 const currentSong = derived([queue, currentIndex], ([$queue, $idx]) => $queue[$idx] ?? null);
 
 let started = false;
+let startPromise: Promise<void> | null = null;
 
 async function drpcStart() {
-  const { start } = await import('tauri-plugin-drpc');
-  await start(APPLICATION_ID);
-  started = true;
+  if (started) return;
+  if (!startPromise) {
+    startPromise = (async () => {
+      const { start } = await import('tauri-plugin-drpc');
+      await start(APPLICATION_ID);
+      started = true;
+    })().finally(() => {
+      startPromise = null;
+    });
+  }
+
+  await startPromise;
 }
 
-async function syncActivity(song: Song | null) {
+async function syncActivity(song: Song | null, playing: boolean, startedAt: number | null) {
   if (!song) {
     const { clearActivity } = await import('tauri-plugin-drpc');
     await clearActivity();
@@ -29,11 +39,20 @@ async function syncActivity(song: Song | null) {
     .setLargeImage(song.coverArtUrl)
     .setLargeText(song.album || song.title);
 
+  if (typeof assets.setSmallImage === 'function' && typeof assets.setSmallText === 'function') {
+    assets
+      .setSmallImage(playing ? 'playing' : 'paused')
+      .setSmallText(playing ? 'Playing' : 'Paused');
+  }
+
   const activity = new Activity()
     .setDetails(song.title)
     .setState(`by ${song.artist}${song.album ? ` — ${song.album}` : ''}`)
-    .setAssets(assets)
-    .setTimestamps(new Timestamps(Date.now()));
+    .setAssets(assets);
+
+  if (playing && startedAt !== null) {
+    activity.setTimestamps(new Timestamps(startedAt));
+  }
 
   await setActivity(activity);
 }
@@ -45,29 +64,58 @@ async function syncActivity(song: Song | null) {
 export function initDrpc(): () => void {
   if (!isTauri()) return () => {};
 
-  drpcStart().catch(console.error);
-
   let latestSong: Song | null = null;
+  let latestPlaying = false;
+  let latestStartedAt: number | null = null;
+  let syncing = false;
+  let pending = false;
 
-  function sync() {
-    if (!started) return;
-    syncActivity(latestSong).catch(console.error);
+  async function sync() {
+    pending = true;
+    if (syncing) return;
+
+    syncing = true;
+    while (pending) {
+      pending = false;
+      try {
+        await drpcStart();
+        await syncActivity(latestSong, latestPlaying, latestStartedAt);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+    syncing = false;
   }
 
   const unsubSong = currentSong.subscribe((v) => {
+    const previousId = latestSong?.id ?? null;
     latestSong = v;
+    if (v?.id !== previousId) {
+      latestStartedAt = latestPlaying && v ? Date.now() : null;
+    }
     sync();
   });
 
-  const unsubPlaying = isPlaying.subscribe(() => {
+  const unsubPlaying = isPlaying.subscribe((value) => {
+    const wasPlaying = latestPlaying;
+    latestPlaying = value;
+    if (latestSong) {
+      if (value && !wasPlaying) {
+        latestStartedAt = Date.now();
+      } else if (!value) {
+        latestStartedAt = null;
+      }
+    }
     sync();
   });
 
   return () => {
     unsubPlaying();
     unsubSong();
-    if (started) {
+    if (started || startPromise) {
       import('tauri-plugin-drpc').then(({ stop }) => stop()).catch(() => {});
     }
+    started = false;
+    startPromise = null;
   };
 }

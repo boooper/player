@@ -6,6 +6,7 @@
   import { searchSongs, type Song } from '$lib/api';
   import { focusTrack, playQueue, playingFrom, recentlyPlayedSongs, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
 
   // All songs loaded from the library on mount.
   let allSongs = $state<Song[]>([]);
@@ -125,13 +126,11 @@
                 {/if}
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground">{song.title}</p>
-                  <span
-                    role="link"
-                    tabindex="0"
-                    class="truncate text-xs text-muted-foreground hover:underline hover:text-foreground transition-colors duration-150 cursor-pointer"
-                    onclick={(e) => { e.stopPropagation(); goto(`/artist/${encodeURIComponent(song.artist)}`); }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/artist/${encodeURIComponent(song.artist)}`); } }}
-                  >{song.artist}</span>
+                  <SongArtistLinks
+                    artist={song.artist}
+                    class="truncate text-xs text-muted-foreground"
+                    linkClass="hover:underline hover:text-foreground transition-colors duration-150"
+                  />
                 </div>
               </div>
               <span class="hidden truncate text-sm text-muted-foreground md:block">{song.album}</span>
@@ -223,13 +222,11 @@
                 {/if}
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
-                  <span
-                    role="link"
-                    tabindex="0"
-                    class="truncate text-xs text-muted-foreground hover:underline hover:text-foreground transition-colors duration-150 cursor-pointer"
-                    onclick={(e) => { e.stopPropagation(); goto(`/artist/${encodeURIComponent(song.artist)}`); }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/artist/${encodeURIComponent(song.artist)}`); } }}
-                  >{song.artist}</span>
+                  <SongArtistLinks
+                    artist={song.artist}
+                    class="truncate text-xs text-muted-foreground"
+                    linkClass="hover:underline hover:text-foreground transition-colors duration-150"
+                  />
                 </div>
               </div>
 

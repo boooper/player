@@ -217,7 +217,7 @@
       <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/60 to-background"></div>
     </div>
   {:else}
-    <div class="absolute inset-0 bg-gradient-to-b from-slate-700 via-slate-800/80 to-background"></div>
+    <div class="absolute inset-0 bg-gradient-to-b from-primary/35 via-primary/15 to-background"></div>
   {/if}
 
   <div class="relative px-6 pb-6 pt-10">

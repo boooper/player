@@ -21,6 +21,8 @@
     type Song,
   } from '$lib/api';
   import { getArtistInfo, type ArtistInfo } from '$lib/metadata';
+  import { primarySongArtist } from '$lib/song-artists';
+  import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
 
   let { open }: { open: boolean } = $props();
 
@@ -63,11 +65,11 @@
     }
 
     if ($focusTrack?.artist && $focusTrack.artist !== _panelArtist) {
-      _panelArtist = $focusTrack.artist;
+      _panelArtist = primarySongArtist($focusTrack.artist);
       panelArtistInfo = null;
       panelArtistLoading = true;
       aboutDialogOpen = false;
-      getArtistInfo($focusTrack.artist)
+      getArtistInfo(primarySongArtist($focusTrack.artist))
         .then((info) => { panelArtistInfo = info; })
         .catch(() => {})
         .finally(() => { panelArtistLoading = false; });
@@ -142,10 +144,11 @@
         </div>
         <div class="space-y-0.5">
           <p class="text-base font-semibold leading-snug">{$focusTrack.title}</p>
-          <a
-            href={`/artist/${encodeURIComponent($focusTrack.artist)}`}
-            class="text-sm text-muted-foreground hover:text-foreground hover:underline transition-colors"
-          >{$focusTrack.artist}</a>
+          <SongArtistLinks
+            artist={$focusTrack.artist}
+            class="text-sm text-muted-foreground"
+            linkClass="hover:text-foreground hover:underline transition-colors"
+          />
         </div>
       </div>
     {:else}
@@ -183,7 +186,7 @@
                 onclick={() => {
                   playQueue([song], 0);
                   focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-                  playingFrom.set({ type: 'artist', name: song.artist, href: `/artist/${encodeURIComponent(song.artist)}` });
+                  playingFrom.set({ type: 'artist', name: primarySongArtist(song.artist), href: `/artist/${encodeURIComponent(primarySongArtist(song.artist))}` });
                   shouldAutoplay.set(true);
                 }}
               >
@@ -194,7 +197,11 @@
                 {/if}
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-sm font-medium">{song.title}</span>
-                  <span class="block truncate text-xs text-muted-foreground">{song.artist}</span>
+                  <SongArtistLinks
+                    artist={song.artist}
+                    class="block truncate text-xs text-muted-foreground"
+                    linkClass="hover:text-foreground hover:underline transition-colors"
+                  />
                 </span>
               </button>
             {/each}
@@ -296,7 +303,7 @@
             </div>
             <div class="border-t border-border/60 px-6 py-4">
               <a
-                href={`/artist/${encodeURIComponent($focusTrack.artist)}`}
+                href={`/artist/${encodeURIComponent(primarySongArtist($focusTrack.artist))}`}
                 onclick={() => { aboutDialogOpen = false; }}
                 class="text-sm font-medium hover:underline"
               >Go to artist page →</a>
@@ -322,7 +329,11 @@
         <div class="space-y-3">
           <div>
             <p class="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-0.5">Performed by</p>
-            <a href={`/artist/${encodeURIComponent(currentSong.artist)}`} class="text-sm font-medium hover:underline">{currentSong.artist}</a>
+            <SongArtistLinks
+              artist={currentSong.artist}
+              class="text-sm font-medium"
+              linkClass="hover:underline"
+            />
           </div>
           {#if creditsExpanded}
             <div>
@@ -390,7 +401,11 @@
                 {/if}
                 <span class="min-w-0">
                   <span class="block truncate text-sm font-medium">{item.song.title}</span>
-                  <span class="block truncate text-xs text-muted-foreground">{item.song.artist}</span>
+                  <SongArtistLinks
+                    artist={item.song.artist}
+                    class="block truncate text-xs text-muted-foreground"
+                    linkClass="hover:text-foreground hover:underline transition-colors"
+                  />
                   {#if $smartShuffleTrackIds.has(item.song.id)}
                     <span class="mt-1 inline-flex rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                       From Smart Shuffle
