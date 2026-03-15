@@ -6,6 +6,7 @@ pub mod library;
 pub mod liked_artists;
 pub mod lyrics;
 pub mod media;
+pub mod playback;
 pub mod profiles;
 pub mod settings;
 pub mod stats;

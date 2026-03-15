@@ -11,6 +11,29 @@ export const duration = writable(0);
 export const volume = writable(0.8);
 export const shuffleEnabled = writable(false);
 export const repeatMode = writable<'off' | 'all' | 'one'>('off');
+export const smartShuffleTrackIds = writable<Set<string>>(new Set());
+
+function shuffleList<T>(items: T[]): T[] {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
+function shuffleUpcomingQueue(): void {
+  const items = get(queue);
+  const idx = get(currentIndex);
+  const upcoming = items.slice(idx + 1);
+  if (upcoming.length <= 1) return;
+  queue.set([...items.slice(0, idx + 1), ...shuffleList(upcoming)]);
+}
+
+function syncSmartShuffleTrackIds(items: Song[]): void {
+  const itemIds = new Set(items.map((song) => song.id));
+  smartShuffleTrackIds.update((ids) => new Set([...ids].filter((id) => itemIds.has(id))));
+}
 
 export const focusTrack = writable<{
   title: string;
@@ -34,6 +57,7 @@ export function playQueue(items: Song[], startIndex = 0): void {
   if (!items.length) return;
 
   queue.set(items);
+  smartShuffleTrackIds.set(new Set());
   currentIndex.set(Math.max(0, Math.min(startIndex, items.length - 1)));
   shouldAutoplay.set(true);
 }
@@ -43,19 +67,8 @@ export function nextTrack(): void {
   if (!items.length) return;
   const current = get(currentIndex);
   const repeat = get(repeatMode);
-  const shuffle = get(shuffleEnabled);
 
   if (repeat === 'one') {
-    shouldAutoplay.set(true);
-    return;
-  }
-
-  if (shuffle && items.length > 1) {
-    let next = current;
-    while (next === current) {
-      next = Math.floor(Math.random() * items.length);
-    }
-    currentIndex.set(next);
     shouldAutoplay.set(true);
     return;
   }
@@ -79,25 +92,40 @@ export function nextTrack(): void {
 export function prevTrack(): void {
   const items = get(queue);
   if (!items.length) return;
-  const current = get(currentIndex);
-  const shuffle = get(shuffleEnabled);
-
-  if (shuffle && items.length > 1) {
-    let prev = current;
-    while (prev === current) {
-      prev = Math.floor(Math.random() * items.length);
-    }
-    currentIndex.set(prev);
-    shouldAutoplay.set(true);
-    return;
-  }
 
   currentIndex.update((index) => (index - 1 + items.length) % items.length);
   shouldAutoplay.set(true);
 }
 
+export function enableShuffle(): void {
+  const alreadyEnabled = get(shuffleEnabled);
+  shuffleEnabled.set(true);
+  if (!alreadyEnabled) shuffleUpcomingQueue();
+}
+
+export function enableSmartShuffle(): void {
+  const alreadyEnabled = get(shuffleEnabled);
+  shuffleEnabled.set(true);
+  smartShuffleMode.set(true);
+  if (!alreadyEnabled) shuffleUpcomingQueue();
+}
+
+export function disableShuffle(): void {
+  shuffleEnabled.set(false);
+  smartShuffleMode.set(false);
+}
+
+export function markSmartShuffleTracks(items: Song[]): void {
+  if (!items.length) return;
+  smartShuffleTrackIds.update((ids) => new Set([...ids, ...items.map((song) => song.id)]));
+}
+
 export function toggleShuffle(): void {
-  shuffleEnabled.update((value) => !value);
+  if (get(shuffleEnabled)) {
+    disableShuffle();
+    return;
+  }
+  enableShuffle();
 }
 
 export function cycleRepeatMode(): void {
@@ -196,7 +224,11 @@ export function playNextInQueue(song: Song): void {
 
 export function appendToQueue(items: Song[]): void {
   if (!items.length) return;
-  queue.update((current) => [...current, ...items]);
+  queue.update((current) => {
+    const next = [...current, ...items];
+    syncSmartShuffleTrackIds(next);
+    return next;
+  });
 }
 
 /**
@@ -208,7 +240,11 @@ export function pruneQueueHistory(keepPrev = 1): void {
   const idx = get(currentIndex);
   const removeCount = Math.max(0, idx - keepPrev);
   if (removeCount === 0) return;
-  queue.update((items) => items.slice(removeCount));
+  queue.update((items) => {
+    const next = items.slice(removeCount);
+    syncSmartShuffleTrackIds(next);
+    return next;
+  });
   currentIndex.update((i) => i - removeCount);
 }
 
@@ -222,6 +258,7 @@ export async function startRadio(
   if (!tracks.length) return { queued: 0 };
   const all = [song, ...tracks];
   queue.set(all);
+  smartShuffleTrackIds.set(new Set());
   currentIndex.set(0);
   shouldAutoplay.set(true);
   return { queued: tracks.length };

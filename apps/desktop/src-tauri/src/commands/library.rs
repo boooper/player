@@ -74,6 +74,21 @@ pub(crate) async fn request(
     Ok(body.clone())
 }
 
+pub(crate) async fn request_binary(
+    http: &reqwest::Client,
+    p: &ActiveProfile,
+    path: &str,
+    params: &[(&str, &str)],
+) -> Result<(), String> {
+    let url = build_url(p, path, params);
+    let resp = http.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Subsonic: HTTP {}", resp.status()));
+    }
+    let _ = resp.bytes().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn cover_url(p: &ActiveProfile, id: &str, size: u32) -> String {
     if id.is_empty() { return String::new(); }
     build_url(p, "getCoverArt", &[("id", id), ("size", &size.to_string())])
@@ -81,7 +96,7 @@ fn cover_url(p: &ActiveProfile, id: &str, size: u32) -> String {
 
 fn stream_url(p: &ActiveProfile, id: &str) -> String {
     if id.is_empty() { return String::new(); }
-    build_url(p, "stream", &[("id", id), ("maxBitRate", "320")])
+    build_url(p, "download", &[("id", id)])
 }
 
 fn is_jf(p: &ActiveProfile) -> bool {
@@ -122,6 +137,88 @@ fn map_song(v: &serde_json::Value, p: &ActiveProfile) -> Song {
         cover_art: cover,
         duration: n(v.get("duration")),
     }
+}
+
+fn normalize_match(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn best_materialized_match(candidates: Vec<Song>, song: &Song) -> Option<Song> {
+    let title = normalize_match(&song.title);
+    let artist = normalize_match(&song.artist);
+
+    candidates
+        .iter()
+        .find(|candidate| {
+            !candidate.id.starts_with("ext-")
+                && normalize_match(&candidate.title) == title
+                && normalize_match(&candidate.artist) == artist
+        })
+        .cloned()
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| {
+                    !candidate.id.starts_with("ext-")
+                        && normalize_match(&candidate.title).contains(&title)
+                        && (artist.is_empty()
+                            || normalize_match(&candidate.artist) == artist
+                            || normalize_match(&candidate.artist).contains(&artist))
+                })
+                .cloned()
+        })
+}
+
+pub(crate) async fn resolve_playback_song(
+    state: &State<'_, AppState>,
+    song: &Song,
+) -> Result<Song, String> {
+    if !song.id.starts_with("ext-") {
+        return Ok(song.clone());
+    }
+
+    let p = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        get_active_profile(&db)?
+    };
+
+    if is_jf(&p) {
+        return Err("External playback materialization is only supported for Subsonic-compatible servers.".to_string());
+    }
+
+    request_binary(
+        &state.http,
+        &p,
+        "stream",
+        &[("id", song.id.as_str()), ("maxBitRate", "320")],
+    )
+    .await?;
+
+    let query = format!("{} {}", song.artist, song.title).trim().to_string();
+    for _ in 0..8 {
+        let body = request(
+            &state.http,
+            &p,
+            "search3",
+            &[("query", &query), ("songCount", "10"), ("artistCount", "0"), ("albumCount", "0")],
+        )
+        .await?;
+        let candidates: Vec<Song> = arr(body.get("searchResult3").and_then(|r| r.get("song")))
+            .iter()
+            .map(|value| map_song(value, &p))
+            .collect();
+
+        if let Some(resolved) = best_materialized_match(candidates, song) {
+            return Ok(resolved);
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+    }
+
+    Err(format!(
+        "Could not materialize \"{}\" by {} for playback",
+        song.title, song.artist
+    ))
 }
 
 fn map_album(v: &serde_json::Value, p: &ActiveProfile, art_size: u32) -> Album {
@@ -391,4 +488,84 @@ pub async fn library_add_to_playlist(
         ("playlistId", &playlist_id), ("songIdToAdd", &song_id),
     ]).await?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn library_create_playlist(
+    state: State<'_, AppState>,
+    name: String,
+    song_ids: Vec<String>,
+) -> Result<Playlist, String> {
+    let p = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        get_active_profile(&db)?
+    };
+
+    let trimmed_name = name.trim();
+    if trimmed_name.is_empty() {
+        return Err("Playlist name is required.".to_string());
+    }
+    if song_ids.is_empty() {
+        return Err("At least one song is required.".to_string());
+    }
+
+    if is_jf(&p) {
+        return crate::commands::jellyfin::create_playlist(
+            &state.http,
+            &p,
+            trimmed_name,
+            &song_ids,
+        )
+        .await;
+    }
+
+    let mut params: Vec<(&str, &str)> = vec![("name", trimmed_name)];
+    for song_id in &song_ids {
+        params.push(("songId", song_id.as_str()));
+    }
+    let body = request(&state.http, &p, "createPlaylist", &params).await?;
+    let playlist = body.get("playlist").cloned().unwrap_or(serde_json::Value::Null);
+    let id = s(playlist.get("id"));
+    let cover = {
+        let c = s(playlist.get("coverArt"));
+        if c.is_empty() { id.clone() } else { c }
+    };
+
+    Ok(Playlist {
+        cover_art_url: cover_url(&p, &cover, 240),
+        id,
+        name: {
+            let created_name = s(playlist.get("name"));
+            if created_name.is_empty() { trimmed_name.to_string() } else { created_name }
+        },
+        song_count: n(playlist.get("songCount")).max(song_ids.len() as f64),
+        duration: n(playlist.get("duration")),
+        cover_art: cover,
+    })
+}
+
+#[tauri::command]
+pub async fn library_materialize_song(
+    state: State<'_, AppState>,
+    song_id: String,
+) -> Result<(), String> {
+    let p = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        get_active_profile(&db)?
+    };
+
+    if is_jf(&p) {
+        return Err("Materializing external tracks is only supported for Subsonic-compatible servers.".to_string());
+    }
+    if song_id.trim().is_empty() {
+        return Err("Song id is required.".to_string());
+    }
+
+    request_binary(
+        &state.http,
+        &p,
+        "stream",
+        &[("id", song_id.as_str()), ("maxBitRate", "320")],
+    )
+    .await
 }

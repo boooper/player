@@ -81,6 +81,21 @@ async fn post_empty(http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Re
     Ok(())
 }
 
+async fn post_json(http: &reqwest::Client, p: &ActiveProfile, path: &str, body: &Value) -> Result<Value, String> {
+    let url = format!("{}{}", p.url.trim_end_matches('/'), path);
+    let resp = http
+        .post(&url)
+        .header("X-Emby-Authorization", auth_header(p))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.json::<Value>().await.map_err(|e| e.to_string())
+}
+
 async fn delete(http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
     let url = format!("{}{}", p.url.trim_end_matches('/'), path);
     http.delete(&url)
@@ -433,6 +448,38 @@ pub(crate) async fn add_to_playlist(
     song_id: &str,
 ) -> Result<(), String> {
     post_empty(http, p, &format!("/Playlists/{}/Items?Ids={}", playlist_id, song_id)).await
+}
+
+pub(crate) async fn create_playlist(
+    http: &reqwest::Client,
+    p: &ActiveProfile,
+    name: &str,
+    song_ids: &[String],
+) -> Result<Playlist, String> {
+    if name.trim().is_empty() {
+        return Err("Playlist name is required.".to_string());
+    }
+    if song_ids.is_empty() {
+        return Err("At least one song is required.".to_string());
+    }
+
+    let user_id = user_id(http, p).await?;
+    let body = serde_json::json!({
+        "Name": name,
+        "Ids": song_ids,
+        "UserId": user_id,
+        "MediaType": "Audio"
+    });
+    let created = post_json(http, p, "/Playlists", &body).await?;
+
+    Ok(Playlist {
+        cover_art_url: String::new(),
+        cover_art: String::new(),
+        id: js(&created, "Id"),
+        name: js(&created, "Name"),
+        song_count: song_ids.len() as f64,
+        duration: 0.0,
+    })
 }
 
 /// Returns true if the server responds successfully to a ping.

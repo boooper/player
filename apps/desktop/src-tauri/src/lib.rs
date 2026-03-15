@@ -1,5 +1,6 @@
 mod db;
 mod commands;
+mod playback_engine;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -20,6 +21,7 @@ pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub http: reqwest::Client,
     pub cast_session: Mutex<Option<CastSessionInfo>>,
+    pub playback: playback_engine::PlaybackHandle,
 }
 
 // AppState is Send + Sync because:
@@ -53,6 +55,8 @@ pub fn run() {
                 db: Mutex::new(conn),
                 http: reqwest::Client::new(),
                 cast_session: Mutex::new(None),
+                playback: playback_engine::PlaybackHandle::new()
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
             });
 
             if cfg!(debug_assertions) {
@@ -107,6 +111,8 @@ pub fn run() {
             commands::library::library_starred,
             commands::library::library_star,
             commands::library::library_add_to_playlist,
+            commands::library::library_create_playlist,
+            commands::library::library_materialize_song,
             // lyrics
             commands::lyrics::fetch_lyrics,
             // chromecast
@@ -119,6 +125,16 @@ pub fn run() {
             commands::cast::cast_set_volume,
             commands::cast::cast_seek,
             commands::cast::cast_get_status,
+            // desktop playback
+            commands::playback::playback_load,
+            commands::playback::playback_preload,
+            commands::playback::playback_play,
+            commands::playback::playback_pause,
+            commands::playback::playback_stop,
+            commands::playback::playback_seek,
+            commands::playback::playback_set_volume,
+            commands::playback::playback_set_eq,
+            commands::playback::playback_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

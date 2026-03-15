@@ -1,0 +1,186 @@
+import { getContext, setContext } from 'svelte';
+import { toast } from 'svelte-sonner';
+import { platform } from '@tauri-apps/plugin-os';
+import { appSettings, libraryRefresh } from '$lib/stores/settings';
+import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
+import {
+  fetchAppSettings,
+  fetchLastFmStatus,
+  fetchProfiles,
+  getAutostart,
+  updateAppSettings,
+  type ProfilePayload,
+} from '$lib/api';
+
+class SettingsController {
+  profiles = $state<ProfilePayload[]>([]);
+  lastFmApiKey = $state('');
+  lastFmSharedSecret = $state('');
+  lastFmSharedSecretConfigured = $state(false);
+  lfmConnected = $state(false);
+  lfmUsername = $state('');
+  listenBrainzUsername = $state('');
+  listenBrainzToken = $state('');
+  listenBrainzTokenConfigured = $state(false);
+  metadataProvider = $state('both');
+  recommendationProvider = $state('lastfm');
+  isMobile = $state(false);
+  autostartEnabled = $state(false);
+  crossfadeSeconds = $state(4);
+  eqEnabled = $state(false);
+  eqPreset = $state<EqPresetId>('flat');
+  eqBands = $state<EqBandValues>(DEFAULT_EQ_BANDS);
+  saving = $state(false);
+  statsRefreshKey = $state(0);
+
+  initialize = async () => {
+    let currentPlatform = 'unknown';
+    try {
+      currentPlatform = await platform();
+    } catch {
+      // Ignore platform checks outside Tauri.
+    }
+
+    this.isMobile = currentPlatform === 'android' || currentPlatform === 'ios';
+    await this.loadInitialSettings();
+
+    if (!this.isMobile) {
+      this.autostartEnabled = await getAutostart().catch(() => false);
+    }
+  };
+
+  loadInitialSettings = async () => {
+    const profilesPromise = fetchProfiles()
+      .then((profiles) => {
+        this.profiles = profiles;
+      })
+      .catch(() => {
+        toast.error('Failed to load servers');
+      });
+
+    const settingsPromise = (async () => {
+      try {
+        const [settings, lfmStatus] = await Promise.all([
+          fetchAppSettings(),
+          fetchLastFmStatus().catch(() => ({ connected: false, username: '' })),
+        ]);
+
+        this.lastFmApiKey = settings.lastFmApiKey;
+        this.lastFmSharedSecretConfigured = settings.lastFmSharedSecretConfigured;
+        this.recommendationProvider = settings.recommendationProvider;
+        this.metadataProvider = settings.metadataProvider;
+        this.listenBrainzUsername = settings.listenBrainzUsername;
+        this.listenBrainzTokenConfigured = settings.listenBrainzTokenConfigured;
+        this.crossfadeSeconds = settings.crossfadeSeconds;
+        this.eqEnabled = settings.eqEnabled;
+        this.eqPreset = settings.eqPreset;
+        this.eqBands = settings.eqBands;
+        this.lfmConnected = lfmStatus.connected;
+        this.lfmUsername = lfmStatus.username;
+
+        appSettings.set({
+          lastFmApiKey: this.lastFmApiKey,
+          recommendationProvider: this.recommendationProvider,
+          metadataProvider: this.metadataProvider,
+          lastFmConnected: this.lfmConnected,
+          lastFmUsername: this.lfmUsername,
+          listenBrainzUsername: this.listenBrainzUsername,
+          listenBrainzToken: '',
+          crossfadeSeconds: this.crossfadeSeconds,
+          eqEnabled: this.eqEnabled,
+          eqPreset: this.eqPreset,
+          eqBands: this.eqBands,
+        });
+      } catch {
+        toast.error('Failed to load settings');
+      }
+    })();
+
+    await Promise.all([profilesPromise, settingsPromise]);
+  };
+
+  save = async () => {
+    this.saving = true;
+
+    try {
+      await updateAppSettings({
+        lastFmApiKey: this.lastFmApiKey,
+        recommendationProvider: this.recommendationProvider,
+        metadataProvider: this.metadataProvider,
+        listenBrainzUsername: this.listenBrainzUsername,
+        crossfadeSeconds: this.crossfadeSeconds,
+        eqEnabled: this.eqEnabled,
+        eqPreset: this.eqPreset,
+        eqBands: this.eqBands,
+        listenBrainzToken: this.listenBrainzToken,
+        lastFmSharedSecret: this.lastFmSharedSecret,
+      });
+
+      appSettings.set({
+        lastFmApiKey: this.lastFmApiKey,
+        recommendationProvider: this.recommendationProvider,
+        metadataProvider: this.metadataProvider,
+        lastFmConnected: this.lfmConnected,
+        lastFmUsername: this.lfmUsername,
+        listenBrainzUsername: this.listenBrainzUsername,
+        listenBrainzToken: this.listenBrainzToken,
+        crossfadeSeconds: this.crossfadeSeconds,
+        eqEnabled: this.eqEnabled,
+        eqPreset: this.eqPreset,
+        eqBands: this.eqBands,
+      });
+
+      libraryRefresh.update((value) => value + 1);
+
+      if (this.lastFmSharedSecret.trim()) {
+        this.lastFmSharedSecretConfigured = true;
+        this.lastFmSharedSecret = '';
+      }
+
+      if (this.listenBrainzToken.trim()) {
+        this.listenBrainzTokenConfigured = true;
+        this.listenBrainzToken = '';
+      }
+
+      toast.success('Settings saved');
+      this.statsRefreshKey += 1;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err) || 'Failed to save settings');
+    } finally {
+      this.saving = false;
+    }
+  };
+
+  refreshStats = () => {
+    this.statsRefreshKey += 1;
+  };
+
+  handleCleared = () => {
+    this.profiles = [];
+    this.lastFmApiKey = '';
+    this.lastFmSharedSecret = '';
+    this.lastFmSharedSecretConfigured = false;
+    this.lfmConnected = false;
+    this.lfmUsername = '';
+    this.listenBrainzUsername = '';
+    this.listenBrainzToken = '';
+    this.listenBrainzTokenConfigured = false;
+    this.recommendationProvider = 'lastfm';
+    this.metadataProvider = 'both';
+    this.crossfadeSeconds = 4;
+    this.eqEnabled = false;
+    this.eqPreset = 'flat';
+    this.eqBands = DEFAULT_EQ_BANDS;
+    this.statsRefreshKey += 1;
+  };
+}
+
+const SETTINGS_CONTEXT_KEY = Symbol.for('player.settings');
+
+export function setSettingsContext() {
+  return setContext(SETTINGS_CONTEXT_KEY, new SettingsController());
+}
+
+export function useSettingsContext(): SettingsController {
+  return getContext(SETTINGS_CONTEXT_KEY);
+}

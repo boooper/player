@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart';
 import type { ServiceStatus } from '@player/shared';
+import { DEFAULT_EQ_BANDS, findEqPresetId, normalizeEqBands, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
 
 // ── Canonical media types (provider-agnostic) ─────────────────────────────────
 export type { Song, Album, Playlist, AlbumDetail, PlaylistDetail } from '@player/shared';
@@ -25,6 +26,10 @@ export type AppSettingsPayload = {
   listenBrainzUsername: string;
   listenBrainzTokenConfigured: boolean;
   volume: number;
+  crossfadeSeconds: number;
+  eqEnabled: boolean;
+  eqPreset: EqPresetId;
+  eqBands: EqBandValues;
   shuffleEnabled: boolean;
   smartShuffleMode: boolean;
   repeatMode: 'off' | 'all' | 'one';
@@ -61,12 +66,33 @@ export type LyricsResult = {
   instrumental: boolean;
 };
 
+export type DesktopPlaybackStatus = {
+  loaded: boolean;
+  playing: boolean;
+  position: number;
+  duration: number;
+  ended: boolean;
+  trackId: string | null;
+  eqEnabled: boolean;
+  eqBands: EqBandValues;
+  volume: number;
+};
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 export async function fetchAppSettings(): Promise<AppSettingsPayload> {
   const s = await invoke<Record<string, string>>('get_settings');
   const rawVol = parseFloat(s.VOLUME ?? '');
+  const rawCrossfade = parseFloat(s.CROSSFADE_SECONDS ?? '');
   const rawRepeat = s.REPEAT;
+  let rawEqBands: number[] = DEFAULT_EQ_BANDS;
+  try {
+    rawEqBands = JSON.parse(s.EQ_BANDS ?? JSON.stringify(DEFAULT_EQ_BANDS));
+  } catch {
+    rawEqBands = DEFAULT_EQ_BANDS;
+  }
+  const eqBands = normalizeEqBands(rawEqBands);
+  const eqPreset = (s.EQ_PRESET as EqPresetId | undefined) ?? findEqPresetId(eqBands);
   return {
     lastFmApiKey: s.LASTFM_API_KEY ?? '',
     lastFmSharedSecretConfigured: Boolean(s.LASTFM_SHARED_SECRET),
@@ -75,6 +101,10 @@ export async function fetchAppSettings(): Promise<AppSettingsPayload> {
     listenBrainzUsername: s.LISTENBRAINZ_USERNAME ?? '',
     listenBrainzTokenConfigured: Boolean(s.LISTENBRAINZ_TOKEN),
     volume: isNaN(rawVol) ? 0.8 : Math.max(0, Math.min(1, rawVol)),
+    crossfadeSeconds: isNaN(rawCrossfade) ? 4 : Math.max(0, Math.min(12, rawCrossfade)),
+    eqEnabled: s.EQ_ENABLED === 'true',
+    eqPreset,
+    eqBands,
     shuffleEnabled: s.SHUFFLE === 'true',
     smartShuffleMode: s.SMART_SHUFFLE === 'true',
     repeatMode: (rawRepeat === 'all' || rawRepeat === 'one') ? rawRepeat : 'off'
@@ -94,6 +124,10 @@ export async function updateAppSettings(data: {
   recommendationProvider: string;
   metadataProvider: string;
   listenBrainzUsername: string;
+  crossfadeSeconds: number;
+  eqEnabled: boolean;
+  eqPreset: EqPresetId;
+  eqBands: EqBandValues;
   listenBrainzToken?: string;
   lastFmSharedSecret?: string;
 }): Promise<void> {
@@ -101,7 +135,11 @@ export async function updateAppSettings(data: {
     LASTFM_API_KEY: data.lastFmApiKey,
     RECOMMENDATION_PROVIDER: data.recommendationProvider,
     METADATA_PROVIDER: data.metadataProvider,
-    LISTENBRAINZ_USERNAME: data.listenBrainzUsername
+    LISTENBRAINZ_USERNAME: data.listenBrainzUsername,
+    CROSSFADE_SECONDS: String(Math.max(0, Math.min(12, data.crossfadeSeconds))),
+    EQ_ENABLED: String(data.eqEnabled),
+    EQ_PRESET: data.eqPreset,
+    EQ_BANDS: JSON.stringify(normalizeEqBands(data.eqBands))
   };
   if (data.lastFmSharedSecret?.trim()) {
     updates.LASTFM_SHARED_SECRET = data.lastFmSharedSecret.trim();
@@ -110,6 +148,44 @@ export async function updateAppSettings(data: {
     updates.LISTENBRAINZ_TOKEN = data.listenBrainzToken.trim();
   }
   await invoke('update_settings', { updates });
+}
+
+// ── Desktop Playback ─────────────────────────────────────────────────────────
+
+export async function desktopPlaybackLoad(song: Song, autoplay = false): Promise<void> {
+  await invoke('playback_load', { song, autoplay });
+}
+
+export async function desktopPlaybackPreload(song: Song): Promise<void> {
+  await invoke('playback_preload', { song });
+}
+
+export async function desktopPlaybackPlay(): Promise<void> {
+  await invoke('playback_play');
+}
+
+export async function desktopPlaybackPause(): Promise<void> {
+  await invoke('playback_pause');
+}
+
+export async function desktopPlaybackStop(): Promise<void> {
+  await invoke('playback_stop');
+}
+
+export async function desktopPlaybackSeek(position: number): Promise<void> {
+  await invoke('playback_seek', { position });
+}
+
+export async function desktopPlaybackSetVolume(volume: number): Promise<void> {
+  await invoke('playback_set_volume', { volume });
+}
+
+export async function desktopPlaybackSetEq(enabled: boolean, bands: EqBandValues): Promise<void> {
+  await invoke('playback_set_eq', { enabled, bands: normalizeEqBands(bands) });
+}
+
+export async function desktopPlaybackStatus(): Promise<DesktopPlaybackStatus> {
+  return invoke<DesktopPlaybackStatus>('playback_status');
 }
 
 // ── Profiles ──────────────────────────────────────────────────────────────────
@@ -175,6 +251,10 @@ export async function searchSongs(query: string, count = 20): Promise<Song[]> {
   return invoke<Song[]>('library_search', { query, count });
 }
 
+export async function searchAlbums(query: string, count = 20): Promise<Album[]> {
+  return invoke<Album[]>('library_artist_albums', { query, count });
+}
+
 export async function fetchSimilarSongs(songId: string, count = 20): Promise<Song[]> {
   return invoke<Song[]>('library_similar', { songId, count });
 }
@@ -225,6 +305,14 @@ export async function unstarSong(id: string, artist?: string, title?: string): P
 
 export async function addSongToPlaylist(playlistId: string, songId: string): Promise<void> {
   await invoke('library_add_to_playlist', { playlistId, songId });
+}
+
+export async function createPlaylist(name: string, songIds: string[]): Promise<Playlist> {
+  return invoke<Playlist>('library_create_playlist', { name, songIds });
+}
+
+export async function materializeSong(songId: string): Promise<void> {
+  await invoke('library_materialize_song', { songId });
 }
 
 // ── Autostart ─────────────────────────────────────────────────────────────────

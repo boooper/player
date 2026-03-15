@@ -19,6 +19,10 @@ const ALLOWED_KEYS: &[&str] = &[
     "SHUFFLE",
     "SMART_SHUFFLE",
     "REPEAT",
+    "CROSSFADE_SECONDS",
+    "EQ_ENABLED",
+    "EQ_PRESET",
+    "EQ_BANDS",
 ];
 
 #[tauri::command]

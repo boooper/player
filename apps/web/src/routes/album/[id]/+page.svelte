@@ -14,11 +14,15 @@
 
   import {
     fetchAlbumDetail,
+    fetchAlbumSongs,
+    fetchArtistAlbums,
     type Album,
     type Song
   } from '$lib/api';
-  import { focusTrack, playQueue, playingFrom, toggleShuffle, shuffleEnabled, smartShuffleMode, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { findAlbumGroupIds, mergeAlbumSongs } from '$lib/media-merge';
+  import { focusTrack, playQueue, playingFrom, enableShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -42,8 +46,22 @@
     error = '';
     try {
       const detail = await fetchAlbumDetail(data.id);
-      album = detail.album;
-      songs = detail.songs;
+      const artistAlbums = await fetchArtistAlbums(detail.album.artist, 100).catch(() => [detail.album]);
+      const groupedAlbumIds = Array.from(new Set([
+        detail.album.id,
+        ...findAlbumGroupIds(artistAlbums, detail.album)
+      ]));
+      const albumSongLists = await Promise.all(
+        groupedAlbumIds.map((albumId) => fetchAlbumSongs(albumId).catch(() => []))
+      );
+      const mergedSongs = mergeAlbumSongs(albumSongLists.flat());
+
+      album = {
+        ...detail.album,
+        songCount: mergedSongs.length,
+        duration: mergedSongs.reduce((total, song) => total + (song.duration || 0), 0)
+      };
+      songs = mergedSongs;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load album.';
     } finally {
@@ -69,9 +87,9 @@
     playFrom(0);
   }
 
-  function activateShuffle() { smartShuffleMode.set(false); shuffleEnabled.set(true); }
-  function activateSmartShuffle() { shuffleEnabled.set(true); smartShuffleMode.set(true); }
-  function deactivateShuffle() { shuffleEnabled.set(false); smartShuffleMode.set(false); }
+  function activateShuffle() { smartShuffleMode.set(false); enableShuffle(); }
+  function activateSmartShuffle() { enableSmartShuffle(); }
+  function deactivateShuffle() { disableShuffle(); }
 
   function fmt(seconds: number): string {
     if (!isFinite(seconds) || !seconds) return '';
@@ -127,7 +145,10 @@
         <div class="h-4 w-48 animate-pulse rounded bg-muted"></div>
       {:else if album}
         <p class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Album</p>
-        <h1 class="mb-1 text-4xl font-black tracking-tight sm:text-5xl">{album.name}</h1>
+        <div class="mb-1 flex flex-wrap items-center gap-2">
+          <h1 class="text-4xl font-black tracking-tight sm:text-5xl">{album.name}</h1>
+          <ExternalSourceBadge id={album.id} />
+        </div>
         <div class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
           <a
             href="/artist/{encodeURIComponent(album.artist)}"
@@ -271,7 +292,10 @@
                 </div>
               {/if}
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                <div class="flex items-center gap-2">
+                  <p class="truncate text-sm font-medium {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                  <ExternalSourceBadge id={song.id} class="shrink-0" />
+                </div>
                 <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
               </div>
             </div>

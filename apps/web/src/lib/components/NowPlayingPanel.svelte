@@ -1,5 +1,8 @@
 <script lang="ts">
   import { ChevronDown, ChevronUp, PanelRight } from '@lucide/svelte';
+  import { flip } from 'svelte/animate';
+  import { cubicOut } from 'svelte/easing';
+  import { fade, fly } from 'svelte/transition';
   import * as Dialog from '$lib/components/ui/dialog';
   import { Button, ScrollArea } from '$lib/components/ui';
   import {
@@ -10,6 +13,7 @@
     shouldAutoplay,
     showQueue,
     playQueue,
+    smartShuffleTrackIds,
   } from '$lib/stores/player';
   import {
     fetchSimilarSongs,
@@ -364,12 +368,19 @@
           {/if}
         </div>
         {#if upNext.length === 0}
-          <p class="text-xs text-muted-foreground/60 px-2">Nothing queued</p>
+          <p
+            class="text-xs text-muted-foreground/60 px-2"
+            in:fade={{ duration: 180 }}
+            out:fade={{ duration: 140 }}
+          >Nothing queued</p>
         {:else}
           <div class="space-y-1">
             {#each (upNextExpanded ? upNext : upNext.slice(0, 1)) as item (item.song.id + '-' + item.index)}
               <button
+                animate:flip={{ duration: 220, easing: cubicOut }}
                 class="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition hover:bg-accent"
+                in:fly={{ y: 12, opacity: 0.15, duration: 220, easing: cubicOut }}
+                out:fade={{ duration: 150 }}
                 onclick={() => playFromUpNext(item.index)}
               >
                 {#if item.song.coverArtUrl}
@@ -380,6 +391,11 @@
                 <span class="min-w-0">
                   <span class="block truncate text-sm font-medium">{item.song.title}</span>
                   <span class="block truncate text-xs text-muted-foreground">{item.song.artist}</span>
+                  {#if $smartShuffleTrackIds.has(item.song.id)}
+                    <span class="mt-1 inline-flex rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                      From Smart Shuffle
+                    </span>
+                  {/if}
                 </span>
               </button>
             {/each}

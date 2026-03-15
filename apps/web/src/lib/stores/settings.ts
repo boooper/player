@@ -1,3 +1,4 @@
+import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
 import { writable, get } from 'svelte/store';
 
 export type AppSettings = {
@@ -8,6 +9,10 @@ export type AppSettings = {
   lastFmUsername: string;
   listenBrainzUsername: string;
   listenBrainzToken: string;
+  crossfadeSeconds: number;
+  eqEnabled: boolean;
+  eqPreset: EqPresetId;
+  eqBands: EqBandValues;
 };
 
 export const appSettings = writable<AppSettings>({
@@ -17,7 +22,11 @@ export const appSettings = writable<AppSettings>({
   lastFmConnected: false,
   lastFmUsername: '',
   listenBrainzUsername: '',
-  listenBrainzToken: ''
+  listenBrainzToken: '',
+  crossfadeSeconds: 4,
+  eqEnabled: false,
+  eqPreset: 'flat',
+  eqBands: DEFAULT_EQ_BANDS
 });
 
 export function getLastFmApiKey(): string {

@@ -132,6 +132,10 @@
         metadataProvider: settings.metadataProvider,
         listenBrainzUsername: settings.listenBrainzUsername,
         listenBrainzToken: lbzToken,
+        crossfadeSeconds: settings.crossfadeSeconds,
+        eqEnabled: settings.eqEnabled,
+        eqPreset: settings.eqPreset,
+        eqBands: settings.eqBands,
       }));
       volume.set(settings.volume);
       shuffleEnabled.set(settings.shuffleEnabled);

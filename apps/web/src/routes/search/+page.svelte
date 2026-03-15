@@ -5,11 +5,13 @@
   import { Clock, X } from '@lucide/svelte';
   import { searchSongs as searchLastFmSongs, type Song as LastFmSong } from '$lib/metadata';
   import { getRecommendations, getTrackTopGenre, type TrackRecommendation } from '$lib/recommendation';
-  import { fetchLikedArtists, fetchSimilarSongs, searchSongs, type Song } from '$lib/api';
+  import { fetchLikedArtists, fetchSimilarSongs, searchAlbums, searchSongs, type Album, type Song } from '$lib/api';
   import { focusTrack, playQueue } from '$lib/stores/player';
   import { appSettings } from '$lib/stores/settings';
   import { Badge, Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
 
   let { data } = $props<{ data: { q: string } }>();
 
@@ -23,6 +25,7 @@
   let likedArtists = $state<string[]>([]);
   let lastfmSongs = $state<LastFmSong[]>([]);
   let subsonicSongs = $state<Song[]>([]);
+  let subsonicAlbums = $state<Album[]>([]);
   let subsonicSimilar = $state<Song[]>([])
 
   type HybridRecommendation = {
@@ -154,13 +157,15 @@
     recError = '';
 
     try {
-      const [lfm, sub] = await Promise.all([
+      const [lfm, sub, albums] = await Promise.all([
         hasLastFmKey ? searchLastFmSongs(queryText, 24) : Promise.resolve([]),
-        searchSongs(queryText, 24)
+        searchSongs(queryText, 24),
+        searchAlbums(queryText, 12)
       ]);
 
       lastfmSongs = lfm;
       subsonicSongs = sub;
+      subsonicAlbums = albums;
       subsonicSimilar = [];
 
       selected = merged[0] ?? null;
@@ -174,13 +179,14 @@
         await loadRecommendations(selected.title, selected.artist);
       }
 
-      if (!lfm.length && !sub.length) {
-        error = 'No songs found for this search.';
+      if (!lfm.length && !sub.length && !albums.length) {
+        error = 'No results found for this search.';
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Search failed.';
       lastfmSongs = [];
       subsonicSongs = [];
+      subsonicAlbums = [];
     } finally {
       loading = false;
     }
@@ -374,7 +380,10 @@
             </div>
           {/if}
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">{item.title}</p>
+            <div class="flex items-center gap-2">
+              <p class="truncate text-sm font-semibold">{item.title}</p>
+              <ExternalSourceBadge id={item.subsonicSong?.id ?? item.id} class="shrink-0" />
+            </div>
             <p class="truncate text-xs text-muted-foreground">{item.artist}</p>
           </div>
         </button>
@@ -394,13 +403,45 @@
           </div>
         {/if}
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-semibold">{item.title}</p>
+          <div class="flex items-center gap-2">
+            <p class="truncate text-sm font-semibold">{item.title}</p>
+            <ExternalSourceBadge id={item.subsonicSong?.id ?? item.id} class="shrink-0" />
+          </div>
           <p class="truncate text-xs text-muted-foreground">{item.artist}</p>
         </div>
       </button>
     {/if}
   {/each}
 </div>
+
+{#if subsonicAlbums.length > 0}
+  <div class="mb-2 flex items-center justify-between">
+    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Albums</h3>
+  </div>
+  <div class="mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
+    {#each subsonicAlbums as album (album.id)}
+      <AlbumContextMenu {album}>
+        <button
+          class="flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
+          onclick={() => goto(`/album/${encodeURIComponent(album.id)}`)}
+        >
+          {#if album.coverArtUrl}
+            <img class="h-10 w-10 shrink-0 rounded object-cover" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+          {:else}
+            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
+              {initials(album.name)}
+            </div>
+          {/if}
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-semibold">{album.name}</p>
+            <p class="truncate text-xs text-muted-foreground">{album.artist}</p>
+          </div>
+          <Badge variant="outline">Album</Badge>
+        </button>
+      </AlbumContextMenu>
+    {/each}
+  </div>
+{/if}
 
 {#if subsonicSimilar.length > 0}
   <div class="mb-2 flex items-center justify-between">
@@ -418,7 +459,10 @@
             </div>
           {/if}
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">{song.title}</p>
+            <div class="flex items-center gap-2">
+              <p class="truncate text-sm font-semibold">{song.title}</p>
+              <ExternalSourceBadge id={song.id} class="shrink-0" />
+            </div>
             <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
           </div>
         </button>
@@ -443,7 +487,10 @@
       <SongContextMenu song={track.subsonicSong} onplay={() => useRecommendation(track)}>
         <div class="flex items-center gap-3 bg-secondary px-3 py-2.5">
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">{track.title}</p>
+            <div class="flex items-center gap-2">
+              <p class="truncate text-sm font-semibold">{track.title}</p>
+              <ExternalSourceBadge id={track.subsonicSong?.id} class="shrink-0" />
+            </div>
             <p class="truncate text-xs text-muted-foreground">{track.artist}</p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
@@ -455,7 +502,10 @@
     {:else}
       <div class="flex items-center gap-3 bg-secondary px-3 py-2.5">
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-semibold">{track.title}</p>
+          <div class="flex items-center gap-2">
+            <p class="truncate text-sm font-semibold">{track.title}</p>
+            <ExternalSourceBadge id={track.id} class="shrink-0" />
+          </div>
           <p class="truncate text-xs text-muted-foreground">{track.artist}</p>
         </div>
         <div class="flex shrink-0 items-center gap-2">

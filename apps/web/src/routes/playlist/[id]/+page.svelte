@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { fetchPlaylistDetail, type Song } from '$lib/api';
   import { Play, Shuffle, Sparkles } from '@lucide/svelte';
-  import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import { Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import {
@@ -132,18 +132,18 @@
           {/snippet}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="min-w-44">
-          <DropdownMenuItem onclick={() => { shuffleEnabled.set(true); smartShuffleMode.set(false); }} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
+          <DropdownMenuItem onclick={() => { smartShuffleMode.set(false); enableShuffle(); }} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
             <Shuffle class="size-4 shrink-0" />
             Shuffle
             {#if $shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
           </DropdownMenuItem>
-          <DropdownMenuItem onclick={() => { shuffleEnabled.set(true); smartShuffleMode.set(true); }} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
+          <DropdownMenuItem onclick={enableSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
             <Sparkles class="size-4 shrink-0" />
             Smart Shuffle
             {#if $smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onclick={() => { shuffleEnabled.set(false); smartShuffleMode.set(false); }} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
+          <DropdownMenuItem onclick={disableShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
             <span class="size-4 shrink-0 flex items-center justify-center text-xs font-bold">—</span>
             Off
             {#if !$shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}

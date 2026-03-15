@@ -14,11 +14,13 @@
     type ArtistInfo,
     type Song as LastFmSong
   } from '$lib/metadata';
-  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import { appSettings } from '$lib/stores/settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
+  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import { mergeAlbums, mergeAlbumSongs, type MergedAlbum } from '$lib/media-merge';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -36,6 +38,7 @@
   let topTracks = $state<LastFmSong[]>([]);
   let subsonicSongs = $state<Song[]>([]);
   let albums = $state<Album[]>([])
+  let mergedAlbums = $state<MergedAlbum[]>([]);
   let showAllTracks = $state(false);
 
   let albumSongs = $state<Record<string, Song[]>>({});
@@ -50,6 +53,7 @@
     topTracks = [];
     subsonicSongs = [];
     albums = [];
+    mergedAlbums = [];
     albumSongs = {};
     albumLoading = {};
     showAllTracks = false;
@@ -64,6 +68,7 @@
       topTracks = top;
       subsonicSongs = sub;
       albums = albs;
+      mergedAlbums = mergeAlbums(albs);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load artist.';
     } finally {
@@ -107,29 +112,30 @@
     playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
   }
 
-  async function loadAndPlayAlbum(albumId: string, startIndex = 0) {
-    if (!albumSongs[albumId]) {
-      albumLoading = { ...albumLoading, [albumId]: true };
+  async function ensureMergedAlbumSongs(album: MergedAlbum): Promise<Song[]> {
+    if (!albumSongs[album.id]) {
+      albumLoading = { ...albumLoading, [album.id]: true };
       try {
-        albumSongs = { ...albumSongs, [albumId]: await fetchAlbumSongs(albumId) };
+        const fetched = await Promise.all(album.sourceIds.map((sourceId) => fetchAlbumSongs(sourceId).catch(() => [])));
+        albumSongs = { ...albumSongs, [album.id]: mergeAlbumSongs(fetched.flat()) };
       } catch {
-        albumSongs = { ...albumSongs, [albumId]: [] };
+        albumSongs = { ...albumSongs, [album.id]: [] };
       } finally {
-        albumLoading = { ...albumLoading, [albumId]: false };
+        albumLoading = { ...albumLoading, [album.id]: false };
       }
     }
-    const songs = albumSongs[albumId];
+
+    return albumSongs[album.id] ?? [];
+  }
+
+  async function loadAndPlayAlbum(album: MergedAlbum, startIndex = 0) {
+    const songs = await ensureMergedAlbumSongs(album);
     if (!songs?.length) return;
     const song = songs[startIndex];
     focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
     playQueue(songs, startIndex);
-    const album = albums.find((a) => a.id === albumId);
-    if (album) {
-      addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
-      playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
-    } else {
-      playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
-    }
+    addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
+    playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
   }
 
   // Shuffle dropdown
@@ -139,33 +145,33 @@
 
   function activateShuffle() {
     smartShuffleMode.set(false);
-    shuffleEnabled.set(true);
+    enableShuffle();
     shuffleAllArtist = false;
   }
 
   function activateSmartShuffle() {
-    shuffleEnabled.set(true);
-    smartShuffleMode.set(true);
+    enableSmartShuffle();
     shuffleAllArtist = false;
   }
 
   function activateShuffleAll() {
     smartShuffleMode.set(false);
-    shuffleEnabled.set(true);
+    enableShuffle();
     shuffleAllArtist = true;
   }
 
   function deactivateShuffle() {
-    shuffleEnabled.set(false);
-    smartShuffleMode.set(false);
+    disableShuffle();
     shuffleAllArtist = false;
   }
 
   async function playOrShuffleAll() {
     if (shuffleAllArtist) {
-      const toastId = toast.loading(`Loading all ${data.name} songs…`);
+        const toastId = toast.loading(`Loading all ${data.name} songs…`);
       try {
-        const allSongs = (await Promise.all(albums.map(a => fetchAlbumSongs(a.id)))).flat();
+        const allSongs = mergeAlbumSongs((await Promise.all(
+          mergedAlbums.flatMap((album) => album.sourceIds.map((sourceId) => fetchAlbumSongs(sourceId).catch(() => [])))
+        )).flat());
         if (!allSongs.length) throw new Error('No songs found');
         for (let i = allSongs.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -249,7 +255,7 @@
               class="flex size-10 items-center justify-center rounded-md transition-colors {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-white/70 hover:text-white'}"
               aria-label="Shuffle options"
               title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
-              disabled={playableTopTracks.length === 0 && albums.length === 0}
+          disabled={playableTopTracks.length === 0 && mergedAlbums.length === 0}
             >
               {#if $smartShuffleMode}
                 <Sparkles class="size-5 {smartShuffleFetching ? 'animate-pulse' : ''}" />
@@ -281,7 +287,7 @@
             {/if}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onclick={activateShuffleAll} disabled={albums.length === 0} class="gap-3 {shuffleAllArtist ? 'text-primary' : ''}">
+          <DropdownMenuItem onclick={activateShuffleAll} disabled={mergedAlbums.length === 0} class="gap-3 {shuffleAllArtist ? 'text-primary' : ''}">
             <Mic2 class="size-4 shrink-0" />
             <div>
               <p class="font-medium">Shuffle All Songs</p>
@@ -336,7 +342,10 @@
               <div class="grid size-10 shrink-0 place-items-center rounded bg-secondary text-xs font-bold">{initials(sub.title)}</div>
             {/if}
             <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium">{sub.title}</p>
+              <div class="flex items-center gap-2">
+                <p class="truncate text-sm font-medium">{sub.title}</p>
+                <ExternalSourceBadge id={sub.id} class="shrink-0" />
+              </div>
               {#if lfm.listeners}
                 <p class="text-xs text-muted-foreground">{lfm.listeners.toLocaleString()} plays</p>
               {/if}
@@ -356,7 +365,7 @@
 {/if}
 
 <!-- Albums carousel -->
-{#if albums.length > 0}
+{#if mergedAlbums.length > 0}
   <section class="mb-8">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="text-xl font-bold">Discography</h2>
@@ -370,8 +379,8 @@
       </div>
     </div>
     <div bind:this={carouselEl} class="flex gap-4 overflow-x-auto pb-3" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each albums as album (album.id)}
-        <AlbumContextMenu {album} onplay={() => loadAndPlayAlbum(album.id)}>
+      {#each mergedAlbums as album (album.id)}
+        <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
         <div class="group relative flex w-44 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 text-left transition hover:bg-accent">
           <a
             href="/album/{encodeURIComponent(album.id)}"
@@ -386,7 +395,7 @@
             {/if}
             <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
               <button
-                onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album.id); }}
+                onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album); }}
                 aria-label="Play {album.name}"
                 class="grid size-full place-items-center rounded-full"
               >
@@ -399,7 +408,10 @@
             </div>
           </div>
           <div class="min-w-0">
-            <p class="truncate text-sm font-semibold">{album.name}</p>
+            <div class="flex items-center gap-2">
+              <p class="truncate text-sm font-semibold">{album.name}</p>
+              <ExternalSourceBadge id={album.id} class="shrink-0" />
+            </div>
             <p class="text-xs text-muted-foreground">{album.year ? `${album.year} · ` : ''}{album.songCount} songs</p>
           </div>
         </div>

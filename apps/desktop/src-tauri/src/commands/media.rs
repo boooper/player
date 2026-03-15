@@ -4,11 +4,11 @@
 //! then returning them from your command implementations.  Nothing outside of a
 //! provider module should reference provider-specific raw shapes.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ── Core media types ──────────────────────────────────────────────────────────
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Song {
     pub id: String,

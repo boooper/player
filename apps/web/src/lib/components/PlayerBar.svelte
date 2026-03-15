@@ -26,6 +26,7 @@
     Cast
   } from '@lucide/svelte';
   import {
+    focusTrack,
     currentIndex,
     currentTime,
     duration,
@@ -36,7 +37,9 @@
     repeatMode,
     shuffleEnabled,
     shouldAutoplay,
-    toggleShuffle,
+    enableShuffle,
+    enableSmartShuffle,
+    disableShuffle,
     cycleRepeatMode,
     volume,
     upNextEnabled,
@@ -48,16 +51,21 @@
     togglePlayRequest,
     starredSongIds,
     playQueue,
-    addRecentlyPlayedSong
+    addRecentlyPlayedSong,
+    markSmartShuffleTracks,
+    smartShuffleTrackIds
   } from '$lib/stores/player';
-  import { fetchUpNextSongs, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetStatus as castGetStatusCmd, type CastDeviceInfo } from '$lib/api';
+  import { fetchUpNextSongs, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, type CastDeviceInfo } from '$lib/api';
   import { fetchLikedArtists, saveVolume } from '$lib/api';
+  import { EQ_FREQUENCIES, normalizeEqBands } from '$lib/audio/equalizer';
   import { lbzNowPlaying, lbzScrobble } from '$lib/listenbrainz';
   import { toast } from 'svelte-sonner';
   import { Button, Slider } from '$lib/components/ui';
   import { appSettings } from '$lib/stores/settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { goto } from '$app/navigation';
+  import { isTauri } from '$lib/tauri';
 
   // ── Cast state ──────────────────────────────────────────────────────────────
   let castDevices = $state<CastDeviceInfo[]>([]);
@@ -65,6 +73,11 @@
   let castActive = $state(false);
   let castPlaying = $state(false);
   let castDevice = $state<CastDeviceInfo | null>(null);
+  const desktopPlayback = isTauri();
+  let desktopLoadedTrackId = $state<string | null>(null);
+  let desktopEndedTrackId = $state<string | null>(null);
+  let desktopPreloadedTrackId = $state<string | null>(null);
+  let desktopLoadPending = $state(false);
 
   async function discoverDevices() {
     if (castActive || discovering) return;
@@ -84,7 +97,10 @@
     if (!currentTrack) { toast.warning('No track selected'); return; }
     const toastId = toast.loading(`Connecting to ${device.name}…`);
     try {
-      if (audioEl && $isPlaying) audioEl.pause();
+      if ($isPlaying) {
+        pauseLocalAudio();
+        if (desktopPlayback) await desktopPlaybackPause().catch(() => undefined);
+      }
       castDevice = device;
       castActive = true;
       castPlaying = false;
@@ -145,7 +161,70 @@
   onMount(() => {
     function handleTogglePlay() { togglePlay(); }
     window.addEventListener('player:toggle-play', handleTogglePlay);
-    return () => window.removeEventListener('player:toggle-play', handleTogglePlay);
+    let desktopPoll = 0;
+    if (desktopPlayback) {
+      desktopPoll = window.setInterval(() => {
+        if (castActive) return;
+        desktopPlaybackStatus()
+          .then((status) => {
+            const activeTrackId = currentTrack?.id ?? null;
+            if (!activeTrackId) {
+              if (status.loaded || status.playing) {
+                desktopPlaybackStop().catch(() => undefined);
+              }
+              desktopLoadedTrackId = null;
+              desktopEndedTrackId = null;
+              desktopLoadPending = false;
+              currentTime.set(0);
+              duration.set(0);
+              isPlaying.set(false);
+              isBuffering = false;
+              return;
+            }
+
+            if (status.trackId && status.trackId !== activeTrackId) {
+              desktopPlaybackStop().catch(() => undefined);
+              desktopLoadedTrackId = activeTrackId;
+              desktopEndedTrackId = null;
+              desktopLoadPending = false;
+              currentTime.set(0);
+              duration.set(currentTrack?.duration > 0 ? currentTrack.duration : 0);
+              isPlaying.set(false);
+              isBuffering = false;
+              return;
+            }
+
+            if (status.trackId) desktopLoadedTrackId = status.trackId;
+            if (!seekDragging) currentTime.set(status.position ?? 0);
+            if (status.duration > 0) duration.set(status.duration);
+            if (desktopLoadPending) {
+              if (status.playing) {
+                desktopLoadPending = false;
+                isPlaying.set(true);
+                isBuffering = false;
+              } else {
+                isPlaying.set(true);
+                isBuffering = true;
+              }
+            } else {
+              isPlaying.set(status.playing);
+              isBuffering = false;
+            }
+
+            if (status.ended && status.trackId && desktopEndedTrackId !== status.trackId) {
+              desktopEndedTrackId = status.trackId;
+              nextTrack();
+            } else if (!status.ended) {
+              desktopEndedTrackId = null;
+            }
+          })
+          .catch(() => undefined);
+      }, 250);
+    }
+    return () => {
+      window.removeEventListener('player:toggle-play', handleTogglePlay);
+      if (desktopPoll) clearInterval(desktopPoll);
+    };
   });
 
   import { showQueue } from '$lib/stores/player';
@@ -153,7 +232,25 @@
   const lastFmApiKey = $derived($appSettings.lastFmApiKey);
   const lastFmConnected = $derived($appSettings.lastFmConnected);
   const lbzToken = $derived($appSettings.listenBrainzToken);
+  const crossfadeMs = $derived(Math.max(0, Math.round(($appSettings.crossfadeSeconds ?? 4) * 1000)));
+  const eqEnabled = $derived($appSettings.eqEnabled ?? false);
+  const eqBands = $derived(normalizeEqBands($appSettings.eqBands));
+  const zeroEqBands = normalizeEqBands([]);
   const shuffleBtnClass = $derived($smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground');
+  const transportLocked = $derived(desktopPlayback && (desktopLoadPending || isBuffering));
+
+  function randomInt(min: number, max: number): number {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function shuffleItems<T>(items: T[]): T[] {
+    const next = [...items];
+    for (let i = next.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [next[i], next[j]] = [next[j], next[i]];
+    }
+    return next;
+  }
 
   // ── Scrobbling ─────────────────────────────────────────────────────────────
   // Send "now playing" when the track changes, then scrobble once the user
@@ -209,10 +306,147 @@
     }
   }
 
-  let audioEl = $state<HTMLAudioElement | null>(null);
+  let deckAEl = $state<HTMLAudioElement | null>(null);
+  let deckBEl = $state<HTMLAudioElement | null>(null);
+  let activeDeck = $state<'a' | 'b'>('a');
+  let crossfadeInProgress = false;
+  let crossfadeTimer = 0;
+  let preloadedIndex = -1;
+  let audioContext: AudioContext | null = null;
+  let deckASource: MediaElementAudioSourceNode | null = null;
+  let deckBSource: MediaElementAudioSourceNode | null = null;
+  let eqFilterChains: BiquadFilterNode[][] = [];
+  let audioGraphUnavailable = false;
 
   const currentTrack = $derived($queue[$currentIndex] ?? null);
   const isStarred = $derived(currentTrack ? $starredSongIds.has(currentTrack.id) : false);
+  const isSmartShuffleTrack = $derived(currentTrack ? $smartShuffleTrackIds.has(currentTrack.id) : false);
+
+  function getActiveAudio(): HTMLAudioElement | null {
+    return activeDeck === 'a' ? deckAEl : deckBEl;
+  }
+
+  function getInactiveAudio(): HTMLAudioElement | null {
+    return activeDeck === 'a' ? deckBEl : deckAEl;
+  }
+
+  function syncLibraryFocus(track: typeof currentTrack): void {
+    if (!track) return;
+    focusTrack.set({
+      title: track.title,
+      artist: track.artist,
+      imageUrl: track.coverArtUrl,
+      source: 'library',
+      album: track.album
+    });
+  }
+
+  function stopCrossfadeTimer(): void {
+    if (!crossfadeTimer) return;
+    clearInterval(crossfadeTimer);
+    crossfadeTimer = 0;
+  }
+
+  function pauseLocalAudio(): void {
+    deckAEl?.pause();
+    deckBEl?.pause();
+  }
+
+  $effect(() => {
+    if (desktopPlayback) return;
+    if (!eqFilterChains.length) return;
+    const gains = eqEnabled ? eqBands : zeroEqBands;
+    eqFilterChains.forEach((filters) => {
+      filters.forEach((filter, index) => {
+        filter.gain.value = gains[index];
+      });
+    });
+  });
+
+  $effect(() => {
+    if (desktopPlayback) return;
+    if (!eqEnabled || audioGraphUnavailable) return;
+    if (!deckAEl || !deckBEl) return;
+    resumeAudioContext().catch(() => undefined);
+  });
+
+  $effect(() => {
+    if (!desktopPlayback || castActive) return;
+    desktopPlaybackSetEq(eqEnabled, eqBands).catch(() => undefined);
+  });
+
+  function createEqFilterChain(): BiquadFilterNode[] {
+    return EQ_FREQUENCIES.map((frequency, index) => {
+      const filter = audioContext!.createBiquadFilter();
+      filter.type = index === 0 ? 'lowshelf' : index === EQ_FREQUENCIES.length - 1 ? 'highshelf' : 'peaking';
+      filter.frequency.value = frequency;
+      filter.Q.value = 1;
+      filter.gain.value = 0;
+      return filter;
+    });
+  }
+
+  function ensureAudioGraph(): boolean {
+    if (typeof window === 'undefined' || audioGraphUnavailable || deckASource || !audioContext) return Boolean(deckASource);
+    if (!deckAEl || !deckBEl) return false;
+
+    try {
+      const sourceA = audioContext.createMediaElementSource(deckAEl);
+      const sourceB = audioContext.createMediaElementSource(deckBEl);
+      const filtersA = createEqFilterChain();
+      const filtersB = createEqFilterChain();
+
+      for (const filters of [filtersA, filtersB]) {
+        for (let i = 0; i < filters.length - 1; i++) {
+          filters[i].connect(filters[i + 1]);
+        }
+        filters[filters.length - 1].connect(audioContext.destination);
+      }
+
+      sourceA.connect(filtersA[0]);
+      sourceB.connect(filtersB[0]);
+
+      deckASource = sourceA;
+      deckBSource = sourceB;
+      eqFilterChains = [filtersA, filtersB];
+      return true;
+    } catch (error) {
+      audioGraphUnavailable = true;
+      console.error('Failed to initialize EQ audio graph', error);
+      toast.error('Equalizer could not be initialized. Playback will continue without EQ.');
+      return false;
+    }
+  }
+
+  async function resumeAudioContext(): Promise<void> {
+    if (!eqEnabled && !audioContext) return;
+    if (audioGraphUnavailable) return;
+
+    if (!audioContext) {
+      try {
+        audioContext = new AudioContext();
+      } catch (error) {
+        audioGraphUnavailable = true;
+        console.error('Failed to create EQ audio context', error);
+        toast.error('Equalizer could not be initialized. Playback will continue without EQ.');
+        return;
+      }
+    }
+
+    if (audioContext.state !== 'running') {
+      await audioContext.resume().catch(() => undefined);
+    }
+
+    if (audioContext.state !== 'running') {
+      if (!deckASource) {
+        await audioContext.close().catch(() => undefined);
+        audioContext = null;
+      }
+      return;
+    }
+
+    ensureAudioGraph();
+  }
 
   // Local state for the seek slider — synced from $currentTime when not dragging
   let seekVal = $state<number[]>([0]);
@@ -229,29 +463,184 @@
     if (!volDragging) volVal = [$volume * 100];
   });
 
-  // Effect 1: load new track src
+  // Effect 1: load the active track into the active deck
   $effect(() => {
     const track = currentTrack;
-    if (!audioEl || !track?.streamUrl) return;
-    if (audioEl.src === track.streamUrl) return;
-    audioEl.src = track.streamUrl;
+    if (desktopPlayback) {
+      if (castActive) return;
+      if (!track?.streamUrl) {
+        desktopPlaybackStop().catch(() => undefined);
+        desktopLoadedTrackId = null;
+        desktopEndedTrackId = null;
+        desktopPreloadedTrackId = null;
+        desktopLoadPending = false;
+        isBuffering = false;
+        isPlaying.set(false);
+        currentTime.set(0);
+        duration.set(0);
+        return;
+      }
+      if (desktopLoadedTrackId === track.id) return;
+      desktopLoadedTrackId = track.id;
+      currentTime.set(0);
+      duration.set(track.duration > 0 ? track.duration : 0);
+      const autoplay = $shouldAutoplay;
+      isBuffering = true;
+      desktopLoadPending = autoplay;
+      isPlaying.set(autoplay);
+      if (autoplay) shouldAutoplay.set(false);
+      desktopPlaybackLoad(track, autoplay)
+        .then(() => {
+          if (!autoplay) {
+            desktopLoadPending = false;
+            isBuffering = false;
+            isPlaying.set(false);
+          }
+        })
+        .catch(() => {
+          desktopLoadedTrackId = null;
+          desktopLoadPending = false;
+          isBuffering = false;
+          isPlaying.set(false);
+          toast.error('Desktop playback failed to load the track');
+        });
+      return;
+    }
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || !track?.streamUrl || crossfadeInProgress) return;
+    if (activeAudio.src === track.streamUrl) return;
+    activeAudio.src = track.streamUrl;
+    activeAudio.preload = 'auto';
     currentTime.set(0);
-    // Use the duration reported by the Subsonic API immediately — don't wait
-    // for loadedmetadata, which often never fires a finite value for streams.
     duration.set(track.duration > 0 ? track.duration : 0);
   });
 
-  // Effect 2: sync volume to audio element
+  // Effect 2: sync volume to the local decks when not crossfading
   $effect(() => {
-    if (audioEl) audioEl.volume = $volume;
+    if (desktopPlayback) {
+      if (!castActive) desktopPlaybackSetVolume($volume).catch(() => undefined);
+      return;
+    }
+    if (crossfadeInProgress) return;
+    const activeAudio = getActiveAudio();
+    const inactiveAudio = getInactiveAudio();
+    if (activeAudio) activeAudio.volume = $volume;
+    if (inactiveAudio && inactiveAudio.paused) inactiveAudio.volume = 0;
   });
 
-  // Effect 3: trigger autoplay (routes through Cast when active)
+  // Effect 3: preload the upcoming song into the inactive deck
   $effect(() => {
-    if (!audioEl || !$shouldAutoplay) return;
-    shouldAutoplay.set(false);
+    if (desktopPlayback) {
+      if (castActive) return;
+      const next = $queue[$currentIndex + 1];
+      if (!next?.streamUrl) {
+        desktopPreloadedTrackId = null;
+        return;
+      }
+      if (desktopPreloadedTrackId === next.id) return;
+      desktopPreloadedTrackId = next.id;
+      desktopPlaybackPreload(next).catch(() => {
+        if (desktopPreloadedTrackId === next.id) desktopPreloadedTrackId = null;
+      });
+      return;
+    }
+    const next = $queue[$currentIndex + 1];
+    const inactiveAudio = getInactiveAudio();
+    if (!inactiveAudio || crossfadeInProgress || castActive) return;
+    if (!next?.streamUrl) {
+      preloadedIndex = -1;
+      return;
+    }
+    if (preloadedIndex === $currentIndex + 1 && inactiveAudio.src === next.streamUrl) return;
+    inactiveAudio.src = next.streamUrl;
+    inactiveAudio.preload = 'auto';
+    inactiveAudio.load();
+    inactiveAudio.volume = 0;
+    preloadedIndex = $currentIndex + 1;
+  });
+
+  async function startCrossfade(nextIndex: number): Promise<void> {
+    if (crossfadeInProgress || castActive) return;
+    const next = $queue[nextIndex];
+    const fromAudio = getActiveAudio();
+    const toAudio = getInactiveAudio();
+    if (!next || !fromAudio || !toAudio) return;
+
+    if (toAudio.src !== next.streamUrl) {
+      toAudio.src = next.streamUrl;
+      toAudio.preload = 'auto';
+      toAudio.load();
+    }
+
+    try {
+      await resumeAudioContext();
+      toAudio.currentTime = 0;
+      toAudio.volume = 0;
+      await toAudio.play();
+    } catch {
+      return;
+    }
+
+    crossfadeInProgress = true;
+    preloadedIndex = -1;
+    const oldAudio = fromAudio;
+    const oldDeck = activeDeck;
+    activeDeck = activeDeck === 'a' ? 'b' : 'a';
+    currentIndex.set(nextIndex);
+    syncLibraryFocus(next);
+    currentTime.set(0);
+    duration.set(next.duration > 0 ? next.duration : 0);
+
+    const fadeDuration = Math.max(0, crossfadeMs);
+    if (fadeDuration === 0) {
+      stopCrossfadeTimer();
+      oldAudio.pause();
+      oldAudio.currentTime = 0;
+      oldAudio.volume = 0;
+      toAudio.volume = $volume;
+      if (oldDeck === 'a') deckAEl?.removeAttribute('src');
+      else deckBEl?.removeAttribute('src');
+      crossfadeInProgress = false;
+      return;
+    }
+
+    const startedAt = performance.now();
+    stopCrossfadeTimer();
+    crossfadeTimer = window.setInterval(() => {
+      const progress = Math.min(1, (performance.now() - startedAt) / fadeDuration);
+      oldAudio.volume = Math.max(0, (1 - progress) * $volume);
+      toAudio.volume = Math.min($volume, progress * $volume);
+
+      if (progress >= 1) {
+        stopCrossfadeTimer();
+        oldAudio.pause();
+        oldAudio.currentTime = 0;
+        oldAudio.volume = 0;
+        if (oldDeck === 'a') deckAEl?.removeAttribute('src');
+        else deckBEl?.removeAttribute('src');
+        crossfadeInProgress = false;
+      }
+    }, 50);
+  }
+
+  // Effect 4: start a real overlap fade near the end of the current track
+  $effect(() => {
+    if (desktopPlayback) return;
+    const next = $queue[$currentIndex + 1];
+    const repeat = $repeatMode;
+    if (castActive || crossfadeInProgress || !next || repeat === 'one' || !$isPlaying) return;
+
+    const remaining = $duration - $currentTime;
+    if (crossfadeMs <= 0 || remaining <= 0 || remaining > crossfadeMs / 1000) return;
+    untrack(() => { startCrossfade($currentIndex + 1); });
+  });
+
+  // Effect 5: trigger autoplay (routes through Cast when active)
+  $effect(() => {
+    if (!$shouldAutoplay) return;
 
     if (castActive && castDevice) {
+      shouldAutoplay.set(false);
       const track = currentTrack;
       if (track) {
         castPlaying = true;
@@ -271,30 +660,54 @@
       return;
     }
 
-    audioEl
-      .play()
+    if (desktopPlayback) {
+      const track = currentTrack;
+      if (!track) return;
+      if (desktopLoadedTrackId === track.id) {
+        shouldAutoplay.set(false);
+        desktopLoadPending = true;
+        isBuffering = true;
+        desktopPlaybackSeek(0)
+          .then(() => desktopPlaybackPlay())
+          .then(() => {
+            isPlaying.set(true);
+            isBuffering = false;
+            desktopLoadPending = false;
+          })
+          .catch(() => {
+            isPlaying.set(false);
+            isBuffering = false;
+            desktopLoadPending = false;
+          });
+      }
+      return;
+    }
+
+    const activeAudio = getActiveAudio();
+    if (!activeAudio) return;
+    shouldAutoplay.set(false);
+    resumeAudioContext()
+      .then(() => activeAudio.play())
       .then(() => isPlaying.set(true))
       .catch(() => isPlaying.set(false));
   });
 
-  // Effect 4: external toggle-play requests
+  // Effect 6: external toggle-play requests
   $effect(() => {
     if ($togglePlayRequest === 0) return;
     untrack(() => togglePlay());
   });
   function activateShuffle() {
     smartShuffleMode.set(false);
-    shuffleEnabled.set(true);
+    enableShuffle();
   }
 
   function activateSmartShuffle() {
-    shuffleEnabled.set(true);
-    smartShuffleMode.set(true);
+    enableSmartShuffle();
   }
 
   function deactivateShuffle() {
-    shuffleEnabled.set(false);
-    smartShuffleMode.set(false);
+    disableShuffle();
   }
 
   async function shuffleArtist() {
@@ -343,11 +756,20 @@
   // recommendations into the upcoming queue. Falls back to Subsonic similar if
   // no Last.fm key is configured. Songs are inserted a few positions ahead so
   // they feel naturally mixed in rather than dumped at the end.
-  const SMART_SHUFFLE_INJECT_EVERY = 3;
+  const SMART_SHUFFLE_MIN_GAP = 2;
+  const SMART_SHUFFLE_MAX_GAP = 5;
+  const SMART_SHUFFLE_MIN_FETCH = 3;
+  const SMART_SHUFFLE_MAX_FETCH = 6;
+  const SMART_SHUFFLE_MAX_INSERT = 4;
+  const SMART_SHUFFLE_MIN_OFFSET = 1;
+  const SMART_SHUFFLE_MAX_OFFSET = 3;
+  const SMART_SHUFFLE_MIN_SPACING = 1;
+  const SMART_SHUFFLE_MAX_SPACING = 3;
   let smartShufflePlayCount = 0;
   let smartShuffleLastIdx = -1;
   let smartShuffleInflight = false;
   let smartShuffleFetching = $state(false);
+  let smartShuffleNextInjectAfter = randomInt(SMART_SHUFFLE_MIN_GAP, SMART_SHUFFLE_MAX_GAP);
 
   $effect(() => {
     const track = $queue[$currentIndex];
@@ -357,6 +779,7 @@
       // Reset counters when Smart Shuffle is toggled off
       smartShufflePlayCount = 0;
       smartShuffleLastIdx = -1;
+      smartShuffleNextInjectAfter = randomInt(SMART_SHUFFLE_MIN_GAP, SMART_SHUFFLE_MAX_GAP);
       return;
     }
     if (!track) return;
@@ -369,9 +792,10 @@
     // Prune played history so old songs don't pile up at the bottom
     pruneQueueHistory(1);
 
-    if (smartShufflePlayCount < SMART_SHUFFLE_INJECT_EVERY || smartShuffleInflight) return;
+    if (smartShufflePlayCount < smartShuffleNextInjectAfter || smartShuffleInflight) return;
 
     smartShufflePlayCount = 0;
+    smartShuffleNextInjectAfter = randomInt(SMART_SHUFFLE_MIN_GAP, SMART_SHUFFLE_MAX_GAP);
     smartShuffleInflight = true;
     smartShuffleFetching = true;
 
@@ -380,6 +804,7 @@
     const capturedIdx = idx;
     const { artist, title, id } = track;
 
+    const fetchLimit = randomInt(SMART_SHUFFLE_MIN_FETCH, SMART_SHUFFLE_MAX_FETCH);
     const doFetch: Promise<import('$lib/api').Song[]> = lastFmApiKey
       ? Promise.all([
           fetchLikedArtists().then(stored => stored.map(a => a.name)).catch((): string[] => []),
@@ -387,20 +812,22 @@
         ]).then(([liked, taste]) => {
           // Merge liked artists + Last.fm top artists, deduplicated
           const merged = [...new Set([...liked, ...taste])];
-          return fetchUpNextSongs({ apiKey: lastFmApiKey, artist, title, likedArtists: merged, limit: 3 });
+          return fetchUpNextSongs({ apiKey: lastFmApiKey, artist, title, likedArtists: merged, limit: fetchLimit });
         })
-      : fetchSimilarSongs(id, 3);
+      : fetchSimilarSongs(id, fetchLimit);
 
     doFetch
       .then(songs => {
-        const fresh = songs.filter(s => !existingIds.has(s.id));
+        const freshPool = shuffleItems(songs.filter(s => !existingIds.has(s.id)));
+        const fresh = freshPool.slice(0, randomInt(1, Math.min(SMART_SHUFFLE_MAX_INSERT, freshPool.length)));
         if (!fresh.length) return;
+        markSmartShuffleTracks(fresh);
         queue.update(items => {
           const next = [...items];
-          // Weave songs in starting 2 positions ahead, spacing them 2 apart
-          const base = Math.min(capturedIdx + 2, next.length);
-          fresh.forEach((song, i) => {
-            next.splice(Math.min(base + i * 2, next.length), 0, song);
+          let insertAt = Math.min(capturedIdx + randomInt(SMART_SHUFFLE_MIN_OFFSET, SMART_SHUFFLE_MAX_OFFSET), next.length);
+          fresh.forEach((song) => {
+            next.splice(insertAt, 0, song);
+            insertAt = Math.min(insertAt + randomInt(SMART_SHUFFLE_MIN_SPACING, SMART_SHUFFLE_MAX_SPACING), next.length);
           });
           return next;
         });
@@ -466,6 +893,7 @@
   }
 
   function togglePlay() {
+    if (transportLocked) return;
     if (castActive) {
       if (castPlaying) {
         castPlaying = false;
@@ -476,11 +904,23 @@
       }
       return;
     }
-    if (!audioEl || !currentTrack) return;
+    if (!currentTrack) return;
+    if (desktopPlayback) {
+      if ($isPlaying) {
+        desktopPlaybackPause().then(() => isPlaying.set(false)).catch(() => undefined);
+      } else {
+        desktopPlaybackPlay().then(() => isPlaying.set(true)).catch(() => {
+          isPlaying.set(false);
+        });
+      }
+      return;
+    }
+    const activeAudio = getActiveAudio();
+    if (!activeAudio) return;
     if ($isPlaying) {
-      audioEl.pause();
+      pauseLocalAudio();
     } else {
-      audioEl.play().catch(() => {
+      resumeAudioContext().then(() => activeAudio.play()).catch(() => {
         isPlaying.set(false);
       });
     }
@@ -497,7 +937,12 @@
     const delta = e.deltaY < 0 ? 0.05 : -0.05;
     const next = Math.max(0, Math.min(1, $volume + delta));
     volume.set(next);
-    if (audioEl) audioEl.volume = next;
+    if (desktopPlayback) {
+      desktopPlaybackSetVolume(next).catch(() => undefined);
+    } else if (!crossfadeInProgress) {
+      const activeAudio = getActiveAudio();
+      if (activeAudio) activeAudio.volume = next;
+    }
     if (castActive) castSetVolumeCmd(next).catch(() => {});
     debounceSaveVolume(next);
   }
@@ -509,15 +954,23 @@
     seekDragging = false;
     if (castActive) {
       castSeekCmd(value).catch((e) => toast.error(`Cast seek failed: ${e}`));
-    } else if (audioEl) {
-      audioEl.currentTime = value;
+    } else if (desktopPlayback) {
+      desktopPlaybackSeek(value).catch(() => undefined);
+    } else {
+      const activeAudio = getActiveAudio();
+      if (activeAudio) activeAudio.currentTime = value;
     }
   }
 
   function changeVolume(values: number[]) {
     const value = Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100));
     volume.set(value);
-    if (audioEl) audioEl.volume = value;
+    if (desktopPlayback) {
+      desktopPlaybackSetVolume(value).catch(() => undefined);
+    } else if (!crossfadeInProgress) {
+      const activeAudio = getActiveAudio();
+      if (activeAudio) activeAudio.volume = value;
+    }
     if (castActive) castSetVolumeCmd(value).catch(() => {});
   }
 
@@ -532,13 +985,23 @@
     if ($volume <= 0.01) {
       const restore = premuteVolume > 0.01 ? premuteVolume : 0.8;
       volume.set(restore);
-      if (audioEl) audioEl.volume = restore;
+      if (desktopPlayback) {
+        desktopPlaybackSetVolume(restore).catch(() => undefined);
+      } else if (!crossfadeInProgress) {
+        const activeAudio = getActiveAudio();
+        if (activeAudio) activeAudio.volume = restore;
+      }
       if (castActive) castSetVolumeCmd(restore).catch(() => {});
       saveVolume(restore);
     } else {
       premuteVolume = $volume;
       volume.set(0);
-      if (audioEl) audioEl.volume = 0;
+      if (desktopPlayback) {
+        desktopPlaybackSetVolume(0).catch(() => undefined);
+      } else if (!crossfadeInProgress) {
+        const activeAudio = getActiveAudio();
+        if (activeAudio) activeAudio.volume = 0;
+      }
       if (castActive) castSetVolumeCmd(0).catch(() => {});
     }
   }
@@ -546,11 +1009,51 @@
   // Handle seek requests from the lyrics panel
   $effect(() => {
     const t = $seekRequest;
-    if (t === null || !audioEl) return;
-    audioEl.currentTime = t;
+    if (t === null) return;
+    if (desktopPlayback) {
+      desktopPlaybackSeek(t).catch(() => undefined);
+    } else {
+      const activeAudio = getActiveAudio();
+      if (!activeAudio) return;
+      activeAudio.currentTime = t;
+    }
     currentTime.set(t);
     seekRequest.set(null);
   });
+
+  function handleAudioPlay(deck: 'a' | 'b') {
+    if (deck === activeDeck) isPlaying.set(true);
+  }
+
+  function handleAudioPause() {
+    if (deckAEl?.paused !== false && deckBEl?.paused !== false) isPlaying.set(false);
+  }
+
+  function handleAudioWaiting(deck: 'a' | 'b') {
+    if (deck === activeDeck) isBuffering = true;
+  }
+
+  function handleAudioCanPlay(deck: 'a' | 'b') {
+    if (deck === activeDeck) isBuffering = false;
+  }
+
+  function handleAudioTimeUpdate(deck: 'a' | 'b') {
+    if (deck !== activeDeck) return;
+    const audio = deck === 'a' ? deckAEl : deckBEl;
+    currentTime.set(audio?.currentTime ?? 0);
+  }
+
+  function handleAudioDuration(deck: 'a' | 'b') {
+    if (deck !== activeDeck) return;
+    const audio = deck === 'a' ? deckAEl : deckBEl;
+    const d = audio?.duration ?? NaN;
+    if (isFinite(d) && d > 0) duration.set(d);
+  }
+
+  function handleAudioEnded(deck: 'a' | 'b') {
+    if (crossfadeInProgress || deck !== activeDeck) return;
+    nextTrack();
+  }
 
   function fmt(seconds: number): string {
     if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
@@ -561,7 +1064,7 @@
   }
 </script>
 
-<footer class="shrink-0 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur">
+<footer class="player-bar shrink-0 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur {isBuffering ? 'player-bar-loading' : ''}">
   <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
     <!-- Track info -->
     <div class="flex min-w-0 items-center gap-3">
@@ -586,11 +1089,19 @@
         </SongContextMenu>
         <div class="min-w-0">
           <div class="flex items-center gap-1.5">
-            <button
-              class="block truncate text-sm font-semibold leading-tight hover:underline cursor-pointer max-w-full text-left"
-              onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
-              title={currentTrack.album}
-            >{currentTrack.title}</button>
+            <div class="min-w-0 flex items-center gap-1.5">
+              <button
+                class="block truncate text-sm font-semibold leading-tight hover:underline cursor-pointer max-w-full text-left"
+                onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
+                title={currentTrack.album}
+              >{currentTrack.title}</button>
+              <ExternalSourceBadge id={currentTrack.id} class="shrink-0" />
+              {#if isSmartShuffleTrack}
+                <span class="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                  Smart Shuffle
+                </span>
+              {/if}
+            </div>
             <button
               onclick={toggleFavorite}
               class="shrink-0 text-muted-foreground transition-colors duration-150 hover:text-foreground {isStarred ? '!text-rose-500' : ''}"
@@ -698,7 +1209,7 @@
           class="rounded-full shadow-sm"
           size="icon-lg"
           onclick={togglePlay}
-          disabled={!currentTrack}
+          disabled={!currentTrack || transportLocked}
           aria-label={$isPlaying ? 'Pause' : 'Play'}
         >
           {#if castActive ? castPlaying : $isPlaying}
@@ -845,26 +1356,62 @@
   </div>
 
   <audio
-    bind:this={audioEl}
-    onplay={() => isPlaying.set(true)}
-    onpause={() => isPlaying.set(false)}
-    onwaiting={() => { isBuffering = true; }}
-    onseeking={() => { isBuffering = true; }}
-    onseeked={() => { isBuffering = false; }}
-    oncanplay={() => { isBuffering = false; }}
-    oncanplaythrough={() => { isBuffering = false; }}
-    ontimeupdate={() => {
-      currentTime.set(audioEl?.currentTime ?? 0);
-    }}
-    onloadedmetadata={() => {
-      const d = audioEl?.duration ?? NaN;
-      // Only override the API-provided duration if the element gives a better finite value
-      if (isFinite(d) && d > 0) duration.set(d);
-    }}
-    ondurationchange={() => {
-      const d = audioEl?.duration ?? NaN;
-      if (isFinite(d) && d > 0) duration.set(d);
-    }}
-    onended={nextTrack}
+    bind:this={deckAEl}
+    crossorigin="anonymous"
+    preload="auto"
+    onplay={() => handleAudioPlay('a')}
+    onpause={handleAudioPause}
+    onwaiting={() => { handleAudioWaiting('a'); }}
+    onseeking={() => { handleAudioWaiting('a'); }}
+    onseeked={() => { handleAudioCanPlay('a'); }}
+    oncanplay={() => { handleAudioCanPlay('a'); }}
+    oncanplaythrough={() => { handleAudioCanPlay('a'); }}
+    ontimeupdate={() => { handleAudioTimeUpdate('a'); }}
+    onloadedmetadata={() => { handleAudioDuration('a'); }}
+    ondurationchange={() => { handleAudioDuration('a'); }}
+    onended={() => { handleAudioEnded('a'); }}
+  ></audio>
+  <audio
+    bind:this={deckBEl}
+    crossorigin="anonymous"
+    preload="auto"
+    onplay={() => handleAudioPlay('b')}
+    onpause={handleAudioPause}
+    onwaiting={() => { handleAudioWaiting('b'); }}
+    onseeking={() => { handleAudioWaiting('b'); }}
+    onseeked={() => { handleAudioCanPlay('b'); }}
+    oncanplay={() => { handleAudioCanPlay('b'); }}
+    oncanplaythrough={() => { handleAudioCanPlay('b'); }}
+    ontimeupdate={() => { handleAudioTimeUpdate('b'); }}
+    onloadedmetadata={() => { handleAudioDuration('b'); }}
+    ondurationchange={() => { handleAudioDuration('b'); }}
+    onended={() => { handleAudioEnded('b'); }}
   ></audio>
 </footer>
+
+<style>
+  .player-bar {
+    transition:
+      box-shadow 180ms ease,
+      background-color 180ms ease,
+      opacity 180ms ease;
+  }
+
+  .player-bar-loading {
+    animation: player-bar-pulse 1.4s ease-in-out infinite;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  }
+
+  @keyframes player-bar-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      background-color: rgb(10 10 10 / 0.95);
+    }
+
+    50% {
+      opacity: 0.88;
+      background-color: rgb(18 18 18 / 0.98);
+    }
+  }
+</style>
