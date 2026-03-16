@@ -181,7 +181,6 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import base64
           import json
           import os
           from pathlib import Path
@@ -189,54 +188,17 @@ jobs:
           src = Path("apps/desktop/src-tauri/tauri.release.conf.json")
           dst = Path("apps/desktop/src-tauri/tauri.release.generated.conf.json")
 
-          pubkey = os.environ["TAURI_UPDATER_PUBKEY"].replace("\\r\\n", "\n").replace("\\n", "\n").strip()
-          if "comment" not in pubkey.lower():
-              compact = "".join(pubkey.split())
-              try:
-                  decoded = base64.b64decode(compact, validate=True).decode("utf-8").strip()
-              except Exception:
-                  decoded = None
-              if decoded and "comment" in decoded.lower():
-                  pubkey = decoded
-
           data = json.loads(src.read_text())
-          data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = pubkey
+          data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = os.environ["TAURI_UPDATER_PUBKEY"].strip()
           dst.write_text(json.dumps(data, indent=2) + "\n")
           PY
 
-      - name: normalize signing key
-        env:
-          TAURI_SIGNING_PRIVATE_KEY_RAW: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import base64
-          import os
-          from pathlib import Path
-
-          raw = os.environ["TAURI_SIGNING_PRIVATE_KEY_RAW"]
-          normalized = raw.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
-
-          if "comment" not in normalized.lower():
-              compact = "".join(normalized.split())
-              try:
-                  decoded = base64.b64decode(compact, validate=True).decode("utf-8").strip()
-              except Exception:
-                  decoded = None
-              if decoded and "comment" in decoded.lower():
-                  normalized = decoded
-
-          key_path = Path(os.environ["RUNNER_TEMP"]) / "tauri-updater.key"
-          key_path.write_text(normalized + "\n")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
-              fh.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
-          PY
-
       - name: build and upload release assets
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
