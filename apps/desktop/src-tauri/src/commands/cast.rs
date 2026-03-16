@@ -97,7 +97,7 @@ pub async fn cast_discover() -> Result<Vec<CastDeviceInfo>, String> {
 
 // ── TLS connection ────────────────────────────────────────────────────────────
 
-async fn cast_connect(addr: &str, port: u16) -> Result<TlsStream, String> {
+async fn cast_connect_tls(addr: &str, port: u16) -> Result<TlsStream, String> {
     let cx = native_tls::TlsConnector::builder()
         .danger_accept_invalid_certs(true)
         .danger_accept_invalid_hostnames(true)
@@ -164,6 +164,80 @@ async fn recv_until(
     }
 }
 
+fn find_media_receiver(status: &Value) -> Option<&Value> {
+    status["status"]["applications"]
+        .as_array()
+        .and_then(|apps| apps.iter().find(|a| a["appId"].as_str() == Some(MEDIA_RECEIVER_APP)))
+}
+
+async fn ensure_cast_session(
+    device_name: String,
+    device_addr: String,
+    device_port: u16,
+) -> Result<CastSessionInfo, String> {
+    let mut tls = cast_connect_tls(&device_addr, device_port).await?;
+
+    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
+    send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
+        json!({"type":"GET_STATUS","requestId":1})).await?;
+
+    let mut recv_status = recv_until(&mut tls, NS_RECV, |v| {
+        v["type"].as_str() == Some("RECEIVER_STATUS")
+    }, 8).await?;
+
+    if find_media_receiver(&recv_status).is_none() {
+        send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
+            json!({"type":"LAUNCH","requestId":2,"appId":MEDIA_RECEIVER_APP})).await?;
+
+        recv_status = recv_until(&mut tls, NS_RECV, |v| {
+            v["type"].as_str() == Some("RECEIVER_STATUS") && find_media_receiver(v).is_some()
+        }, 20).await?;
+    }
+
+    let app = find_media_receiver(&recv_status)
+        .ok_or("App not found in RECEIVER_STATUS")?;
+
+    let transport_id = app["transportId"].as_str().ok_or("Missing transportId")?.to_string();
+    let session_id = app["sessionId"].as_str().unwrap_or("").to_string();
+
+    Ok(CastSessionInfo {
+        device_name,
+        device_addr,
+        device_port,
+        transport_id,
+        session_id,
+        media_session_id: 0,
+    })
+}
+
+async fn receiver_status(session: &CastSessionInfo) -> Result<Value, String> {
+    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
+    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
+    send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
+        json!({"type":"GET_STATUS","requestId":8})).await?;
+    recv_until(&mut tls, NS_RECV, |v| v["type"].as_str() == Some("RECEIVER_STATUS"), 8).await
+}
+
+fn media_session_id(session: &CastSessionInfo) -> Result<i32, String> {
+    if session.media_session_id > 0 {
+        Ok(session.media_session_id)
+    } else {
+        Err("No active cast media session".into())
+    }
+}
+
+#[tauri::command]
+pub async fn cast_connect(
+    state: State<'_, AppState>,
+    device_name: String,
+    device_addr: String,
+    device_port: u16,
+) -> Result<(), String> {
+    let session = ensure_cast_session(device_name, device_addr, device_port).await?;
+    *state.cast_session.lock().map_err(|e| e.to_string())? = Some(session);
+    Ok(())
+}
+
 // ── cast_play ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -177,31 +251,14 @@ pub async fn cast_play(
     artist: String,
     cover_url: String,
 ) -> Result<(), String> {
-    let mut tls = cast_connect(&device_addr, device_port).await?;
+    let mut session = ensure_cast_session(device_name, device_addr, device_port).await?;
+    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
 
     send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
-        json!({"type":"LAUNCH","requestId":1,"appId":MEDIA_RECEIVER_APP})).await?;
-
-    let recv_status = recv_until(&mut tls, NS_RECV, |v| {
-        v["type"].as_str() == Some("RECEIVER_STATUS")
-            && v["status"]["applications"].as_array()
-                .map(|apps| apps.iter().any(|a| a["appId"].as_str() == Some(MEDIA_RECEIVER_APP)))
-                .unwrap_or(false)
-    }, 20).await?;
-
-    let app = recv_status["status"]["applications"]
-        .as_array()
-        .and_then(|apps| apps.iter().find(|a| a["appId"].as_str() == Some(MEDIA_RECEIVER_APP)))
-        .ok_or("App not found in RECEIVER_STATUS")?;
-
-    let transport_id = app["transportId"].as_str().ok_or("Missing transportId")?.to_string();
-    let session_id = app["sessionId"].as_str().unwrap_or("").to_string();
-
-    send_msg(&mut tls, "sender-0", &transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
+    send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
 
     let images = if cover_url.is_empty() { json!([]) } else { json!([{"url": cover_url}]) };
-    send_msg(&mut tls, "sender-0", &transport_id, NS_MEDIA, json!({
+    send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA, json!({
         "type": "LOAD",
         "requestId": 2,
         "media": {
@@ -222,16 +279,15 @@ pub async fn cast_play(
         .and_then(|s| s["mediaSessionId"].as_i64())
         .unwrap_or(1) as i32;
 
-    *state.cast_session.lock().map_err(|e| e.to_string())? = Some(CastSessionInfo {
-        device_name, device_addr, device_port, transport_id, session_id, media_session_id,
-    });
+    session.media_session_id = media_session_id;
+    *state.cast_session.lock().map_err(|e| e.to_string())? = Some(session);
     Ok(())
 }
 
 // ── Helper: reconnect + send a media command ──────────────────────────────────
 
 async fn media_command(session: &CastSessionInfo, payload: Value) -> Result<(), String> {
-    let mut tls = cast_connect(&session.device_addr, session.device_port).await?;
+    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
     send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
     send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
     send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA, payload).await?;
@@ -244,7 +300,7 @@ async fn media_command(session: &CastSessionInfo, payload: Value) -> Result<(), 
 pub async fn cast_pause(state: State<'_, AppState>) -> Result<(), String> {
     let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
         .ok_or("No active cast session")?;
-    media_command(&session, json!({"type":"PAUSE","requestId":3,"mediaSessionId":session.media_session_id})).await
+    media_command(&session, json!({"type":"PAUSE","requestId":3,"mediaSessionId":media_session_id(&session)?})).await
 }
 
 // ── cast_resume ───────────────────────────────────────────────────────────────
@@ -253,7 +309,7 @@ pub async fn cast_pause(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn cast_resume(state: State<'_, AppState>) -> Result<(), String> {
     let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
         .ok_or("No active cast session")?;
-    media_command(&session, json!({"type":"PLAY","requestId":4,"mediaSessionId":session.media_session_id})).await
+    media_command(&session, json!({"type":"PLAY","requestId":4,"mediaSessionId":media_session_id(&session)?})).await
 }
 
 // ── cast_stop ─────────────────────────────────────────────────────────────────
@@ -262,7 +318,7 @@ pub async fn cast_resume(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn cast_stop(state: State<'_, AppState>) -> Result<(), String> {
     let session = { let mut l = state.cast_session.lock().map_err(|e| e.to_string())?; l.take() };
     if let Some(session) = session {
-        let mut tls = cast_connect(&session.device_addr, session.device_port).await?;
+        let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
         send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
         send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
             json!({"type":"STOP","requestId":5,"sessionId":session.session_id})).await?;
@@ -285,27 +341,36 @@ pub async fn cast_get_session(state: State<'_, AppState>) -> Result<Option<CastS
 pub struct CastPlaybackStatus {
     pub current_time: f64,
     pub player_state: String, // "PLAYING" | "PAUSED" | "IDLE" | "BUFFERING"
+    pub volume_level: f64,
 }
 
 #[tauri::command]
 pub async fn cast_get_status(state: State<'_, AppState>) -> Result<CastPlaybackStatus, String> {
     let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
         .ok_or("No active cast session")?;
-    let mut tls = cast_connect(&session.device_addr, session.device_port).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA,
-        json!({"type":"GET_STATUS","requestId":8,"mediaSessionId":session.media_session_id})).await?;
+    let receiver_status = receiver_status(&session).await?;
+    let volume_level = receiver_status["status"]["volume"]["level"].as_f64().unwrap_or(0.0);
 
-    let resp = recv_until(&mut tls, NS_MEDIA,
-        |v| v["type"].as_str() == Some("MEDIA_STATUS"), 8).await?;
+    let status = if session.media_session_id > 0 {
+        let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
+        send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
+        send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
+        send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA,
+            json!({"type":"GET_STATUS","requestId":9,"mediaSessionId":session.media_session_id})).await?;
 
-    let status = resp["status"].as_array().and_then(|a| a.first()).cloned()
-        .unwrap_or_default();
+        let resp = recv_until(&mut tls, NS_MEDIA,
+            |v| v["type"].as_str() == Some("MEDIA_STATUS"), 8).await?;
+
+        resp["status"].as_array().and_then(|a| a.first()).cloned()
+            .unwrap_or_default()
+    } else {
+        Value::Null
+    };
 
     Ok(CastPlaybackStatus {
         current_time: status["currentTime"].as_f64().unwrap_or(0.0),
         player_state: status["playerState"].as_str().unwrap_or("IDLE").to_string(),
+        volume_level,
     })
 }
 
@@ -316,7 +381,7 @@ pub async fn cast_get_status(state: State<'_, AppState>) -> Result<CastPlaybackS
 pub async fn cast_set_volume(state: State<'_, AppState>, level: f64) -> Result<(), String> {
     let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
         .ok_or("No active cast session")?;
-    let mut tls = cast_connect(&session.device_addr, session.device_port).await?;
+    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
     send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
     send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
         json!({"type":"SET_VOLUME","requestId":6,"volume":{"level": level}})).await?;
@@ -331,5 +396,5 @@ pub async fn cast_seek(state: State<'_, AppState>, position: f64) -> Result<(), 
     let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
         .ok_or("No active cast session")?;
     media_command(&session,
-        json!({"type":"SEEK","requestId":7,"mediaSessionId":session.media_session_id,"currentTime":position})).await
+        json!({"type":"SEEK","requestId":7,"mediaSessionId":media_session_id(&session)?,"currentTime":position})).await
 }

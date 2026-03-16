@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
   import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists } from '$lib/stores/player';
+  import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import { get } from 'svelte/store';
   import { createPlaylist, fetchAlbumSongs, fetchPlaylists, materializeSong, searchSongs, type Album } from '$lib/servers';
 
@@ -78,6 +79,7 @@
       });
       const playlist = await createPlaylist(playlistName, playlistSongIds);
       subsonicPlaylists.update((lists) => [playlist, ...lists]);
+      requestLibraryRefresh();
       fetchPlaylists()
         .then((lists) => subsonicPlaylists.set(lists))
         .catch(() => undefined);

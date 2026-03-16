@@ -2,7 +2,7 @@ import { getContext, setContext } from 'svelte';
 import { toast } from 'svelte-sonner';
 import { platform } from '@tauri-apps/plugin-os';
 import { backendSettings, defaultBackendSettings } from '$lib/stores/backend-settings';
-import { libraryRefresh } from '$lib/stores/ui-state';
+import { requestLibraryRefresh } from '$lib/stores/ui-state';
 import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
 import {
   fetchAppSettings,
@@ -136,7 +136,7 @@ class SettingsController {
         discordRpcEnabled: this.discordRpcEnabled,
       });
 
-      libraryRefresh.update((value) => value + 1);
+      requestLibraryRefresh();
 
       if (this.lastFmSharedSecret.trim()) {
         this.lastFmSharedSecretConfigured = true;

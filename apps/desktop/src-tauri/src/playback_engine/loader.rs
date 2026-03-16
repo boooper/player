@@ -130,16 +130,6 @@ pub async fn load_track_payload(
                 read_stream_bytes(state, &playback_song.stream_url).await?
             };
 
-            if bytes.len() >= 16 {
-                eprintln!(
-                    "Playback load {} content-type='{}' bytes={} head={:02x?}",
-                    requested_song.id,
-                    content_type,
-                    bytes.len(),
-                    &bytes[..16]
-                );
-            }
-
             if content_type.contains("application/json") {
                 let snippet = String::from_utf8_lossy(&bytes[..bytes.len().min(160)]);
                 return Err(format!("Expected audio stream for playback, got JSON response: {snippet}"));

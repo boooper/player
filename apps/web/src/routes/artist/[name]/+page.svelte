@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Play, Shuffle, ChevronLeft, ChevronRight, Sparkles, Mic2 } from '@lucide/svelte';
+  import { Play, Pause, Shuffle, ChevronLeft, ChevronRight, Sparkles, Mic2 } from '@lucide/svelte';
 
   import {
     fetchArtistAlbums,
@@ -14,7 +14,7 @@
     type DiscoveryArtistInfo as ArtistInfo,
     type DiscoverySong as LastFmSong
   } from '$lib/discovery';
-  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -22,6 +22,7 @@
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { mergeAlbums, mergeAlbumSongs, type MergedAlbum } from '$lib/media-merge';
   import { formatClockDuration } from '$lib/utils';
+  import { libraryRefresh } from '$lib/stores/ui-state';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -44,10 +45,34 @@
 
   let albumSongs = $state<Record<string, Song[]>>({});
   let albumLoading = $state<Record<string, boolean>>({});
+  let artistLoadVersion = 0;
+  const ARTIST_LOAD_TIMEOUT_MS = 12000;
 
   let carouselEl = $state<HTMLDivElement | null>(null);
+  const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
+  const artistIsActive = $derived($playingFrom.href === artistHref);
+
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        reject(new Error(`${label} timed out.`));
+      }, ms);
+
+      promise.then(
+        (value) => {
+          window.clearTimeout(timeout);
+          resolve(value);
+        },
+        (reason) => {
+          window.clearTimeout(timeout);
+          reject(reason);
+        }
+      );
+    });
+  }
 
   async function loadArtist(name: string) {
+    const loadVersion = ++artistLoadVersion;
     loading = true;
     error = '';
     artistInfo = null;
@@ -59,25 +84,38 @@
     albumLoading = {};
     showAllTracks = false;
     try {
-      const [info, top, sub, albs] = await Promise.all([
-        getArtistInfo(name),
-        getArtistTopTracks(name, 10),
-        searchSongs(name, 30),
-        fetchArtistAlbums(name, 24)
+      const [infoResult, topResult, subResult, albumResult] = await Promise.allSettled([
+        withTimeout(getArtistInfo(name), ARTIST_LOAD_TIMEOUT_MS, 'Artist metadata load'),
+        withTimeout(getArtistTopTracks(name, 10), ARTIST_LOAD_TIMEOUT_MS, 'Artist top tracks load'),
+        withTimeout(searchSongs(name, 30), ARTIST_LOAD_TIMEOUT_MS, 'Artist songs load'),
+        withTimeout(fetchArtistAlbums(name, 24), ARTIST_LOAD_TIMEOUT_MS, 'Artist albums load')
       ]);
-      artistInfo = info;
-      topTracks = top;
-      subsonicSongs = sub;
-      albums = albs;
-      mergedAlbums = mergeAlbums(albs);
+      if (loadVersion !== artistLoadVersion) return;
+      artistInfo = infoResult.status === 'fulfilled' ? infoResult.value : null;
+      topTracks = topResult.status === 'fulfilled' ? topResult.value : [];
+      subsonicSongs = subResult.status === 'fulfilled' ? subResult.value : [];
+      albums = albumResult.status === 'fulfilled' ? albumResult.value : [];
+      mergedAlbums = mergeAlbums(albums);
+
+      if (!artistInfo && topTracks.length === 0 && subsonicSongs.length === 0 && albums.length === 0) {
+        throw new Error('Failed to load artist.');
+      }
     } catch (err) {
+      if (loadVersion !== artistLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load artist.';
     } finally {
+      if (loadVersion !== artistLoadVersion) return;
       loading = false;
     }
   }
 
   $effect(() => {
+    const refresh = $libraryRefresh;
+    const metadataProvider = $backendSettings.metadataProvider;
+    const recommendationProvider = $backendSettings.recommendationProvider;
+    void refresh;
+    void metadataProvider;
+    void recommendationProvider;
     loadArtist(data.name);
   });
 
@@ -117,7 +155,14 @@
     if (!albumSongs[album.id]) {
       albumLoading = { ...albumLoading, [album.id]: true };
       try {
-        const fetched = await Promise.all(album.sourceIds.map((sourceId) => fetchAlbumSongs(sourceId).catch(() => [])));
+        const fetchedResults = await Promise.allSettled(
+          album.sourceIds.map((sourceId) =>
+            withTimeout(fetchAlbumSongs(sourceId), ARTIST_LOAD_TIMEOUT_MS, 'Album tracks load').catch(() => [])
+          )
+        );
+        const fetched = fetchedResults.flatMap((result) =>
+          result.status === 'fulfilled' ? [result.value] : []
+        );
         albumSongs = { ...albumSongs, [album.id]: mergeAlbumSongs(fetched.flat()) };
       } catch {
         albumSongs = { ...albumSongs, [album.id]: [] };
@@ -170,9 +215,16 @@
     if (shuffleAllArtist) {
         const toastId = toast.loading(`Loading all ${data.name} songs…`);
       try {
-        const allSongs = mergeAlbumSongs((await Promise.all(
-          mergedAlbums.flatMap((album) => album.sourceIds.map((sourceId) => fetchAlbumSongs(sourceId).catch(() => [])))
-        )).flat());
+        const allSongResults = await Promise.allSettled(
+          mergedAlbums.flatMap((album) =>
+            album.sourceIds.map((sourceId) =>
+              withTimeout(fetchAlbumSongs(sourceId), ARTIST_LOAD_TIMEOUT_MS, 'Album tracks load').catch(() => [])
+            )
+          )
+        );
+        const allSongs = mergeAlbumSongs(
+          allSongResults.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+        );
         if (!allSongs.length) throw new Error('No songs found');
         for (let i = allSongs.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -210,99 +262,128 @@
 </script>
 
 <!-- Hero -->
-<div class="page-hero relative -mx-4 -mt-4 mb-6 overflow-hidden">
+<div class="page-hero app-glass relative -mx-4 -mt-4 mb-8 overflow-hidden rounded-[2rem]">
   {#if artistInfo?.imageUrl}
     <div class="absolute inset-0">
-      <img class="h-full w-full object-cover object-top" src={artistInfo.imageUrl} alt="" aria-hidden="true" />
-      <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/60 to-background"></div>
+      <img class="h-full w-full object-cover object-top opacity-30" src={artistInfo.imageUrl} alt="" aria-hidden="true" />
+      <div class="absolute inset-0 bg-gradient-to-b from-black/30 via-background/35 to-background"></div>
     </div>
   {:else}
-    <div class="absolute inset-0 bg-gradient-to-b from-primary/35 via-primary/15 to-background"></div>
+    <div class="absolute inset-0 bg-gradient-to-br from-primary/18 via-background/20 to-background"></div>
   {/if}
 
-  <div class="relative px-6 pb-6 pt-10">
-    {#if loading}
-      <div class="h-16 w-56 animate-pulse rounded bg-white/10"></div>
-    {:else}
-      <p class="mb-1 text-xs font-semibold uppercase tracking-widest text-white/70">Artist</p>
-      <h1 class="text-5xl font-black tracking-tight text-white drop-shadow-lg sm:text-6xl">{data.name}</h1>
-      {#if artistInfo?.listeners}
-        <p class="mt-2 text-sm text-white/60">{fmtListeners(artistInfo.listeners)}</p>
+  <div class="relative grid gap-8 px-6 pb-7 pt-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end lg:gap-10 lg:pb-9 lg:pt-10">
+    <div>
+      {#if loading}
+        <div class="h-16 w-56 animate-pulse rounded bg-white/10"></div>
+      {:else}
+        <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">Artist</p>
+        <h1 class="app-section-title max-w-3xl text-5xl font-black tracking-tight sm:text-6xl lg:text-7xl">{data.name}</h1>
+        <div class="mt-4 flex flex-wrap gap-2 text-xs font-medium">
+          {#if artistInfo?.listeners}
+            <span class="app-card-soft rounded-full px-3 py-1.5">{fmtListeners(artistInfo.listeners)}</span>
+          {/if}
+          {#if mergedAlbums.length > 0}
+            <span class="app-card-soft rounded-full px-3 py-1.5">{mergedAlbums.length} releases</span>
+          {/if}
+          {#if playableTopTracks.length > 0}
+            <span class="app-card-soft rounded-full px-3 py-1.5">{playableTopTracks.length} playable tracks</span>
+          {/if}
+        </div>
+        {#if artistInfo?.tags?.length}
+          <div class="mt-4 flex flex-wrap gap-2">
+            {#each artistInfo.tags as tag (tag)}
+              <span class="app-card-soft rounded-full px-3 py-1 text-xs font-medium">{tag}</span>
+            {/each}
+          </div>
+        {/if}
       {/if}
-      {#if artistInfo?.tags?.length}
-        <div class="mt-2 flex flex-wrap gap-1.5">
-          {#each artistInfo.tags as tag (tag)}
-            <span class="rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-white/80">{tag}</span>
-          {/each}
+      <div class="mt-6 flex items-center gap-3">
+        <button
+          class="grid size-14 shrink-0 place-items-center rounded-full bg-white text-black shadow-[0_16px_40px_rgba(0,0,0,0.35)] transition duration-200 hover:scale-[1.04] disabled:opacity-40"
+          onclick={() => artistIsActive ? togglePlayRequest.update((n) => n + 1) : playOrShuffleAll()}
+          disabled={playableTopTracks.length === 0 && !shuffleAllArtist}
+          aria-label={artistIsActive && $isPlaying ? 'Pause' : 'Play'}
+        >
+          {#if artistIsActive && $isPlaying}
+            <Pause class="size-6" fill="currentColor" />
+          {:else}
+            <Play class="size-6 translate-x-0.5" fill="currentColor" />
+          {/if}
+        </button>
+        <!-- Shuffle dropdown -->
+        <DropdownMenu>
+          <DropdownMenuTrigger>
+            {#snippet child({ props })}
+              <button
+                {...props}
+                class="app-round-button flex h-11 items-center gap-2 rounded-full px-4 text-sm font-medium transition-colors {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+                aria-label="Shuffle options"
+                title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
+                disabled={playableTopTracks.length === 0 && mergedAlbums.length === 0}
+              >
+                {#if $smartShuffleMode}
+                  <Sparkles class="size-4 {smartShuffleFetching ? 'animate-pulse' : ''}" />
+                  Smart Shuffle
+                {:else if $shuffleEnabled}
+                  <Shuffle class="size-4" />
+                  Shuffle On
+                {:else}
+                  <Shuffle class="size-4" />
+                  Shuffle
+                {/if}
+              </button>
+            {/snippet}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" class="min-w-56">
+            <DropdownMenuItem onclick={activateShuffle} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
+              <Shuffle class="size-4 shrink-0" />
+              <div>
+                <p class="font-medium">Shuffle</p>
+                <p class="text-xs text-muted-foreground">Play popular tracks in random order</p>
+              </div>
+              {#if $shuffleEnabled && !$smartShuffleMode}
+                <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
+              {/if}
+            </DropdownMenuItem>
+            <DropdownMenuItem onclick={activateSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
+              <Sparkles class="size-4 shrink-0" />
+              <div>
+                <p class="font-medium">Smart Shuffle</p>
+                <p class="text-xs text-muted-foreground">Weaves in Last.fm recommendations</p>
+              </div>
+              {#if $smartShuffleMode}
+                <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
+              {/if}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onclick={activateShuffleAll} disabled={mergedAlbums.length === 0} class="gap-3 {shuffleAllArtist ? 'text-primary' : ''}">
+              <Mic2 class="size-4 shrink-0" />
+              <div>
+                <p class="font-medium">Shuffle All Songs</p>
+                <p class="truncate max-w-40 text-xs text-muted-foreground">{data.name} · entire discography</p>
+              </div>
+              {#if shuffleAllArtist}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onclick={deactivateShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
+              <span class="size-4 shrink-0 flex items-center justify-center text-xs font-bold">—</span>
+              Off
+              {#if !$shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+
+    <div class="app-card hidden h-[250px] overflow-hidden rounded-[1.75rem] lg:flex">
+      {#if artistInfo?.imageUrl}
+        <img class="h-full w-full object-cover" src={artistInfo.imageUrl} alt={data.name} loading="lazy" />
+      {:else}
+        <div class="grid h-full w-full place-items-center bg-gradient-to-br from-secondary to-accent text-5xl font-black">
+          {initials(data.name)}
         </div>
       {/if}
-    {/if}
-    <div class="mt-5 flex items-center gap-3">
-      <button
-        class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
-        onclick={playOrShuffleAll}
-        disabled={playableTopTracks.length === 0 && !shuffleAllArtist}
-        aria-label="Play"
-      >
-        <Play class="size-6 translate-x-0.5" fill="currentColor" />
-      </button>
-      <!-- Shuffle dropdown -->
-      <DropdownMenu>
-        <DropdownMenuTrigger>
-          {#snippet child({ props })}
-            <button
-              {...props}
-              class="flex size-10 items-center justify-center rounded-md transition-colors {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-white/70 hover:text-white'}"
-              aria-label="Shuffle options"
-              title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
-          disabled={playableTopTracks.length === 0 && mergedAlbums.length === 0}
-            >
-              {#if $smartShuffleMode}
-                <Sparkles class="size-5 {smartShuffleFetching ? 'animate-pulse' : ''}" />
-              {:else}
-                <Shuffle class="size-5" />
-              {/if}
-            </button>
-          {/snippet}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" class="min-w-56">
-          <DropdownMenuItem onclick={activateShuffle} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
-            <Shuffle class="size-4 shrink-0" />
-            <div>
-              <p class="font-medium">Shuffle</p>
-              <p class="text-xs text-muted-foreground">Play popular tracks in random order</p>
-            </div>
-            {#if $shuffleEnabled && !$smartShuffleMode}
-              <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-            {/if}
-          </DropdownMenuItem>
-          <DropdownMenuItem onclick={activateSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
-            <Sparkles class="size-4 shrink-0" />
-            <div>
-              <p class="font-medium">Smart Shuffle</p>
-              <p class="text-xs text-muted-foreground">Weaves in Last.fm recommendations</p>
-            </div>
-            {#if $smartShuffleMode}
-              <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-            {/if}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onclick={activateShuffleAll} disabled={mergedAlbums.length === 0} class="gap-3 {shuffleAllArtist ? 'text-primary' : ''}">
-            <Mic2 class="size-4 shrink-0" />
-            <div>
-              <p class="font-medium">Shuffle All Songs</p>
-              <p class="truncate max-w-40 text-xs text-muted-foreground">{data.name} · entire discography</p>
-            </div>
-            {#if shuffleAllArtist}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onclick={deactivateShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
-            <span class="size-4 shrink-0 flex items-center justify-center text-xs font-bold">—</span>
-            Off
-            {#if !$shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
   </div>
 </div>
@@ -324,12 +405,17 @@
   </div>
 {:else if playableTopTracks.length > 0}
   <section class="page-section mb-8">
-    <h2 class="mb-3 text-xl font-bold">Popular</h2>
+    <div class="mb-4 flex items-end justify-between gap-4">
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Highlights</p>
+        <h2 class="app-section-title text-xl font-bold">Popular</h2>
+      </div>
+    </div>
     <div class="space-y-1">
       {#each visibleTopTracks as { lfm, sub }, i (lfm.id)}
         <SongContextMenu song={sub} onplay={() => playTopTrack(i)}>
           <button
-            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent"
+            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
             style:--stagger-index={i}
             onclick={() => playTopTrack(i)}
           >
@@ -369,12 +455,15 @@
 {#if mergedAlbums.length > 0}
   <section class="page-section mb-8">
     <div class="mb-3 flex items-center justify-between">
-      <h2 class="text-xl font-bold">Discography</h2>
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Collection</p>
+        <h2 class="app-section-title text-xl font-bold">Discography</h2>
+      </div>
       <div class="flex gap-1">
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scrollCarousel(-1)} aria-label="Scroll left">
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scrollCarousel(-1)} aria-label="Scroll left">
           <ChevronLeft class="size-4" />
         </button>
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scrollCarousel(1)} aria-label="Scroll right">
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scrollCarousel(1)} aria-label="Scroll right">
           <ChevronRight class="size-4" />
         </button>
       </div>
@@ -382,10 +471,10 @@
     <div bind:this={carouselEl} class="flex gap-4 overflow-x-auto pb-3" style="scrollbar-width:none;-ms-overflow-style:none">
       {#each mergedAlbums as album, index (album.id)}
         <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
-        <div class="stagger-item group relative flex w-44 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 text-left transition hover:bg-accent" style={`--stagger-index:${index};`}>
+        <div class="app-card app-hover stagger-item group relative flex w-44 shrink-0 flex-col gap-2 rounded-2xl p-3 text-left" style={`--stagger-index:${index};`}>
           <a
             href="/album/{encodeURIComponent(album.id)}"
-            class="absolute inset-0 z-10 rounded-lg"
+            class="absolute inset-0 z-10 rounded-2xl"
             aria-label="Open {album.name}"
           ></a>
           <div class="relative w-full">
@@ -425,12 +514,15 @@
 <!-- Fans also like -->
 {#if artistInfo?.similarArtists?.length}
   <section class="page-section mb-8">
-    <h2 class="mb-3 text-xl font-bold">Fans also like</h2>
+    <div class="mb-4">
+      <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Related</p>
+      <h2 class="app-section-title text-xl font-bold">Fans also like</h2>
+    </div>
     <div class="flex flex-wrap gap-3">
       {#each artistInfo.similarArtists as artist, index (artist.name)}
         <a
           href="/artist/{encodeURIComponent(artist.name)}"
-          class="stagger-item flex flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent"
+          class="app-card app-hover stagger-item flex flex-col items-center gap-2 rounded-2xl p-3 text-center"
           style={`--stagger-index:${index};`}
         >
           {#if artist.imageUrl}

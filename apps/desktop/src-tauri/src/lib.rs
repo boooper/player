@@ -134,11 +134,13 @@ pub fn run() {
             commands::library::library_star,
             commands::library::library_add_to_playlist,
             commands::library::library_create_playlist,
+            commands::library::library_rename_playlist,
             commands::library::library_materialize_song,
             // lyrics
             commands::lyrics::fetch_lyrics,
             // chromecast
             commands::cast::cast_discover,
+            commands::cast::cast_connect,
             commands::cast::cast_play,
             commands::cast::cast_pause,
             commands::cast::cast_resume,

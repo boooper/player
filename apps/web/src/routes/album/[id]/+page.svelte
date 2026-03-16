@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Play, Pause, Shuffle, Clock3, ArrowLeft } from '@lucide/svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
@@ -32,8 +31,11 @@
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
   import { Sparkles } from '@lucide/svelte';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
+  const albumHref = $derived(`/album/${encodeURIComponent(data.id)}`);
+  const albumIsActive = $derived($playingFrom.href === albumHref);
 
   let { data } = $props<{ data: { id: string } }>();
 
@@ -41,33 +43,74 @@
   let error = $state('');
   let album = $state<(Album & { genre?: string }) | null>(null);
   let songs = $state<Song[]>([])
+  let albumLoadVersion = 0;
+  const ALBUM_LOAD_TIMEOUT_MS = 12000;
 
-  onMount(async () => {
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        reject(new Error(`${label} timed out.`));
+      }, ms);
+
+      promise.then(
+        (value) => {
+          window.clearTimeout(timeout);
+          resolve(value);
+        },
+        (reason) => {
+          window.clearTimeout(timeout);
+          reject(reason);
+        }
+      );
+    });
+  }
+
+  async function loadAlbum() {
+    const loadVersion = ++albumLoadVersion;
     loading = true;
     error = '';
     try {
-      const detail = await fetchAlbumDetail(data.id);
-      const artistAlbums = await fetchArtistAlbums(detail.album.artist, 100).catch(() => [detail.album]);
+      const detail = await withTimeout(fetchAlbumDetail(data.id), ALBUM_LOAD_TIMEOUT_MS, 'Album load');
+      const artistAlbums = await withTimeout(
+        fetchArtistAlbums(detail.album.artist, 100),
+        ALBUM_LOAD_TIMEOUT_MS,
+        'Related albums load'
+      ).catch(() => [detail.album]);
       const groupedAlbumIds = Array.from(new Set([
         detail.album.id,
         ...findAlbumGroupIds(artistAlbums, detail.album)
       ]));
-      const albumSongLists = await Promise.all(
-        groupedAlbumIds.map((albumId) => fetchAlbumSongs(albumId).catch(() => []))
+      const albumSongResults = await Promise.allSettled(
+        groupedAlbumIds.map((albumId) =>
+          withTimeout(fetchAlbumSongs(albumId), ALBUM_LOAD_TIMEOUT_MS, 'Album tracks load').catch(() => [])
+        )
+      );
+      const albumSongLists = albumSongResults.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : []
       );
       const mergedSongs = mergeAlbumSongs(albumSongLists.flat());
+      const resolvedSongs = mergedSongs.length ? mergedSongs : detail.songs;
+      if (loadVersion !== albumLoadVersion) return;
 
       album = {
         ...detail.album,
-        songCount: mergedSongs.length,
-        duration: mergedSongs.reduce((total, song) => total + (song.duration || 0), 0)
+        songCount: resolvedSongs.length,
+        duration: resolvedSongs.reduce((total, song) => total + (song.duration || 0), 0)
       };
-      songs = mergedSongs;
+      songs = resolvedSongs;
     } catch (err) {
+      if (loadVersion !== albumLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load album.';
     } finally {
+      if (loadVersion !== albumLoadVersion) return;
       loading = false;
     }
+  }
+
+  $effect(() => {
+    const refresh = $libraryRefresh;
+    void refresh;
+    loadAlbum();
   });
 
   function playFrom(index: number) {
@@ -121,17 +164,17 @@
   </button>
 
   <!-- Hero -->
-  <div class="page-hero mb-8 flex flex-col gap-6 sm:flex-row sm:items-end">
+  <div class="page-hero app-glass mb-8 flex flex-col gap-6 rounded-[2rem] p-5 sm:flex-row sm:items-end">
     {#if loading}
-      <div class="aspect-square w-48 shrink-0 animate-pulse rounded-lg bg-muted shadow-2xl"></div>
+      <div class="aspect-square w-48 shrink-0 animate-pulse rounded-2xl bg-muted shadow-2xl"></div>
     {:else if album?.coverArtUrl}
       <img
-        class="aspect-square w-48 shrink-0 rounded-lg object-cover shadow-2xl"
+        class="aspect-square w-48 shrink-0 rounded-2xl object-cover shadow-2xl"
         src={album.coverArtUrl}
         alt={album?.name ?? ''}
       />
     {:else}
-      <div class="grid aspect-square w-48 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-slate-600 to-slate-800 text-4xl font-black shadow-2xl">
+      <div class="app-card grid aspect-square w-48 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-secondary to-accent text-4xl font-black shadow-2xl">
         {album ? initials(album.name) : ''}
       </div>
     {/if}
@@ -144,7 +187,7 @@
       {:else if album}
         <p class="mb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Album</p>
         <div class="mb-1 flex flex-wrap items-center gap-2">
-          <h1 class="text-4xl font-black tracking-tight sm:text-5xl">{album.name}</h1>
+          <h1 class="app-section-title text-4xl font-black tracking-tight sm:text-5xl">{album.name}</h1>
           <ExternalSourceBadge id={album.id} />
         </div>
         <div class="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
@@ -173,18 +216,22 @@
         <div class="mt-5 flex items-center gap-3">
           <button
             class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
-            onclick={playAll}
+            onclick={() => albumIsActive ? togglePlayRequest.update((n) => n + 1) : playAll()}
             disabled={songs.length === 0}
-            aria-label="Play album"
+            aria-label={albumIsActive && $isPlaying ? 'Pause album' : 'Play album'}
           >
-            <Play class="size-6 translate-x-0.5" fill="currentColor" />
+            {#if albumIsActive && $isPlaying}
+              <Pause class="size-6" fill="currentColor" />
+            {:else}
+              <Play class="size-6 translate-x-0.5" fill="currentColor" />
+            {/if}
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger>
               {#snippet child({ props })}
                 <button
                   {...props}
-                  class="grid size-10 shrink-0 place-items-center rounded-md transition {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+                  class="app-round-button grid size-10 shrink-0 place-items-center rounded-full transition {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
                   aria-label="Shuffle options"
                   title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
                   disabled={songs.length === 0}

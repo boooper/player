@@ -107,4 +107,5 @@ export type CastSessionInfo = {
 export type CastPlaybackStatus = {
   currentTime: number;
   playerState: 'PLAYING' | 'PAUSED' | 'IDLE' | 'BUFFERING';
+  volumeLevel: number;
 };

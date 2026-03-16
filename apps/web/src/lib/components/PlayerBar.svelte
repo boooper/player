@@ -57,7 +57,7 @@
     markSmartShuffleTracks,
     smartShuffleTrackIds
   } from '$lib/stores/player';
-  import { fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, desktopPlaybackIsCached, type CastDeviceInfo } from '$lib/servers';
+  import { fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castConnect as castConnectCmd, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetSession as castGetSessionCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, desktopPlaybackIsCached, type CastDeviceInfo } from '$lib/servers';
   import { getUpNextSongs } from '$lib/discovery';
   import { fetchLikedArtists, saveVolume } from '$lib/servers';
   import { EQ_FREQUENCIES, normalizeEqBands } from '$lib/audio/equalizer';
@@ -79,6 +79,7 @@
   let castActive = $state(false);
   let castPlaying = $state(false);
   let castDevice = $state<CastDeviceInfo | null>(null);
+  let castVolume = $state<number | null>(null);
   const desktopPlayback = isTauri();
   let desktopLoadedTrackId = $state<string | null>(null);
   let desktopEndedTrackId = $state<string | null>(null);
@@ -106,8 +107,7 @@
   }
 
   async function startCast(device: CastDeviceInfo) {
-    if (!currentTrack) { toast.warning('No track selected'); return; }
-    const toastId = toast.loading(`Connecting to ${device.name}…`);
+    const toastId = toast.loading(`Connecting to ${device.name}...`);
     try {
       if ($isPlaying) {
         pauseLocalAudio();
@@ -116,19 +116,34 @@
       castDevice = device;
       castActive = true;
       castPlaying = false;
-      await castPlayCmd({
-        deviceName: device.name,
-        deviceAddr: device.addr,
-        devicePort: device.port,
-        streamUrl: currentTrack.streamUrl,
-        title: currentTrack.title,
-        artist: currentTrack.artist,
-        coverUrl: currentTrack.coverArtUrl ?? '',
-      });
-      castPlaying = true;
-      toast.success(`Casting to ${device.name}`, { id: toastId });
+      if (currentTrack) {
+        await castPlayCmd({
+          deviceName: device.name,
+          deviceAddr: device.addr,
+          devicePort: device.port,
+          streamUrl: currentTrack.streamUrl,
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          coverUrl: currentTrack.coverArtUrl ?? '',
+        });
+        castPlaying = true;
+        toast.success(`Casting to ${device.name}`, { id: toastId });
+      } else {
+        await castConnectCmd({
+          deviceName: device.name,
+          deviceAddr: device.addr,
+          devicePort: device.port,
+        });
+        const status = await castGetStatusCmd();
+        castVolume = status.volumeLevel;
+        volVal = [status.volumeLevel * 100];
+        _lastPlayerState = status.playerState;
+        toast.success(`Connected to ${device.name}`, { id: toastId });
+      }
     } catch (e) {
       castActive = false;
+      castPlaying = false;
+      castVolume = null;
       castDevice = null;
       toast.error(`Cast failed: ${e}`, { id: toastId });
     }
@@ -138,6 +153,7 @@
     const name = castDevice?.name ?? 'device';
     castActive = false;
     castPlaying = false;
+    castVolume = null;
     castDevice = null;
     try { await castStopCmd(); } catch {}
     toast.success(`Stopped casting to ${name}`);
@@ -150,14 +166,18 @@
       if (!castActive || seekDragging) return;
       try {
         const status = await castGetStatusCmd();
+        castVolume = status.volumeLevel;
+        if (!volDragging) volVal = [status.volumeLevel * 100];
         // Update UI time + playing flag when available
         if (status.playerState === 'PLAYING' || status.playerState === 'PAUSED') {
           currentTime.set(status.currentTime);
           castPlaying = status.playerState === 'PLAYING';
+        } else if (status.playerState === 'IDLE') {
+          castPlaying = false;
         }
 
         // If device transitioned to IDLE, advance the queue
-        if (_lastPlayerState !== 'IDLE' && status.playerState === 'IDLE') {
+        if (_lastPlayerState && _lastPlayerState !== 'IDLE' && status.playerState === 'IDLE') {
           // Use store action to advance; this will set shouldAutoplay and
           // Effect 3 will route playback through Cast when active.
           nextTrack();
@@ -174,6 +194,35 @@
     function handleTogglePlay() { togglePlay(); }
     window.addEventListener('player:toggle-play', handleTogglePlay);
     let desktopPoll = 0;
+
+    if (desktopPlayback) {
+      castGetSessionCmd()
+        .then(async (session) => {
+          if (!session) return;
+          castDevice = {
+            name: session.deviceName,
+            addr: session.deviceAddr,
+            port: session.devicePort,
+          };
+          castActive = true;
+
+          try {
+            const status = await castGetStatusCmd();
+            currentTime.set(status.currentTime);
+            castPlaying = status.playerState === 'PLAYING';
+            castVolume = status.volumeLevel;
+            volVal = [status.volumeLevel * 100];
+            _lastPlayerState = status.playerState;
+          } catch {
+            castActive = false;
+            castPlaying = false;
+            castVolume = null;
+            castDevice = null;
+          }
+        })
+        .catch(() => undefined);
+    }
+
     if (desktopPlayback) {
       desktopPoll = window.setInterval(() => {
         if (castActive) return;
@@ -942,6 +991,20 @@
       if (castPlaying) {
         castPlaying = false;
         castPauseCmd().catch((e) => { castPlaying = true; toast.error(`Cast pause failed: ${e}`); });
+      } else if (currentTrack && (!_lastPlayerState || _lastPlayerState === 'IDLE')) {
+        castPlaying = true;
+        castPlayCmd({
+          deviceName: castDevice?.name ?? 'Chromecast',
+          deviceAddr: castDevice?.addr ?? '',
+          devicePort: castDevice?.port ?? 0,
+          streamUrl: currentTrack.streamUrl,
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          coverUrl: currentTrack.coverArtUrl ?? '',
+        }).catch((e) => {
+          castPlaying = false;
+          toast.error(`Cast play failed: ${e}`);
+        });
       } else {
         castPlaying = true;
         castResumeCmd().catch((e) => { castPlaying = false; toast.error(`Cast resume failed: ${e}`); });
@@ -979,7 +1042,16 @@
   function onVolumeWheel(e: WheelEvent) {
     e.preventDefault();
     const delta = e.deltaY < 0 ? 0.05 : -0.05;
-    const next = Math.max(0, Math.min(1, $volume + delta));
+    const base = castActive ? (castVolume ?? $volume) : $volume;
+    const next = Math.max(0, Math.min(1, base + delta));
+    volVal = [next * 100];
+
+    if (castActive) {
+      castVolume = next;
+      castSetVolumeCmd(next).catch(() => {});
+      return;
+    }
+
     volume.set(next);
     if (desktopPlayback) {
       desktopPlaybackSetVolume(next).catch(() => undefined);
@@ -987,7 +1059,6 @@
       const activeAudio = getActiveAudio();
       if (activeAudio) activeAudio.volume = next;
     }
-    if (castActive) castSetVolumeCmd(next).catch(() => {});
     debounceSaveVolume(next);
   }
 
@@ -1008,6 +1079,13 @@
 
   function changeVolume(values: number[]) {
     const value = Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100));
+    volVal = [value * 100];
+    if (castActive) {
+      castVolume = value;
+      castSetVolumeCmd(value).catch(() => {});
+      return;
+    }
+
     volume.set(value);
     if (desktopPlayback) {
       desktopPlaybackSetVolume(value).catch(() => undefined);
@@ -1015,19 +1093,27 @@
       const activeAudio = getActiveAudio();
       if (activeAudio) activeAudio.volume = value;
     }
-    if (castActive) castSetVolumeCmd(value).catch(() => {});
   }
 
   function commitVolume(values: number[]) {
     changeVolume(values);
     volDragging = false;
+    if (castActive) return;
     saveVolume(Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100)));
   }
 
   let premuteVolume = $state(0.8);
   function toggleMute() {
-    if ($volume <= 0.01) {
+    const activeVolume = castActive ? (castVolume ?? $volume) : $volume;
+    if (activeVolume <= 0.01) {
       const restore = premuteVolume > 0.01 ? premuteVolume : 0.8;
+      volVal = [restore * 100];
+      if (castActive) {
+        castVolume = restore;
+        castSetVolumeCmd(restore).catch(() => {});
+        return;
+      }
+
       volume.set(restore);
       if (desktopPlayback) {
         desktopPlaybackSetVolume(restore).catch(() => undefined);
@@ -1035,10 +1121,16 @@
         const activeAudio = getActiveAudio();
         if (activeAudio) activeAudio.volume = restore;
       }
-      if (castActive) castSetVolumeCmd(restore).catch(() => {});
       saveVolume(restore);
     } else {
-      premuteVolume = $volume;
+      premuteVolume = activeVolume;
+      volVal = [0];
+      if (castActive) {
+        castVolume = 0;
+        castSetVolumeCmd(0).catch(() => {});
+        return;
+      }
+
       volume.set(0);
       if (desktopPlayback) {
         desktopPlaybackSetVolume(0).catch(() => undefined);
@@ -1046,7 +1138,6 @@
         const activeAudio = getActiveAudio();
         if (activeAudio) activeAudio.volume = 0;
       }
-      if (castActive) castSetVolumeCmd(0).catch(() => {});
     }
   }
 
@@ -1386,7 +1477,7 @@
         role="group"
         aria-label="Volume"
       >
-        {#if $volume <= 0.01}
+        {#if (castActive ? (castVolume ?? $volume) : $volume) <= 0.01}
           <button onclick={toggleMute} aria-label="Unmute" class="player-volume-button shrink-0 text-muted-foreground hover:text-foreground">
             <VolumeX class="size-[18px]" />
           </button>

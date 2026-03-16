@@ -96,8 +96,8 @@
   }
 </script>
 
-<aside class="app-shell-rail hidden h-full shrink-0 flex-col overflow-hidden transition-[width] duration-300 ease-in-out xl:flex {open ? 'w-72 border-l border-border/40' : 'w-0'}">
-  <div class="flex w-72 shrink-0 items-center justify-between border-b border-border/40 px-4 py-4">
+<aside class="app-shell-rail flex h-full w-full shrink-0 flex-col overflow-hidden border-l border-border/40">
+  <div class="flex shrink-0 items-center justify-between border-b border-border/40 px-4 py-4">
     {#if $playingFrom.type}
       <div class="flex min-w-0 flex-1 flex-col">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -120,7 +120,7 @@
     </Button>
   </div>
 
-  <ScrollArea class="h-full flex-1 px-4 pt-4 pb-24 w-72">
+  <ScrollArea class="h-full flex-1 px-4 pt-4 pb-24">
     {#if $focusTrack}
       <div class="space-y-4">
         <div class="group/art relative aspect-square w-full">

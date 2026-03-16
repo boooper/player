@@ -18,6 +18,7 @@
     type Song
   } from '$lib/servers';
   import { backendSettings } from '$lib/stores/backend-settings';
+  import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import { primarySongArtist } from '$lib/song-artists';
 
   let { song, onplay, children, triggerClass }: {
@@ -54,6 +55,7 @@
       starredSongIds.update((ids) => { const s = new Set(ids); s.delete(song.id); return s; });
       try {
         await unstarSong(song.id, song.artist, song.title, song.album);
+        requestLibraryRefresh();
         toast.success('Removed from favorites', { description: song.title });
       } catch {
         starredSongIds.update((ids) => new Set([...ids, song.id]));
@@ -63,6 +65,7 @@
       starredSongIds.update((ids) => new Set([...ids, song.id]));
       try {
         await starSong(song.id, song.artist, song.title, song.album);
+        requestLibraryRefresh();
         toast.success('Added to favorites', { description: song.title });
       } catch {
         starredSongIds.update((ids) => { const s = new Set(ids); s.delete(song.id); return s; });
@@ -78,6 +81,7 @@
       subsonicPlaylists.update(lists =>
         lists.map(pl => pl.id === playlistId ? { ...pl, songCount: pl.songCount + 1 } : pl)
       );
+      requestLibraryRefresh();
       toast.success(`Added to ${playlistName}`, { description: song.title });
     } catch {
       toast.error('Failed to add to playlist');

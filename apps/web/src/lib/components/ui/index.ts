@@ -12,6 +12,7 @@ export { Input } from './input';
 export { Badge, badgeVariants } from './badge';
 export { Slider } from './slider';
 export { ScrollArea } from './scroll-area';
+export { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './resizable';
 export { Toaster } from './sonner';
 export {
   Sidebar,

@@ -5,6 +5,18 @@ export async function castDiscover(): Promise<CastDeviceInfo[]> {
   return invoke<CastDeviceInfo[]>('cast_discover');
 }
 
+export async function castConnect(params: {
+  deviceName: string;
+  deviceAddr: string;
+  devicePort: number;
+}): Promise<void> {
+  return invoke<void>('cast_connect', {
+    deviceName: params.deviceName,
+    deviceAddr: params.deviceAddr,
+    devicePort: params.devicePort,
+  });
+}
+
 export async function castPlay(params: {
   deviceName: string;
   deviceAddr: string;

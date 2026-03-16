@@ -1,12 +1,13 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { fetchPlaylistDetail, type Song } from '$lib/servers';
-  import { Play, Shuffle, Sparkles } from '@lucide/svelte';
-  import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
+  import { Play, Pause, Shuffle, Sparkles } from '@lucide/svelte';
+  import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import { formatClockDuration } from '$lib/utils';
+  import { libraryRefresh } from '$lib/stores/ui-state';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -23,22 +24,31 @@
   let coverArtUrl = $state('');
   let songCount = $state(0);
   let songs = $state<Song[]>([])
+  let playlistLoadVersion = 0;
+  const playlistHref = $derived(`/playlist/${encodeURIComponent(data.id)}`);
+  const playlistIsActive = $derived($playingFrom.href === playlistHref);
 
   $effect(() => {
     const id = data.id;
+    const refresh = $libraryRefresh;
+    const loadVersion = ++playlistLoadVersion;
+    void refresh;
     loading = true;
     error = '';
     fetchPlaylistDetail(id)
       .then((detail) => {
+        if (loadVersion !== playlistLoadVersion) return;
         playlistName = detail.playlist.name;
         coverArtUrl = detail.playlist.coverArtUrl;
         songCount = detail.playlist.songCount;
         songs = detail.songs;
       })
       .catch((err) => {
+        if (loadVersion !== playlistLoadVersion) return;
         error = err instanceof Error ? err.message : 'Failed to load playlist.';
       })
       .finally(() => {
+        if (loadVersion !== playlistLoadVersion) return;
         loading = false;
       });
   });
@@ -83,17 +93,17 @@
   }
 </script>
 
-<div class="page-hero mb-6 flex gap-4">
+<div class="page-hero app-glass mb-6 flex gap-4 rounded-[2rem] p-5">
   {#if coverArtUrl}
-    <img class="h-36 w-36 shrink-0 rounded-lg object-cover shadow-lg" src={coverArtUrl} alt={playlistName} />
+    <img class="h-36 w-36 shrink-0 rounded-2xl object-cover shadow-lg" src={coverArtUrl} alt={playlistName} />
   {:else}
-    <div class="flex h-36 w-36 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-slate-500 to-slate-700 text-2xl font-black shadow-lg">
+    <div class="app-card flex h-36 w-36 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-secondary to-accent text-2xl font-black shadow-lg">
       {initials(playlistName || '?')}
     </div>
   {/if}
   <div class="flex flex-col justify-end gap-2">
     <p class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Playlist</p>
-    <h2 class="text-3xl font-bold tracking-tight">{playlistName || '…'}</h2>
+    <h2 class="app-section-title text-3xl font-bold tracking-tight">{playlistName || '…'}</h2>
     {#if songs.length}
       <p class="text-sm text-muted-foreground">
         {songCount} songs · {formatDuration(totalDuration())}
@@ -102,12 +112,16 @@
     <div class="flex items-center gap-3 mt-1">
       <!-- Big play button -->
       <button
-        onclick={playAll}
+        onclick={() => playlistIsActive ? togglePlayRequest.update((n) => n + 1) : playAll()}
         disabled={!songs.length}
         class="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all duration-150 hover:scale-105 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Play all"
+        aria-label={playlistIsActive && $isPlaying ? 'Pause playlist' : 'Play playlist'}
       >
-        <Play class="size-6 translate-x-0.5" fill="currentColor" />
+        {#if playlistIsActive && $isPlaying}
+          <Pause class="size-6" fill="currentColor" />
+        {:else}
+          <Play class="size-6 translate-x-0.5" fill="currentColor" />
+        {/if}
       </button>
 
       <!-- Shuffle mode selector -->
@@ -117,7 +131,7 @@
             <button
               {...props}
               disabled={!songs.length}
-              class="grid size-10 shrink-0 place-items-center rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+              class="app-round-button grid size-10 shrink-0 place-items-center rounded-full transition disabled:opacity-40 disabled:cursor-not-allowed {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
               aria-label="Shuffle options"
               title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
             >

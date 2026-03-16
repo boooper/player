@@ -1,5 +1,6 @@
 <script lang="ts">
   import { SlidersHorizontal, Power, AudioLines } from '@lucide/svelte';
+  import { Slider } from '$lib/components/ui';
   import { toast } from 'svelte-sonner';
   import { DEFAULT_EQ_BANDS, EQ_FREQUENCIES, EQ_MAX_GAIN, EQ_MIN_GAIN, EQ_PRESETS, findEqPresetId, normalizeEqBands, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
   import { setAutostart } from '$lib/servers';
@@ -165,13 +166,16 @@
           </div>
           <span class="min-w-12 text-right text-sm font-semibold tabular-nums">{crossfadeSeconds.toFixed(1)}s</span>
         </div>
-        <input
+
+
+         <Slider
           class="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full bg-input accent-primary"
-          type="range"
-          min="0"
-          max="12"
-          step="0.5"
-          bind:value={crossfadeSeconds}
+          type="multiple"
+          min={0}
+          max={12}
+          step={0.5}
+          value={[crossfadeSeconds]}
+          onValueChange={(value) => { crossfadeSeconds = value[0] ?? 0; }}
           aria-label="Crossfade duration"
         />
       </div>

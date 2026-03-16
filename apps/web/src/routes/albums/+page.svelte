@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Play, Disc3, RefreshCw } from '@lucide/svelte';
 
   import { fetchAlbumList, fetchAlbumSongs, type Album } from '$lib/servers';
   import { focusTrack, playQueue, playingFrom, addRecentlyPlayed } from '$lib/stores/player';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   type TabType = 'newest' | 'random' | 'recent' | 'frequent';
   const TABS: { id: TabType; label: string }[] = [
@@ -19,16 +19,22 @@
   let loading = $state(false);
   let error = $state('');
   let albumLoadingId = $state<string | null>(null);
+  let albumsLoadVersion = 0;
 
   async function loadAlbums(type: TabType) {
+    const loadVersion = ++albumsLoadVersion;
     loading = true;
     error = '';
     albums = [];
     try {
-      albums = await fetchAlbumList(type, 50);
+      const nextAlbums = await fetchAlbumList(type, 50);
+      if (loadVersion !== albumsLoadVersion) return;
+      albums = nextAlbums;
     } catch (err) {
+      if (loadVersion !== albumsLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load albums.';
     } finally {
+      if (loadVersion !== albumsLoadVersion) return;
       loading = false;
     }
   }
@@ -57,8 +63,10 @@
     loadAlbums(tab);
   }
 
-  onMount(() => {
-    loadAlbums('newest');
+  $effect(() => {
+    const refresh = $libraryRefresh;
+    void refresh;
+    loadAlbums(activeTab);
   });
 </script>
 

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Play, Pause, Plus, Check, ChevronLeft, ChevronRight, Disc3, ListMusic } from '@lucide/svelte';
 
   import {
@@ -18,6 +17,8 @@
   import PlaylistContextMenu from '$lib/components/PlaylistContextMenu.svelte';
   import { goto } from '$app/navigation';
   import { formatClockDuration } from '$lib/utils';
+  import { backendSettings } from '$lib/stores/backend-settings';
+  import { libraryRefresh, requestLibraryRefresh } from '$lib/stores/ui-state';
 
   let liked = $state<string[]>([]);
   let top = $state<Artist[]>([]);
@@ -38,6 +39,7 @@
   let newestCarouselEl = $state<HTMLDivElement | null>(null);
   let randomCarouselEl = $state<HTMLDivElement | null>(null);
   let playlistCarouselEl = $state<HTMLDivElement | null>(null);
+  let homeLoadVersion = 0;
 
   function greeting(): string {
     const h = new Date().getHours();
@@ -57,6 +59,7 @@
         liked = [...liked, name];
         await saveLikedArtist(name);
       }
+      requestLibraryRefresh();
     } catch {
       liked = liked.includes(name) ? liked.filter((a) => a !== name) : [...liked, name];
     } finally {
@@ -126,7 +129,8 @@
     el?.scrollBy({ left: dir * 240, behavior: 'smooth' });
   }
 
-  onMount(async () => {
+  async function loadHomeData() {
+    const loadVersion = ++homeLoadVersion;
     loading = true;
     try {
       const [stored, topArtists, starred, newest, random] = await Promise.all([
@@ -136,16 +140,29 @@
         fetchAlbumList('newest', 20),
         fetchAlbumList('random', 20)
       ]);
+      if (loadVersion !== homeLoadVersion) return;
       liked = stored.map((entry) => entry.name);
       top = topArtists;
       starredSongs = starred;
       newestAlbums = newest;
       randomAlbums = random;
     } catch (err) {
+      if (loadVersion !== homeLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load home feed.';
     } finally {
+      if (loadVersion !== homeLoadVersion) return;
       loading = false;
     }
+  }
+
+  $effect(() => {
+    const refresh = $libraryRefresh;
+    const metadataProvider = $backendSettings.metadataProvider;
+    const recommendationProvider = $backendSettings.recommendationProvider;
+    void refresh;
+    void metadataProvider;
+    void recommendationProvider;
+    loadHomeData();
   });
 </script>
 
@@ -311,7 +328,7 @@
       {#each starredSongs.slice(0, 6) as song, i (song.id)}
         <SongContextMenu {song} onplay={() => playSong(starredSongs, i)}>
           <button
-            class="app-card-soft stagger-row group grid w-full items-center gap-4 rounded-xl px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
+            class="stagger-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
             style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
             style:--stagger-index={i}
             onclick={() => playSong(starredSongs, i)}

@@ -103,6 +103,10 @@ export async function createPlaylist(name: string, songIds: string[]): Promise<P
   return normalizePlaylist(await invoke<Playlist>('library_create_playlist', { name, songIds }));
 }
 
+export async function renamePlaylist(playlistId: string, name: string): Promise<void> {
+  await invoke('library_rename_playlist', { playlistId, name });
+}
+
 export async function materializeSong(songId: string): Promise<void> {
   await invoke('library_materialize_song', { songId });
 }

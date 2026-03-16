@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { afterNavigate, goto } from '$app/navigation';
+  import { goto } from '$app/navigation';
   import { Clock, X } from '@lucide/svelte';
 
   import { searchBundle, type SearchBundlePayload, type Song } from '$lib/servers';
@@ -10,6 +9,8 @@
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { readUiJson, writeUiJson } from '$lib/ui-storage';
+  import { backendSettings } from '$lib/stores/backend-settings';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   let { data } = $props<{ data: { q: string } }>();
 
@@ -23,6 +24,7 @@
   const RECENT_KEY = 'madrify_recent_searches';
   const LEGACY_RECENT_KEY = 'naviarr_recent_searches';
   let recentSearches = $state<string[]>([]);
+  let searchLoadVersion = 0;
 
   async function loadRecentSearches() {
     recentSearches = await readUiJson<string[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]);
@@ -34,18 +36,17 @@
     void writeUiJson(RECENT_KEY, updated, [LEGACY_RECENT_KEY]);
   }
 
-  onMount(async () => {
+  $effect(() => {
     loadRecentSearches();
-    await runQuerySearch();
-  });
-
-  afterNavigate(() => {
-    void runQuerySearch();
   });
 
   async function runQuerySearch() {
-    if (!query || loading || lastExecutedQuery === query) return;
-    lastExecutedQuery = query;
+    const refresh = $libraryRefresh;
+    const metadataProvider = $backendSettings.metadataProvider;
+    const recommendationProvider = $backendSettings.recommendationProvider;
+    const requestKey = `${query}::${refresh}::${metadataProvider}::${recommendationProvider}`;
+    if (!query || lastExecutedQuery === requestKey) return;
+    lastExecutedQuery = requestKey;
     await loadSearch(query);
   }
 
@@ -59,7 +60,8 @@
   }
 
   async function loadSearch(queryText: string) {
-    if (!queryText.trim() || loading) return;
+    if (!queryText.trim()) return;
+    const loadVersion = ++searchLoadVersion;
 
     loading = true;
     error = '';
@@ -67,7 +69,9 @@
     selectedSongId = null;
 
     try {
-      results = await searchBundle(queryText, 24, 12, 16);
+      const nextResults = await searchBundle(queryText, 24, 12, 16);
+      if (loadVersion !== searchLoadVersion) return;
+      results = nextResults;
 
       if (results.songs[0]) {
         const song = results.songs[0];
@@ -85,11 +89,32 @@
         error = 'No results found for this search.';
       }
     } catch (err) {
+      if (loadVersion !== searchLoadVersion) return;
       error = err instanceof Error ? err.message : 'Search failed.';
     } finally {
+      if (loadVersion !== searchLoadVersion) return;
       loading = false;
     }
   }
+
+  $effect(() => {
+    const queryText = query;
+    const refresh = $libraryRefresh;
+    const metadataProvider = $backendSettings.metadataProvider;
+    const recommendationProvider = $backendSettings.recommendationProvider;
+    void queryText;
+    void refresh;
+    void metadataProvider;
+    void recommendationProvider;
+    if (!query) {
+      lastExecutedQuery = '';
+      results = { songs: [], albums: [], recommendations: [] };
+      selectedSongId = null;
+      error = '';
+      return;
+    }
+    void runQuerySearch();
+  });
 
   function pick(song: Song) {
     selectedSongId = song.id;

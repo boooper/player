@@ -459,9 +459,6 @@ pub(crate) async fn create_playlist(
     if name.trim().is_empty() {
         return Err("Playlist name is required.".to_string());
     }
-    if song_ids.is_empty() {
-        return Err("At least one song is required.".to_string());
-    }
 
     let user_id = user_id(http, p).await?;
     let body = serde_json::json!({
@@ -480,6 +477,26 @@ pub(crate) async fn create_playlist(
         song_count: song_ids.len() as f64,
         duration: 0.0,
     })
+}
+
+pub(crate) async fn rename_playlist(
+    http: &reqwest::Client,
+    p: &ActiveProfile,
+    playlist_id: &str,
+    name: &str,
+) -> Result<(), String> {
+    if playlist_id.trim().is_empty() {
+        return Err("Playlist id is required.".to_string());
+    }
+    if name.trim().is_empty() {
+        return Err("Playlist name is required.".to_string());
+    }
+
+    let body = serde_json::json!({
+        "Name": name.trim()
+    });
+    post_json(http, p, &format!("/Playlists/{}", playlist_id), &body).await?;
+    Ok(())
 }
 
 /// Returns true if the server responds successfully to a ping.

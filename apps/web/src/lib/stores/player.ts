@@ -145,6 +145,8 @@ export const togglePlayRequest = writable(0);
 export const subsonicPlaylists = writable<Playlist[]>([]);
 export const starredSongIds = writable<Set<string>>(new Set());
 export const showQueue = writable(false);
+const SHOW_QUEUE_KEY = 'madrify_show_now_playing';
+let hasHydratedPlayerUiState = false;
 
 export type PlayingFrom = {
   type: 'playlist' | 'favorites' | 'artist' | 'album' | 'search' | null;
@@ -183,6 +185,40 @@ const RECENT_SONGS_KEY = 'madrify_recently_played_songs';
 const LEGACY_RECENT_SONGS_KEY = 'naviarr_recently_played_songs';
 
 export const recentlyPlayedSongs = writable<Song[]>([]);
+export const pinnedPlaylistIds = writable<Set<string>>(new Set());
+
+const PINNED_PLAYLISTS_KEY = 'madrify_pinned_playlists';
+
+export function setPlaylistPinned(playlistId: string, pinned: boolean): void {
+  if (!playlistId) return;
+  pinnedPlaylistIds.update((ids) => {
+    const next = new Set(ids);
+    if (pinned) {
+      next.add(playlistId);
+    } else {
+      next.delete(playlistId);
+    }
+    void writeUiJson(PINNED_PLAYLISTS_KEY, [...next]);
+    return next;
+  });
+}
+
+export function togglePlaylistPinned(playlistId: string): boolean {
+  let nextPinned = false;
+  pinnedPlaylistIds.update((ids) => {
+    const next = new Set(ids);
+    if (next.has(playlistId)) {
+      next.delete(playlistId);
+      nextPinned = false;
+    } else {
+      next.add(playlistId);
+      nextPinned = true;
+    }
+    void writeUiJson(PINNED_PLAYLISTS_KEY, [...next]);
+    return next;
+  });
+  return nextPinned;
+}
 
 export function addRecentlyPlayedSong(song: Song): void {
   recentlyPlayedSongs.update((list) => {
@@ -194,13 +230,23 @@ export function addRecentlyPlayedSong(song: Song): void {
 }
 
 export async function hydratePlayerUiState(): Promise<void> {
-  const [recentItems, recentSongs] = await Promise.all([
+  const [recentItems, recentSongs, pinnedPlaylists, persistedShowQueue] = await Promise.all([
     readUiJson<RecentItem[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]),
-    readUiJson<Song[]>(RECENT_SONGS_KEY, [], [LEGACY_RECENT_SONGS_KEY])
+    readUiJson<Song[]>(RECENT_SONGS_KEY, [], [LEGACY_RECENT_SONGS_KEY]),
+    readUiJson<string[]>(PINNED_PLAYLISTS_KEY, []),
+    readUiJson<boolean>(SHOW_QUEUE_KEY, false)
   ]);
   recentlyPlayed.set(recentItems);
   recentlyPlayedSongs.set(recentSongs);
+  pinnedPlaylistIds.set(new Set(pinnedPlaylists.filter(Boolean)));
+  showQueue.set(persistedShowQueue);
+  hasHydratedPlayerUiState = true;
 }
+
+showQueue.subscribe((open) => {
+  if (!hasHydratedPlayerUiState) return;
+  void writeUiJson(SHOW_QUEUE_KEY, open);
+});
 
 export function playNextInQueue(song: Song): void {
   const items = get(queue);

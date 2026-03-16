@@ -63,6 +63,33 @@ export type DiscoveryRecommendation = {
 type MetadataProvider = 'local' | 'lastfm' | 'audiodb' | 'both';
 type RecommendationProvider = 'lastfm' | 'listenbrainz';
 const artistArtworkCache = new Map<string, Promise<string>>();
+const discoveryCache = new Map<string, { expiresAt: number; promise: Promise<unknown> }>();
+const SHORT_CACHE_TTL_MS = 30_000;
+const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
+
+function getCachedValue<T>(key: string, loader: () => Promise<T>, ttlMs = DEFAULT_CACHE_TTL_MS): Promise<T> {
+  const now = Date.now();
+  const cached = discoveryCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise as Promise<T>;
+  }
+
+  const promise = loader().catch((error) => {
+    const current = discoveryCache.get(key);
+    if (current?.promise === promise) {
+      discoveryCache.delete(key);
+    }
+    throw error;
+  });
+
+  discoveryCache.set(key, { expiresAt: now + ttlMs, promise });
+  return promise;
+}
+
+export function clearDiscoveryCaches(): void {
+  discoveryCache.clear();
+  artistArtworkCache.clear();
+}
 
 function getMetadataProvider(): MetadataProvider {
   const value = getMetadataProviderSetting().trim().toLowerCase();
@@ -148,12 +175,22 @@ async function searchLocalArtists(query: string, limit = 12): Promise<DiscoveryA
 }
 
 async function getLocalArtistAlbums(artist: string): Promise<LibraryAlbum[]> {
-  return fetchArtistAlbums(artist, 24).catch(() => []);
+  return getCachedValue(
+    `local-artist-albums:${normalize(artist)}`,
+    () => fetchArtistAlbums(artist, 24).catch(() => []),
+    DEFAULT_CACHE_TTL_MS
+  );
 }
 
 async function getLocalArtistSongs(artist: string, limit = 30): Promise<LibrarySong[]> {
-  const songs = await searchLocalSongs(artist, Math.max(limit * 2, 30));
-  return songs.filter((song) => normalize(song.artist) === normalize(artist)).slice(0, limit);
+  return getCachedValue(
+    `local-artist-songs:${normalize(artist)}:${limit}`,
+    async () => {
+      const songs = await searchLocalSongs(artist, Math.max(limit * 2, 30));
+      return songs.filter((song) => normalize(song.artist) === normalize(artist)).slice(0, limit);
+    },
+    DEFAULT_CACHE_TTL_MS
+  );
 }
 
 async function getLocalArtistInfo(artist: string): Promise<DiscoveryArtistInfo | null> {
@@ -258,7 +295,11 @@ export async function getArtistArtworkMap(artists: string[]): Promise<Record<str
 export async function getTopArtists(limit = 24): Promise<DiscoveryArtist[]> {
   const provider = getMetadataProvider();
   if (provider === 'local' || provider === 'audiodb' || !hasLfm()) return [];
-  return hydrateImages(await lfmTopArtists({ apiKey: getLfmKey(), limit }), (artist) => artist.name);
+  return getCachedValue(
+    `top-artists:${provider}:${limit}`,
+    async () => hydrateImages(await lfmTopArtists({ apiKey: getLfmKey(), limit }), (artist) => artist.name),
+    SHORT_CACHE_TTL_MS
+  );
 }
 
 export async function searchArtists(query: string, limit = 12): Promise<DiscoveryArtist[]> {
@@ -275,7 +316,11 @@ export async function searchArtists(query: string, limit = 12): Promise<Discover
 export async function getTopSongs(limit = 24): Promise<DiscoverySong[]> {
   const provider = getMetadataProvider();
   if (provider === 'local' || provider === 'audiodb' || !hasLfm()) return [];
-  return hydrateImages(await lfmTopSongs({ apiKey: getLfmKey(), limit }), (song) => song.artist);
+  return getCachedValue(
+    `top-songs:${provider}:${limit}`,
+    async () => hydrateImages(await lfmTopSongs({ apiKey: getLfmKey(), limit }), (song) => song.artist),
+    SHORT_CACHE_TTL_MS
+  );
 }
 
 export async function searchMetadataSongs(query: string, limit = 12): Promise<DiscoverySong[]> {
@@ -297,82 +342,94 @@ export async function searchMetadataSongs(query: string, limit = 12): Promise<Di
 
 export async function getArtistInfo(artist: string): Promise<DiscoveryArtistInfo | null> {
   const provider = getMetadataProvider();
-  const local = await getLocalArtistInfo(artist);
+  return getCachedValue(
+    `artist-info:${provider}:${normalize(artist)}`,
+    async () => {
+      const local = await getLocalArtistInfo(artist);
 
-  if (provider === 'local') return local;
+      if (provider === 'local') return local;
 
-  if (provider === 'audiodb') {
-    const adb = await fetchAudioDbArtist(artist);
-    if (!adb) return local;
-    return {
-      name: local?.name || adb.name || artist,
-      imageUrl: local?.imageUrl || adb.thumb || adb.fanart || adb.banner || '',
-      listeners: local?.listeners ?? 0,
-      playcount: 0,
-      bio: local?.bio || adb.biography,
-      tags: local?.tags?.length ? local.tags : adb.genre ? [adb.genre] : [],
-      similarArtists: [],
-      genre: adb.genre,
-      country: adb.country,
-      formedYear: adb.formedYear
-    };
-  }
+      if (provider === 'audiodb') {
+        const adb = await fetchAudioDbArtist(artist);
+        if (!adb) return local;
+        return {
+          name: local?.name || adb.name || artist,
+          imageUrl: local?.imageUrl || adb.thumb || adb.fanart || adb.banner || '',
+          listeners: local?.listeners ?? 0,
+          playcount: 0,
+          bio: local?.bio || adb.biography,
+          tags: local?.tags?.length ? local.tags : adb.genre ? [adb.genre] : [],
+          similarArtists: [],
+          genre: adb.genre,
+          country: adb.country,
+          formedYear: adb.formedYear
+        };
+      }
 
-  if (provider === 'lastfm') {
-    if (!hasLfm()) return local;
-    const lfm = await lfmArtistInfo({ apiKey: getLfmKey(), artist });
-    if (!lfm) return local;
-    return {
-      name: local?.name || lfm.name,
-      imageUrl: local?.imageUrl || lfm.imageUrl,
-      listeners: lfm.listeners ?? local?.listeners ?? 0,
-      playcount: lfm.playcount ?? 0,
-      bio: lfm.bio || local?.bio || '',
-      tags: lfm.tags?.length ? lfm.tags : local?.tags ?? [],
-      similarArtists: lfm.similarArtists,
-      genre: lfm.tags[0] ?? '',
-      country: '',
-      formedYear: ''
-    };
-  }
+      if (provider === 'lastfm') {
+        if (!hasLfm()) return local;
+        const lfm = await lfmArtistInfo({ apiKey: getLfmKey(), artist });
+        if (!lfm) return local;
+        return {
+          name: local?.name || lfm.name,
+          imageUrl: local?.imageUrl || lfm.imageUrl,
+          listeners: lfm.listeners ?? local?.listeners ?? 0,
+          playcount: lfm.playcount ?? 0,
+          bio: lfm.bio || local?.bio || '',
+          tags: lfm.tags?.length ? lfm.tags : local?.tags ?? [],
+          similarArtists: lfm.similarArtists,
+          genre: lfm.tags[0] ?? '',
+          country: '',
+          formedYear: ''
+        };
+      }
 
-  const [lfmRes, adbRes] = await Promise.allSettled([
-    hasLfm() ? lfmArtistInfo({ apiKey: getLfmKey(), artist }) : Promise.resolve(null),
-    fetchAudioDbArtist(artist)
-  ]);
-  const lfm = lfmRes.status === 'fulfilled' ? lfmRes.value : null;
-  const adb = adbRes.status === 'fulfilled' ? adbRes.value : null;
+      const [lfmRes, adbRes] = await Promise.allSettled([
+        hasLfm() ? lfmArtistInfo({ apiKey: getLfmKey(), artist }) : Promise.resolve(null),
+        fetchAudioDbArtist(artist)
+      ]);
+      const lfm = lfmRes.status === 'fulfilled' ? lfmRes.value : null;
+      const adb = adbRes.status === 'fulfilled' ? adbRes.value : null;
 
-  if (!local && !lfm && !adb) return null;
+      if (!local && !lfm && !adb) return null;
 
-  const imageUrl = await getArtistArtwork(artist, local?.imageUrl || lfm?.imageUrl || (adb ? adb.thumb || adb.fanart || adb.banner : '') || '');
-  const rawSimilar = lfm?.similarArtists ?? [];
-  const similarArtists = await Promise.all(
-    rawSimilar.map(async (item) => ({ ...item, imageUrl: await getArtistArtwork(item.name, item.imageUrl) }))
+      const imageUrl = await getArtistArtwork(artist, local?.imageUrl || lfm?.imageUrl || (adb ? adb.thumb || adb.fanart || adb.banner : '') || '');
+      const rawSimilar = lfm?.similarArtists ?? [];
+      const similarArtists = await Promise.all(
+        rawSimilar.map(async (item) => ({ ...item, imageUrl: await getArtistArtwork(item.name, item.imageUrl) }))
+      );
+
+      return {
+        name: local?.name || lfm?.name || adb?.name || artist,
+        imageUrl,
+        listeners: lfm?.listeners ?? local?.listeners ?? 0,
+        playcount: lfm?.playcount ?? 0,
+        bio: local?.bio || lfm?.bio || adb?.biography || '',
+        tags: local?.tags?.length ? local.tags : lfm?.tags?.length ? lfm.tags : adb?.genre ? [adb.genre] : [],
+        similarArtists,
+        genre: adb?.genre || lfm?.tags?.[0] || '',
+        country: adb?.country || '',
+        formedYear: adb?.formedYear || ''
+      };
+    },
+    SHORT_CACHE_TTL_MS
   );
-
-  return {
-    name: local?.name || lfm?.name || adb?.name || artist,
-    imageUrl,
-    listeners: lfm?.listeners ?? local?.listeners ?? 0,
-    playcount: lfm?.playcount ?? 0,
-    bio: local?.bio || lfm?.bio || adb?.biography || '',
-    tags: local?.tags?.length ? local.tags : lfm?.tags?.length ? lfm.tags : adb?.genre ? [adb.genre] : [],
-    similarArtists,
-    genre: adb?.genre || lfm?.tags?.[0] || '',
-    country: adb?.country || '',
-    formedYear: adb?.formedYear || ''
-  };
 }
 
 export async function getArtistTopTracks(artist: string, limit = 10): Promise<DiscoverySong[]> {
   const provider = getMetadataProvider();
-  const local = await getLocalArtistTopTracks(artist, limit);
-  if (provider === 'local') return local;
-  if (!hasLfm() || provider === 'audiodb') return local;
-  const remote = await lfmArtistTopTracks({ apiKey: getLfmKey(), artist, limit });
-  if (provider !== 'both') return remote;
-  return uniqueBy([...local, ...remote], (song) => `${normalize(song.artist)}::${normalize(song.title)}`).slice(0, limit);
+  return getCachedValue(
+    `artist-top-tracks:${provider}:${normalize(artist)}:${limit}`,
+    async () => {
+      const local = await getLocalArtistTopTracks(artist, limit);
+      if (provider === 'local') return local;
+      if (!hasLfm() || provider === 'audiodb') return local;
+      const remote = await lfmArtistTopTracks({ apiKey: getLfmKey(), artist, limit });
+      if (provider !== 'both') return remote;
+      return uniqueBy([...local, ...remote], (song) => `${normalize(song.artist)}::${normalize(song.title)}`).slice(0, limit);
+    },
+    SHORT_CACHE_TTL_MS
+  );
 }
 
 export async function getTopTags(limit = 40): Promise<string[]> {
@@ -416,27 +473,34 @@ export async function getUpNextSongs(params: {
   const limit = params.limit ?? 5;
 
   if (!artist || !title || limit <= 0) return [];
+  const likedKey = (params.likedArtists ?? []).map(normalize).sort().join('|');
 
-  const recommendations = await getRecommendations({
-    seedArtist: artist,
-    seedSongTitle: title,
-    likedArtists: params.likedArtists,
-    limit: limit * 4
-  }).catch(() => [] as DiscoveryRecommendation[]);
+  return getCachedValue(
+    `up-next:${getRecommendationProvider()}:${normalize(artist)}:${normalize(title)}:${limit}:${likedKey}`,
+    async () => {
+      const recommendations = await getRecommendations({
+        seedArtist: artist,
+        seedSongTitle: title,
+        likedArtists: params.likedArtists,
+        limit: limit * 4
+      }).catch(() => [] as DiscoveryRecommendation[]);
 
-  const results: LibrarySong[] = [];
-  const seen = new Set<string>();
+      const results: LibrarySong[] = [];
+      const seen = new Set<string>();
 
-  for (const recommendation of recommendations) {
-    if (results.length >= limit) break;
+      for (const recommendation of recommendations) {
+        if (results.length >= limit) break;
 
-    const candidates = await searchLocalSongs(`${recommendation.artist} ${recommendation.title}`, 10);
-    const match = matchRecommendedSong(candidates, recommendation.artist, recommendation.title);
-    if (!match || seen.has(match.id)) continue;
+        const candidates = await searchLocalSongs(`${recommendation.artist} ${recommendation.title}`, 10);
+        const match = matchRecommendedSong(candidates, recommendation.artist, recommendation.title);
+        if (!match || seen.has(match.id)) continue;
 
-    seen.add(match.id);
-    results.push(match);
-  }
+        seen.add(match.id);
+        results.push(match);
+      }
 
-  return results;
+      return results;
+    },
+    SHORT_CACHE_TTL_MS
+  );
 }

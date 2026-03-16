@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { Play, Pause, Shuffle, Heart, Sparkles } from '@lucide/svelte';
 
@@ -15,6 +14,7 @@
     DropdownMenuItem,
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   let loading = $state(false);
   let error = $state('');
@@ -24,12 +24,19 @@
   // API call completes and returns stale data.
   let allStarredSongs = $state<Song[]>([])
   let songs = $derived(allStarredSongs.filter(s => $starredSongIds.has(s.id)));
+  const favoritesHref = '/favorites';
+  const favoritesIsActive = $derived($playingFrom.href === favoritesHref);
+  const favoriteSongCount = $derived(songs.length);
 
-  onMount(() => {
+  let favoritesLoadVersion = 0;
+
+  function loadFavorites() {
+    const loadVersion = ++favoritesLoadVersion;
     loading = true;
     error = '';
     fetchStarredSongs()
       .then((s) => {
+        if (loadVersion !== favoritesLoadVersion) return;
         allStarredSongs = s;
         // If the layout hasn't populated starredSongIds yet (initial direct load),
         // seed it from our result so songs is derived correctly right away.
@@ -37,8 +44,20 @@
           starredSongIds.set(new Set(s.map(song => song.id)));
         }
       })
-      .catch((err) => { error = err instanceof Error ? err.message : 'Failed to load favorites.'; })
-      .finally(() => { loading = false; });
+      .catch((err) => {
+        if (loadVersion !== favoritesLoadVersion) return;
+        error = err instanceof Error ? err.message : 'Failed to load favorites.';
+      })
+      .finally(() => {
+        if (loadVersion !== favoritesLoadVersion) return;
+        loading = false;
+      });
+  }
+
+  $effect(() => {
+    const refresh = $libraryRefresh;
+    void refresh;
+    loadFavorites();
   });
 
   function formatDuration(seconds: number): string {
@@ -69,7 +88,7 @@
       album: song.album
     });
     playQueue(songs, index);
-    playingFrom.set({ type: 'favorites', name: 'Favorite Songs', href: '/favorites' });
+    playingFrom.set({ type: 'favorites', name: 'Liked Songs', href: favoritesHref });
   }
 
   function playAll() {
@@ -77,33 +96,48 @@
     const list = ($shuffleEnabled || $smartShuffleMode) ? [...songs].sort(() => Math.random() - 0.5) : songs;
     focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'library', album: list[0].album });
     playQueue(list, 0);
-    playingFrom.set({ type: 'favorites', name: 'Favorite Songs', href: '/favorites' });
+    playingFrom.set({ type: 'favorites', name: 'Liked Songs', href: favoritesHref });
   }
 
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
 </script>
 
-<div class="page-hero mb-6 flex gap-4">
-  <div class="flex h-36 w-36 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-pink-700 shadow-lg">
-    <Heart class="size-14 fill-white text-white" />
+<div class="page-hero app-glass mb-6 flex gap-4 rounded-[2rem] p-5">
+  <div class="relative h-36 w-36 shrink-0 overflow-hidden rounded-2xl shadow-lg">
+    {#if songs.length >= 4}
+      <div class="grid h-full w-full grid-cols-2 grid-rows-2">
+        {#each songs.slice(0, 4) as song (song.id)}
+          <img class="h-full w-full object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+        {/each}
+      </div>
+      <div class="absolute inset-0 bg-gradient-to-br from-black/10 via-transparent to-black/45"></div>
+    {:else}
+      <div class="app-card flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary to-accent">
+        <Heart class="size-14 fill-white text-white" />
+      </div>
+    {/if}
   </div>
   <div class="flex flex-col justify-end gap-2">
-    <p class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Collection</p>
-    <h2 class="text-3xl font-bold tracking-tight">Favorite Songs</h2>
-    {#if songs.length}
+    <p class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Playlist</p>
+    <h2 class="app-section-title text-3xl font-bold tracking-tight">Liked Songs</h2>
+    {#if favoriteSongCount}
       <p class="text-sm text-muted-foreground">
-        {songs.length} songs · {formatDuration(totalDuration())}
+        {favoriteSongCount} songs · {formatDuration(totalDuration())}
       </p>
     {/if}
     <div class="flex items-center gap-3 mt-1">
       <!-- Big play button -->
       <button
-        onclick={playAll}
+        onclick={() => favoritesIsActive ? togglePlayRequest.update((n) => n + 1) : playAll()}
         disabled={!songs.length}
         class="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all duration-150 hover:scale-105 hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-        aria-label="Play all"
+        aria-label={favoritesIsActive && $isPlaying ? 'Pause liked songs' : 'Play liked songs'}
       >
-        <Play class="size-6 translate-x-0.5 text-muted-foreground" fill="currentColor" />
+        {#if favoritesIsActive && $isPlaying}
+          <Pause class="size-6 text-muted-foreground" fill="currentColor" />
+        {:else}
+          <Play class="size-6 translate-x-0.5 text-muted-foreground" fill="currentColor" />
+        {/if}
       </button>
 
       <!-- Shuffle mode selector -->
@@ -113,7 +147,7 @@
             <button
               {...props}
               disabled={!songs.length}
-              class="grid size-10 shrink-0 place-items-center rounded-md transition disabled:opacity-40 disabled:cursor-not-allowed {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
+              class="app-round-button grid size-10 shrink-0 place-items-center rounded-full transition disabled:opacity-40 disabled:cursor-not-allowed {$smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}"
               aria-label="Shuffle options"
               title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
             >
@@ -152,7 +186,7 @@
   <p class="mb-3 text-sm text-destructive">{error}</p>
 {/if}
 {#if loading}
-  <p class="mb-3 text-sm text-muted-foreground">Loading favorites…</p>
+  <p class="mb-3 text-sm text-muted-foreground">Loading liked songs…</p>
 {/if}
 
 {#if songs.length}

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { Play, Pause, Music2, Search, X } from '@lucide/svelte';
 
@@ -8,12 +7,14 @@
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import { formatClockDuration } from '$lib/utils';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   // All songs loaded from the library on mount.
   let allSongs = $state<Song[]>([]);
   let query = $state('');
   let loading = $state(false);
   let error = $state('');
+  let songsLoadVersion = 0;
 
   // Client-side filter when a query is present.
   const songs = $derived(
@@ -54,13 +55,30 @@
     playSong(0);
   }
 
-  onMount(() => {
+  function loadSongs() {
+    const loadVersion = ++songsLoadVersion;
     loading = true;
+    error = '';
     // Fetch all library songs — empty query returns the full catalogue on most servers.
     searchSongs('', 500)
-      .then((s) => { allSongs = s; })
-      .catch((err) => { error = err instanceof Error ? err.message : 'Failed to load songs.'; })
-      .finally(() => { loading = false; });
+      .then((s) => {
+        if (loadVersion !== songsLoadVersion) return;
+        allSongs = s;
+      })
+      .catch((err) => {
+        if (loadVersion !== songsLoadVersion) return;
+        error = err instanceof Error ? err.message : 'Failed to load songs.';
+      })
+      .finally(() => {
+        if (loadVersion !== songsLoadVersion) return;
+        loading = false;
+      });
+  }
+
+  $effect(() => {
+    const refresh = $libraryRefresh;
+    void refresh;
+    loadSongs();
   });
 
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');

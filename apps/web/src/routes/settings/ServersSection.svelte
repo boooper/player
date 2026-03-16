@@ -10,7 +10,7 @@
     type ProfileDraftPayload,
     type ProfilePayload,
   } from '$lib/servers';
-  import { libraryRefresh } from '$lib/stores/ui-state';
+  import { requestLibraryRefresh } from '$lib/stores/ui-state';
 
   type Profile = ProfilePayload;
 
@@ -88,6 +88,7 @@
       } else {
         profiles = profiles.map((p) => (p.id === profile.id ? profile : p));
       }
+      requestLibraryRefresh();
       dialogOpen = false;
       toast.success(isNew ? 'Server added' : 'Server updated');
       onHealthChange();
@@ -102,7 +103,7 @@
     try {
       await activateProfileApi(id);
       profiles = profiles.map((p) => ({ ...p, isActive: p.id === id }));
-      libraryRefresh.update((n) => n + 1);
+      requestLibraryRefresh();
       toast.success('Server activated');
       onHealthChange();
     } catch {
@@ -124,6 +125,7 @@
       if (wasActive && profiles.length > 0) {
         profiles = profiles.map((p, i) => (i === 0 ? { ...p, isActive: true } : p));
       }
+      requestLibraryRefresh();
       toast.success('Server removed');
       if (wasActive) onHealthChange();
     } catch (err) {

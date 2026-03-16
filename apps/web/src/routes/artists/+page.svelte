@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { Mic2, Search, X } from '@lucide/svelte';
 
   import { fetchAlbumList } from '$lib/servers';
   import { getArtistArtworkMap } from '$lib/discovery';
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   type ArtistEntry = { name: string; imageUrl: string };
 
@@ -13,6 +13,7 @@
   let query = $state('');
   let loading = $state(false);
   let error = $state('');
+  let artistsLoadVersion = 0;
 
   // Client-side filter.
   const artists = $derived(
@@ -27,8 +28,10 @@
     return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
   }
 
-  onMount(async () => {
+  async function loadArtists() {
+    const loadVersion = ++artistsLoadVersion;
     loading = true;
+    error = '';
     try {
       // Fetch a large album list and extract unique artist names.
       const albums = await fetchAlbumList('newest', 500);
@@ -42,19 +45,29 @@
       }
       // Sort alphabetically.
       entries.sort((a, b) => a.name.localeCompare(b.name));
+      if (loadVersion !== artistsLoadVersion) return;
       allArtists = entries;
 
       getArtistArtworkMap(entries.map((entry) => entry.name)).then((images) => {
+        if (loadVersion !== artistsLoadVersion) return;
         allArtists = allArtists.map((artist) => ({
           ...artist,
           imageUrl: images[artist.name] || artist.imageUrl
         }));
       });
     } catch (err) {
+      if (loadVersion !== artistsLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load artists.';
     } finally {
+      if (loadVersion !== artistsLoadVersion) return;
       loading = false;
     }
+  }
+
+  $effect(() => {
+    const refresh = $libraryRefresh;
+    void refresh;
+    loadArtists();
   });
 </script>
 
