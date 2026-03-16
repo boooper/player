@@ -148,11 +148,31 @@ jobs:
           dst.write_text(json.dumps(data, indent=2) + "\n")
           PY
 
+      - name: materialize updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KEY_PATH="$RUNNER_TEMP/tauri-signing.key"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          raw = os.environ["TAURI_SIGNING_PRIVATE_KEY"]
+          if "\\n" in raw and "\n" not in raw:
+              raw = raw.replace("\\n", "\n")
+
+          path = Path(os.environ["KEY_PATH"])
+          path.write_text(raw)
+          path.chmod(0o600)
+          PY
+          echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+
       - name: build and upload release assets
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
