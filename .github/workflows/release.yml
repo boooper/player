@@ -159,6 +159,18 @@ jobs:
           data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = os.environ["TAURI_UPDATER_PUBKEY"]
           dst.write_text(json.dumps(data, indent=2) + "\n")
           PY
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          raw = os.environ["TAURI_SIGNING_PRIVATE_KEY"]
+          # Support secrets stored either as real multiline content or with literal "\n" escapes.
+          normalized = raw.replace("\\r\\n", "\n").replace("\\n", "\n")
+          key_path = Path(os.environ["RUNNER_TEMP"]) / "tauri-updater.key"
+          key_path.write_text(normalized)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
+          PY
           bun run --cwd apps/desktop tauri build \
             --config src-tauri/tauri.build.conf.json \
             --config src-tauri/tauri.release.generated.conf.json \
