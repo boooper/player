@@ -47,6 +47,31 @@ export type ProfileDraftPayload = {
   serverType: string;
 };
 
+export type PlexAuthStartPayload = {
+  pinId: number;
+  code: string;
+  authUrl: string;
+  expiresAt?: string | null;
+};
+
+export type PlexServerResourcePayload = {
+  name: string;
+  uri: string;
+  machineIdentifier: string;
+  accessToken: string;
+  owned: boolean;
+  sourceTitle?: string | null;
+  local: boolean;
+};
+
+export type PlexAuthPollResultPayload = {
+  status: 'pending' | 'complete' | 'expired';
+  username?: string | null;
+  authToken?: string | null;
+  expiresAt?: string | null;
+  servers: PlexServerResourcePayload[];
+};
+
 export type LibraryStatsPayload = {
   likedArtists: number;
   playlistCount: number | null;

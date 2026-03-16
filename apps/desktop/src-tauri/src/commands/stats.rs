@@ -46,6 +46,11 @@ pub async fn get_library_stats(state: State<'_, AppState>) -> Result<LibraryStat
                 Ok((pc, tps, ss)) => (Some(pc), Some(tps), Some(ss)),
                 Err(_) => (None, None, None),
             }
+        } else if p.server_type == "plex" {
+            match crate::commands::plex::library_counts(&state.http, p).await {
+                Ok((pc, tps, ss)) => (Some(pc), Some(tps), Some(ss)),
+                Err(_) => (None, None, None),
+            }
         } else {
         let playlists_result = request(&state.http, p, "getPlaylists", &[]).await;
         let (pc, tps) = playlists_result

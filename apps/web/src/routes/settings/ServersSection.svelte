@@ -1,15 +1,19 @@
 <script lang="ts">
-  import { Server, Plus, Pencil, Trash2, CheckCircle, Eye, EyeOff, Save, Loader2 } from '@lucide/svelte';
+  import { Server, Plus, Pencil, Trash2, CheckCircle, Eye, EyeOff, Save, Loader2, Link2 } from '@lucide/svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import { toast } from 'svelte-sonner';
   import {
     activateProfile as activateProfileApi,
     createProfile,
     deleteProfile as deleteProfileApi,
+    plexBeginAuth,
+    plexPollAuth,
     updateProfile,
+    type PlexServerResourcePayload,
     type ProfileDraftPayload,
     type ProfilePayload,
   } from '$lib/servers';
+  import { openUrl } from '$lib/tauri';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
 
   type Profile = ProfilePayload;
@@ -28,6 +32,7 @@
     subsonic_legacy: 'Subsonic (Token Legacy)',
     jellyfin: 'Jellyfin',
     emby: 'Emby',
+    plex: 'Plex',
     local: 'Local Folder',
   };
 
@@ -43,18 +48,112 @@
   let dialogOpen = $state(false);
   let showDraftPassword = $state(false);
   let savingProfile = $state(false);
+  let plexAuthPending = $state(false);
+  let plexAuthCode = $state('');
+  let plexAuthUsername = $state('');
+  let plexSelectedServerUri = $state('');
+  let plexServers = $state<PlexServerResourcePayload[]>([]);
+  let plexAuthAttempt = 0;
 
-  $effect(() => { if (!dialogOpen) profileDraft = null; });
+  function resetPlexAuthState() {
+    plexAuthPending = false;
+    plexAuthCode = '';
+    plexAuthUsername = '';
+    plexSelectedServerUri = '';
+    plexServers = [];
+    plexAuthAttempt += 1;
+  }
+
+  function applySelectedPlexServer(uri: string) {
+    if (!profileDraft) return;
+    const server = plexServers.find((item) => item.uri === uri);
+    if (!server) return;
+    plexSelectedServerUri = server.uri;
+    profileDraft.url = server.uri;
+    profileDraft.password = server.accessToken;
+    if (!profileDraft.name.trim() || profileDraft.name === 'Plex') {
+      profileDraft.name = server.name;
+    }
+  }
+
+  async function beginPlexConnect() {
+    if (!profileDraft || profileDraft.serverType !== 'plex') return;
+    const attempt = plexAuthAttempt + 1;
+    plexAuthAttempt = attempt;
+    plexAuthPending = true;
+    plexAuthCode = '';
+    plexAuthUsername = '';
+    plexSelectedServerUri = '';
+    plexServers = [];
+
+    try {
+      const start = await plexBeginAuth();
+      if (attempt !== plexAuthAttempt) return;
+      plexAuthCode = start.code;
+      await openUrl(start.authUrl);
+
+      for (let tries = 0; tries < 90; tries += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        if (attempt !== plexAuthAttempt || !dialogOpen || !profileDraft || profileDraft.serverType !== 'plex') return;
+
+        const result = await plexPollAuth(start.pinId);
+        if (attempt !== plexAuthAttempt || !profileDraft || profileDraft.serverType !== 'plex') return;
+
+        if (result.status === 'complete') {
+          plexAuthPending = false;
+          plexAuthUsername = result.username ?? '';
+          plexServers = result.servers;
+          if (result.username) {
+            profileDraft.username = result.username;
+          }
+          if (plexServers.length > 0) {
+            applySelectedPlexServer(plexServers[0].uri);
+            toast.success('Plex account connected');
+          } else {
+            toast.error('Connected to Plex, but no servers were available for this account');
+          }
+          return;
+        }
+
+        if (result.status === 'expired') {
+          plexAuthPending = false;
+          toast.error('Plex sign-in expired. Start the connection again.');
+          return;
+        }
+      }
+
+      plexAuthPending = false;
+      toast.error('Timed out waiting for Plex sign-in');
+    } catch (err) {
+      plexAuthPending = false;
+      toast.error(err instanceof Error ? err.message : 'Failed to connect Plex');
+    }
+  }
+
+  $effect(() => {
+    if (!dialogOpen) {
+      profileDraft = null;
+      resetPlexAuthState();
+    }
+  });
+
+  $effect(() => {
+    if (!profileDraft || profileDraft.serverType !== 'plex') {
+      resetPlexAuthState();
+    }
+  });
 
   function openAdd() {
     profileDraft = { id: null, name: '', url: '', username: '', password: '', serverType: 'subsonic' };
     showDraftPassword = false;
+    resetPlexAuthState();
     dialogOpen = true;
   }
 
   function openEdit(p: Profile) {
     profileDraft = { id: p.id, name: p.name, url: p.url, username: p.username, password: '', serverType: p.serverType };
     showDraftPassword = false;
+    resetPlexAuthState();
     dialogOpen = true;
   }
 
@@ -141,7 +240,7 @@
         <Server class="size-4 text-muted-foreground" />
         <h2 class="font-semibold">Servers</h2>
       </div>
-      <p class="mt-0.5 text-xs text-muted-foreground">Manage your Subsonic, Jellyfin, Emby, and local library connections.</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">Manage your Subsonic, Jellyfin, Emby, Plex, and local library connections.</p>
     </div>
     <button
       class="flex items-center gap-1.5 rounded-lg border border-border bg-secondary/60 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary"
@@ -156,7 +255,7 @@
     <div class="px-5 py-10 text-center">
       <Server class="mx-auto mb-3 size-8 text-muted-foreground/40" />
       <p class="text-sm font-medium text-muted-foreground">No servers configured</p>
-      <p class="mt-1 text-xs text-muted-foreground/70">Add your first Navidrome, Subsonic, Jellyfin, or Emby server above.</p>
+      <p class="mt-1 text-xs text-muted-foreground/70">Add your first Subsonic, Jellyfin, Emby, Plex, or local library above.</p>
     </div>
   {:else}
     <ul class="divide-y divide-border/50">
@@ -214,7 +313,7 @@
   <Dialog.Content class="sm:max-w-xl">
     <Dialog.Header>
       <Dialog.Title>{profileDraft?.id === null ? 'Add Server' : 'Edit Server'}</Dialog.Title>
-      <Dialog.Description>Configure your server connection. For Jellyfin/Emby, use your API key as the password. Local Folder uses a filesystem path.</Dialog.Description>
+      <Dialog.Description>Configure your server connection. Jellyfin, Emby, and Plex use an API or auth token as the password. Local Folder uses a filesystem path.</Dialog.Description>
     </Dialog.Header>
     {#if profileDraft !== null}
       <div class="space-y-4 py-2">
@@ -240,6 +339,7 @@
               <option value="subsonic_legacy">Subsonic (Token Legacy)</option>
               <option value="jellyfin">Jellyfin</option>
               <option value="emby">Emby</option>
+              <option value="plex">Plex</option>
               <option value="local">Local Folder</option>
             </select>
           </div>
@@ -254,10 +354,69 @@
               ? 'D:\\Music or /home/user/Music'
               : (profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby')
                 ? 'http://localhost:8096'
+                : profileDraft.serverType === 'plex'
+                  ? 'http://localhost:32400'
                 : 'http://localhost:4533'}
             class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
+        {#if profileDraft.serverType === 'plex'}
+          <div class="rounded-xl border border-border/70 bg-secondary/30 p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="space-y-1">
+                <p class="text-sm font-medium">Connect Plex Account</p>
+                <p class="text-xs text-muted-foreground">
+                  Sign in with Plex, then choose one of the servers linked to that account. You can still enter a server URL and token manually if you prefer.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-border bg-background/40 px-3 py-2 text-xs font-medium transition hover:bg-background/60 disabled:opacity-60"
+                onclick={beginPlexConnect}
+                disabled={plexAuthPending || savingProfile}
+              >
+                {#if plexAuthPending}
+                  <Loader2 class="size-3.5 animate-spin" />
+                  Waiting…
+                {:else}
+                  <Link2 class="size-3.5" />
+                  Connect Plex
+                {/if}
+              </button>
+            </div>
+            {#if plexAuthCode}
+              <div class="mt-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2">
+                <p class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Link code</p>
+                <p class="mt-1 text-lg font-semibold tracking-[0.28em]">{plexAuthCode}</p>
+                <p class="mt-1 text-xs text-muted-foreground">A browser window should open to Plex sign-in automatically.</p>
+              </div>
+            {/if}
+            {#if plexAuthUsername || plexServers.length > 0}
+              <div class="mt-3 space-y-3">
+                {#if plexAuthUsername}
+                  <p class="text-xs text-muted-foreground">Connected as <span class="font-medium text-foreground">{plexAuthUsername}</span></p>
+                {/if}
+                {#if plexServers.length > 0}
+                  <div class="space-y-1.5">
+                    <label class="text-sm font-medium" for="dialog-plex-server">Plex Server</label>
+                    <select
+                      id="dialog-plex-server"
+                      bind:value={plexSelectedServerUri}
+                      class="w-full rounded-lg border border-border bg-background/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      onchange={() => applySelectedPlexServer(plexSelectedServerUri)}
+                    >
+                      {#each plexServers as server (server.machineIdentifier + server.uri)}
+                        <option value={server.uri}>
+                          {server.name}{server.owned ? '' : ' • Shared'}{server.local ? ' • Local' : ''}
+                        </option>
+                      {/each}
+                    </select>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-1.5">
             <label class="text-sm font-medium" for="dialog-user">Username</label>
@@ -265,7 +424,7 @@
               id="dialog-user"
               type="text"
               bind:value={profileDraft.username}
-              placeholder={profileDraft.serverType === 'local' ? 'Not used for local folders' : 'admin'}
+              placeholder={profileDraft.serverType === 'local' ? 'Not used for local folders' : profileDraft.serverType === 'plex' ? 'Optional for Plex tokens' : 'admin'}
               autocomplete="username"
               class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               disabled={profileDraft.serverType === 'local'}
@@ -277,6 +436,8 @@
                 Password
               {:else if profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby'}
                 API Key{profileDraft.id !== null ? ' (blank = keep current)' : ''}
+              {:else if profileDraft.serverType === 'plex'}
+                Plex Token{profileDraft.id !== null ? ' (blank = keep current)' : ''}
               {:else}
                 {profileDraft.id !== null ? 'Password (blank = keep current)' : 'Password'}
               {/if}
@@ -292,6 +453,8 @@
                     ? 'Leave blank to keep current'
                     : (profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby')
                       ? 'API key'
+                      : profileDraft.serverType === 'plex'
+                        ? 'X-Plex-Token'
                       : 'Password'}
                 autocomplete="current-password"
                 class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"

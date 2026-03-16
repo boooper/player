@@ -103,6 +103,10 @@ fn is_jf(p: &ActiveProfile) -> bool {
     matches!(p.server_type.as_str(), "jellyfin" | "emby")
 }
 
+fn is_plex(p: &ActiveProfile) -> bool {
+    p.server_type == "plex"
+}
+
 fn is_local(p: &ActiveProfile) -> bool {
     p.server_type == "local"
 }
@@ -288,7 +292,7 @@ pub(crate) async fn resolve_playback_song(
         get_active_profile(&db)?
     };
 
-    if is_jf(&p) {
+    if is_jf(&p) || is_plex(&p) {
         return Err("External playback materialization is only supported for Subsonic-compatible servers.".to_string());
     }
 
@@ -386,6 +390,10 @@ pub async fn library_search(
         let songs = crate::commands::jellyfin::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
+    if is_plex(&p) {
+        let songs = crate::commands::plex::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
+        return Ok(cache_song_covers(&state, songs).await);
+    }
     let cnt = count.unwrap_or(20).to_string();
     let body = request(&state.http, &p, "search3", &[
         ("query", &query), ("songCount", &cnt), ("artistCount", "0"), ("albumCount", "0"),
@@ -412,6 +420,9 @@ pub async fn library_search_bundle(
     } else if is_jf(&p) {
         let songs = crate::commands::jellyfin::search(&state.http, &p, &query, song_limit).await?;
         cache_song_covers(&state, songs).await
+    } else if is_plex(&p) {
+        let songs = crate::commands::plex::search(&state.http, &p, &query, song_limit).await?;
+        cache_song_covers(&state, songs).await
     } else {
         let cnt = song_limit.to_string();
         let body = request(&state.http, &p, "search3", &[
@@ -428,6 +439,9 @@ pub async fn library_search_bundle(
         crate::commands::local::artist_albums(&p, &query, album_limit).await?
     } else if is_jf(&p) {
         let albums = crate::commands::jellyfin::artist_albums(&state.http, &p, &query, album_limit).await?;
+        cache_album_covers(&state, albums).await
+    } else if is_plex(&p) {
+        let albums = crate::commands::plex::artist_albums(&state.http, &p, &query, album_limit).await?;
         cache_album_covers(&state, albums).await
     } else {
         let cnt = album_limit.to_string();
@@ -446,6 +460,8 @@ pub async fn library_search_bundle(
             crate::commands::local::similar(&p, &seed.id, rec_limit).await?
         } else if is_jf(&p) {
             crate::commands::jellyfin::similar(&state.http, &p, &seed.id, rec_limit).await?
+        } else if is_plex(&p) {
+            crate::commands::plex::similar(&state.http, &p, &seed.id, rec_limit).await?
         } else {
             let cnt = rec_limit.to_string();
             let body = request(&state.http, &p, "getSimilarSongs2", &[("id", &seed.id), ("count", &cnt)]).await?;
@@ -492,6 +508,10 @@ pub async fn library_similar(
         let songs = crate::commands::jellyfin::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
+    if is_plex(&p) {
+        let songs = crate::commands::plex::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
+        return Ok(cache_song_covers(&state, songs).await);
+    }
     let cnt = count.unwrap_or(20).to_string();
     let body = request(&state.http, &p, "getSimilarSongs2", &[("id", &song_id), ("count", &cnt)]).await?;
     let songs = arr(body.get("similarSongs2").and_then(|r| r.get("song"))).iter().map(|v| map_song(v, &p)).collect();
@@ -504,6 +524,10 @@ pub async fn library_playlists(state: State<'_, AppState>) -> Result<Vec<Playlis
     if is_local(&p) { return crate::commands::local::playlists(&p).await; }
     if is_jf(&p) {
         let playlists = crate::commands::jellyfin::playlists(&state.http, &p).await?;
+        return Ok(cache_playlist_covers(&state, playlists).await);
+    }
+    if is_plex(&p) {
+        let playlists = crate::commands::plex::playlists(&state.http, &p).await?;
         return Ok(cache_playlist_covers(&state, playlists).await);
     }
     let body = request(&state.http, &p, "getPlaylists", &[]).await?;
@@ -536,6 +560,10 @@ pub async fn library_playlist(
         let detail = crate::commands::jellyfin::playlist(&state.http, &p, &id).await?;
         return Ok(cache_playlist_detail(&state, detail).await);
     }
+    if is_plex(&p) {
+        let detail = crate::commands::plex::playlist(&state.http, &p, &id).await?;
+        return Ok(cache_playlist_detail(&state, detail).await);
+    }
     let body = request(&state.http, &p, "getPlaylist", &[("id", &id)]).await?;
     let pl = body.get("playlist").cloned().unwrap_or(serde_json::Value::Null);
     let songs = arr(pl.get("entry")).iter().map(|v| map_song(v, &p)).collect();
@@ -566,6 +594,10 @@ pub async fn library_artist_albums(
         let albums = crate::commands::jellyfin::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
         return Ok(cache_album_covers(&state, albums).await);
     }
+    if is_plex(&p) {
+        let albums = crate::commands::plex::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
+        return Ok(cache_album_covers(&state, albums).await);
+    }
     let cnt = count.unwrap_or(20).to_string();
     let body = request(&state.http, &p, "search3", &[
         ("query", &query), ("artistCount", "0"), ("albumCount", &cnt), ("songCount", "0"),
@@ -583,6 +615,10 @@ pub async fn library_album_songs(
     if is_local(&p) { return crate::commands::local::album_songs(&p, &id).await; }
     if is_jf(&p) {
         let songs = crate::commands::jellyfin::album_songs(&state.http, &p, &id).await?;
+        return Ok(cache_song_covers(&state, songs).await);
+    }
+    if is_plex(&p) {
+        let songs = crate::commands::plex::album_songs(&state.http, &p, &id).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
     let body = request(&state.http, &p, "getAlbum", &[("id", &id)]).await?;
@@ -606,6 +642,10 @@ pub async fn library_album(
     if is_local(&p) { return crate::commands::local::album(&p, &id).await; }
     if is_jf(&p) {
         let detail = crate::commands::jellyfin::album(&state.http, &p, &id).await?;
+        return Ok(cache_album_detail(&state, detail).await);
+    }
+    if is_plex(&p) {
+        let detail = crate::commands::plex::album(&state.http, &p, &id).await?;
         return Ok(cache_album_detail(&state, detail).await);
     }
     let body = request(&state.http, &p, "getAlbum", &[("id", &id)]).await?;
@@ -656,6 +696,10 @@ pub async fn library_album_list(
         let albums = crate::commands::jellyfin::album_list(&state.http, &p, &kind.unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await?;
         return Ok(cache_album_covers(&state, albums).await);
     }
+    if is_plex(&p) {
+        let albums = crate::commands::plex::album_list(&state.http, &p, &kind.clone().unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await?;
+        return Ok(cache_album_covers(&state, albums).await);
+    }
     let kind = kind.unwrap_or_else(|| "newest".to_string());
     let cnt = count.unwrap_or(20).min(100).to_string();
     let body = request(&state.http, &p, "getAlbumList2", &[("type", &kind), ("size", &cnt)]).await?;
@@ -669,6 +713,10 @@ pub async fn library_starred(state: State<'_, AppState>) -> Result<Vec<Song>, St
     if is_local(&p) { return crate::commands::local::starred(&p).await; }
     if is_jf(&p) {
         let songs = crate::commands::jellyfin::starred(&state.http, &p).await?;
+        return Ok(cache_song_covers(&state, songs).await);
+    }
+    if is_plex(&p) {
+        let songs = crate::commands::plex::starred(&state.http, &p).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
     let body = request(&state.http, &p, "getStarred2", &[]).await?;
@@ -688,6 +736,9 @@ pub async fn library_star(
     let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
     if is_local(&p) {
         return Err("Favorites are not supported for local libraries yet.".to_string());
+    }
+    if is_plex(&p) {
+        return Err("Favorites are not supported for Plex libraries yet.".to_string());
     }
     let resolved_id = resolve_library_song_id(&state, &id, artist.as_deref(), title.as_deref(), album.as_deref()).await?;
     if is_jf(&p) {
@@ -757,6 +808,9 @@ pub async fn library_add_to_playlist(
     if is_local(&p) {
         return Err("Playlists are not supported for local libraries yet.".to_string());
     }
+    if is_plex(&p) {
+        return Err("Editing Plex playlists is not supported yet.".to_string());
+    }
     let resolved_id = resolve_library_song_id(&state, &song_id, artist.as_deref(), title.as_deref(), album.as_deref()).await?;
     if is_jf(&p) { return crate::commands::jellyfin::add_to_playlist(&state.http, &p, &playlist_id, &resolved_id).await; }
     if playlist_id.is_empty() || resolved_id.is_empty() {
@@ -795,6 +849,9 @@ pub async fn library_create_playlist(
     }
     if is_local(&p) {
         return Err("Playlists are not supported for local libraries yet.".to_string());
+    }
+    if is_plex(&p) {
+        return Err("Creating Plex playlists is not supported yet.".to_string());
     }
 
     let mut params: Vec<(&str, &str)> = vec![("name", trimmed_name)];
@@ -853,6 +910,9 @@ pub async fn library_rename_playlist(
         )
         .await;
     }
+    if is_plex(&p) {
+        return Err("Renaming Plex playlists is not supported yet.".to_string());
+    }
 
     request(&state.http, &p, "updatePlaylist", &[
         ("playlistId", &playlist_id),
@@ -871,7 +931,7 @@ pub async fn library_materialize_song(
         get_active_profile(&db)?
     };
 
-    if is_jf(&p) {
+    if is_jf(&p) || is_plex(&p) {
         return Err("Materializing external tracks is only supported for Subsonic-compatible servers.".to_string());
     }
     if is_local(&p) {

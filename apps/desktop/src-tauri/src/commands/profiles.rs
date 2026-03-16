@@ -57,7 +57,7 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
     let name = data.name.trim().to_string();
     let username = data.username.trim().to_string();
     let password = data.password.unwrap_or_default().trim().to_string();
-    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "local"]
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "plex", "local"]
         .contains(&data.server_type.as_str())
     {
         data.server_type.clone()
@@ -72,7 +72,7 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
 
     if name.is_empty() { return Err("name is required".to_string()); }
     if url.is_empty() { return Err("url is required".to_string()); }
-    if server_type != "local" && username.is_empty() { return Err("username is required".to_string()); }
+    if server_type != "local" && username.is_empty() && server_type != "plex" { return Err("username is required".to_string()); }
     if server_type != "local" && password.is_empty() { return Err("password is required".to_string()); }
 
     let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -124,7 +124,7 @@ pub fn update_profile(
 
     let name = data.name.trim().to_string();
     let username = data.username.trim().to_string();
-    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "local"]
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "plex", "local"]
         .contains(&data.server_type.as_str())
     {
         data.server_type.clone()

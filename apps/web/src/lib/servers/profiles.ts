@@ -1,4 +1,9 @@
-import type { ProfileDraftPayload, ProfilePayload } from './types';
+import type {
+  PlexAuthPollResultPayload,
+  PlexAuthStartPayload,
+  ProfileDraftPayload,
+  ProfilePayload,
+} from './types';
 import { invoke } from './shared';
 
 export async function fetchProfiles(): Promise<ProfilePayload[]> {
@@ -19,4 +24,12 @@ export async function deleteProfile(id: number): Promise<void> {
 
 export async function activateProfile(id: number): Promise<void> {
   await invoke('activate_profile', { id });
+}
+
+export async function plexBeginAuth(): Promise<PlexAuthStartPayload> {
+  return invoke<PlexAuthStartPayload>('plex_begin_auth');
+}
+
+export async function plexPollAuth(pinId: number): Promise<PlexAuthPollResultPayload> {
+  return invoke<PlexAuthPollResultPayload>('plex_poll_auth', { pinId });
 }

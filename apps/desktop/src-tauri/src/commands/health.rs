@@ -51,6 +51,12 @@ pub async fn get_service_health(state: State<'_, AppState>) -> Result<ServiceHea
                 _ => "offline".to_string(),
             }
         }
+        Some(p) if p.server_type == "plex" => {
+            match crate::commands::plex::ping(&state.http, &p).await {
+                Ok(true) => "online".to_string(),
+                _ => "offline".to_string(),
+            }
+        }
         Some(p) => {
             let salt: String = rand::thread_rng()
                 .sample_iter(&rand::distributions::Alphanumeric)
