@@ -2,12 +2,14 @@
   import { goto } from '$app/navigation';
   import { Play, Pause, Music2, Search, X } from '@lucide/svelte';
 
-  import { searchSongs, type Song } from '$lib/servers';
+  import { desktopPlaybackCachedIds, searchSongs, type Song } from '$lib/servers';
   import { focusTrack, playQueue, playingFrom, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { formatClockDuration } from '$lib/utils';
   import { libraryRefresh } from '$lib/stores/ui-state';
+  import { isTauri } from '$lib/tauri';
 
   // All songs loaded from the library on mount.
   let allSongs = $state<Song[]>([]);
@@ -15,6 +17,8 @@
   let loading = $state(false);
   let error = $state('');
   let songsLoadVersion = 0;
+  let cachedSongIds = $state<Set<string>>(new Set());
+  const desktopPlayback = isTauri();
 
   // Client-side filter when a query is present.
   const songs = $derived(
@@ -64,6 +68,19 @@
       .then((s) => {
         if (loadVersion !== songsLoadVersion) return;
         allSongs = s;
+        if (!desktopPlayback) {
+          cachedSongIds = new Set();
+          return;
+        }
+        desktopPlaybackCachedIds(s)
+          .then((ids) => {
+            if (loadVersion !== songsLoadVersion) return;
+            cachedSongIds = new Set(ids);
+          })
+          .catch(() => {
+            if (loadVersion !== songsLoadVersion) return;
+            cachedSongIds = new Set();
+          });
       })
       .catch((err) => {
         if (loadVersion !== songsLoadVersion) return;
@@ -191,11 +208,19 @@
                 {/if}
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
-                  <SongArtistLinks
-                    artist={song.artist}
-                    class="truncate text-xs text-muted-foreground"
-                    linkClass="hover:underline hover:text-foreground transition-colors duration-150"
-                  />
+                  <div class="mt-0.5 flex min-w-0 items-center gap-2">
+                    <SongArtistLinks
+                      artist={song.artist}
+                      class="truncate text-xs text-muted-foreground"
+                      linkClass="hover:underline hover:text-foreground transition-colors duration-150"
+                    />
+                    <SongTechBadge
+                      cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+                      audioFormat={song.audioFormat}
+                      bitrateKbps={song.bitrateKbps}
+                      compact
+                    />
+                  </div>
                 </div>
               </div>
 

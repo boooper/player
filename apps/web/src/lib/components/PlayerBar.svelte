@@ -23,9 +23,7 @@
     Heart,
     Disc3,
     User2,
-    Cast,
-    HardDrive,
-    Cloud
+    Cast
   } from '@lucide/svelte';
   import {
     focusTrack,
@@ -69,6 +67,7 @@
   import { Button, Slider } from '$lib/components/ui';
   import { backendSettings } from '$lib/stores/backend-settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { goto } from '$app/navigation';
   import { isTauri } from '$lib/tauri';
@@ -1227,19 +1226,12 @@
                 title={currentTrack.album}
               >{currentTrack.title}</button>
               <ExternalSourceBadge id={currentTrack.id} class="shrink-0" />
-              {#if desktopPlayback}
-                <span
-                  class="player-status-icon shrink-0 text-muted-foreground {currentTrackCached ? 'is-cached' : ''}"
-                  title={currentTrackCached ? 'Cached locally' : 'Not cached locally'}
-                  aria-label={currentTrackCached ? 'Cached locally' : 'Not cached locally'}
-                >
-                  {#if currentTrackCached}
-                    <HardDrive class="size-3.5 text-emerald-400" />
-                  {:else}
-                    <Cloud class="size-3.5" />
-                  {/if}
-                </span>
-              {/if}
+              <SongTechBadge
+                cached={desktopPlayback ? currentTrackCached : null}
+                audioFormat={currentTrack.audioFormat}
+                bitrateKbps={currentTrack.bitrateKbps}
+                compact
+              />
               {#if isSmartShuffleTrack}
                 <span class="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                   Smart Shuffle
@@ -1617,7 +1609,6 @@
     text-underline-offset: 0.18em;
   }
 
-  .player-status-icon,
   .player-favorite-button,
   .player-volume-button {
     transition:
@@ -1627,13 +1618,8 @@
   }
 
   .player-favorite-button:hover,
-  .player-volume-button:hover,
-  .player-status-icon.is-cached {
+  .player-volume-button:hover {
     transform: translateY(-1px);
-  }
-
-  .player-status-icon.is-cached {
-    animation: player-cache-pulse 2.8s ease-in-out infinite;
   }
 
   .player-transport {
@@ -1829,17 +1815,6 @@
       box-shadow:
         0 16px 34px hsl(var(--primary) / 0.28),
         0 0 0 1px hsl(var(--foreground) / 0.08);
-    }
-  }
-
-  @keyframes player-cache-pulse {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 0 hsl(var(--primary) / 0));
-    }
-
-    50% {
-      filter: drop-shadow(0 0 10px hsl(var(--primary) / 0.24));
     }
   }
 

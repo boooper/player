@@ -154,6 +154,35 @@ fn jartist_id(v: &Value) -> String {
         .unwrap_or("")
         .to_string()
 }
+fn j_audio_format(v: &Value) -> Option<String> {
+    v.get("Container")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            v.get("MediaSources")
+                .and_then(|value| value.as_array())
+                .and_then(|sources| sources.first())
+                .and_then(|source| source.get("Container"))
+                .and_then(|value| value.as_str())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+fn j_bitrate_kbps(v: &Value) -> Option<u32> {
+    let bits_per_second = v
+        .get("Bitrate")
+        .and_then(|value| value.as_u64())
+        .or_else(|| {
+            v.get("MediaSources")
+                .and_then(|value| value.as_array())
+                .and_then(|sources| sources.first())
+                .and_then(|source| source.get("Bitrate"))
+                .and_then(|value| value.as_u64())
+        })?;
+
+    let kbps = bits_per_second / 1000;
+    u32::try_from(kbps).ok().filter(|value| *value > 0)
+}
 
 // ── Item mappers ──────────────────────────────────────────────────────────────
 
@@ -180,6 +209,8 @@ pub(crate) fn map_song(v: &Value, p: &ActiveProfile) -> Song {
         album_id,
         cover_art: cover_id,
         duration: jduration(v),
+        audio_format: j_audio_format(v),
+        bitrate_kbps: j_bitrate_kbps(v),
     }
 }
 
@@ -213,7 +244,7 @@ fn map_playlist(v: &Value, p: &ActiveProfile) -> Playlist {
 // ── Command implementations ───────────────────────────────────────────────────
 
 const SONG_FIELDS: &str =
-    "Artists,ArtistItems,Album,AlbumId,ImageTags,RunTimeTicks,AlbumPrimaryImageTag";
+    "Artists,ArtistItems,Album,AlbumId,ImageTags,RunTimeTicks,AlbumPrimaryImageTag,Container,Bitrate,MediaSources";
 const ALBUM_FIELDS: &str =
     "Artists,ArtistItems,ChildCount,RunTimeTicks,ImageTags,ProductionYear";
 

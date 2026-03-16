@@ -160,6 +160,7 @@ pub fn run() {
             commands::playback::playback_set_eq,
             commands::playback::playback_status,
             commands::playback::playback_is_cached,
+            commands::playback::playback_cached_ids,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

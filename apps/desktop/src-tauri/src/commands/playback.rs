@@ -13,6 +13,18 @@ fn playback_handle<'a>(
     &state.playback
 }
 
+fn is_song_cached(state: &State<'_, AppState>, song: &Song) -> Result<bool, String> {
+    if playback_handle(state).cached_track(&song.id)?.is_some() {
+        return Ok(true);
+    }
+
+    if song.stream_url.starts_with("file:") || song.stream_url.starts_with("data:") {
+        return Ok(true);
+    }
+
+    Ok(state.playback_cache.local_file_url(&song.id)?.is_some())
+}
+
 #[tauri::command]
 pub async fn playback_load(
     state: State<'_, AppState>,
@@ -80,13 +92,16 @@ pub fn playback_status(state: State<'_, AppState>) -> Result<PlaybackStatus, Str
 
 #[tauri::command]
 pub fn playback_is_cached(state: State<'_, AppState>, song: Song) -> Result<bool, String> {
-    if playback_handle(&state).cached_track(&song.id)?.is_some() {
-        return Ok(true);
-    }
+    is_song_cached(&state, &song)
+}
 
-    if song.stream_url.starts_with("file:") || song.stream_url.starts_with("data:") {
-        return Ok(true);
+#[tauri::command]
+pub fn playback_cached_ids(state: State<'_, AppState>, songs: Vec<Song>) -> Result<Vec<String>, String> {
+    let mut cached_ids = Vec::new();
+    for song in songs {
+        if is_song_cached(&state, &song)? {
+            cached_ids.push(song.id);
+        }
     }
-
-    Ok(state.playback_cache.local_file_url(&song.id)?.is_some())
+    Ok(cached_ids)
 }

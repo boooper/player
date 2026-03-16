@@ -230,6 +230,13 @@ fn read_song(root: &Path, file: &Path) -> Option<(Song, Option<String>, SystemTi
         cover_art_url,
         stream_url: file_url(file),
         duration,
+        audio_format: file
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::trim)
+            .filter(|ext| !ext.is_empty())
+            .map(ToOwned::to_owned),
+        bitrate_kbps: None,
     };
 
     Some((song, year, modified))

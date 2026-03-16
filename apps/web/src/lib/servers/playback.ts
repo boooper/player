@@ -42,3 +42,7 @@ export async function desktopPlaybackStatus(): Promise<DesktopPlaybackStatus> {
 export async function desktopPlaybackIsCached(song: Song): Promise<boolean> {
   return invoke<boolean>('playback_is_cached', { song });
 }
+
+export async function desktopPlaybackCachedIds(songs: Song[]): Promise<string[]> {
+  return invoke<string[]>('playback_cached_ids', { songs });
+}

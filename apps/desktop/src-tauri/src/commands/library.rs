@@ -193,6 +193,25 @@ fn s(v: Option<&serde_json::Value>) -> String {
 fn n(v: Option<&serde_json::Value>) -> f64 {
     v.and_then(|x| x.as_f64()).unwrap_or(0.0)
 }
+fn optional_string(v: Option<&serde_json::Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+fn optional_u32(v: Option<&serde_json::Value>) -> Option<u32> {
+    v.and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|value| value.round() as u64)))
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value > 0)
+}
+fn format_from_content_type(content_type: &str) -> Option<String> {
+    content_type
+        .rsplit('/')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
 fn arr(v: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
     match v {
         Some(serde_json::Value::Array(a)) => a.clone(),
@@ -208,6 +227,9 @@ fn arr(v: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
 fn map_song(v: &serde_json::Value, p: &ActiveProfile) -> Song {
     let id = s(v.get("id"));
     let cover = s(v.get("coverArt"));
+    let audio_format = optional_string(v.get("transcodedSuffix"))
+        .or_else(|| optional_string(v.get("suffix")))
+        .or_else(|| optional_string(v.get("contentType")).and_then(|value| format_from_content_type(&value)));
     Song {
         cover_art_url: cover_url(p, &cover, 240),
         stream_url: stream_url(p, &id),
@@ -218,6 +240,8 @@ fn map_song(v: &serde_json::Value, p: &ActiveProfile) -> Song {
         album_id: s(v.get("albumId")),
         cover_art: cover,
         duration: n(v.get("duration")),
+        audio_format,
+        bitrate_kbps: optional_u32(v.get("bitRate")).or_else(|| optional_u32(v.get("transcodedBitRate"))),
     }
 }
 
@@ -324,6 +348,8 @@ async fn resolve_library_song_id(
         cover_art_url: String::new(),
         stream_url: String::new(),
         duration: 0.0,
+        audio_format: None,
+        bitrate_kbps: None,
     };
 
     let resolved = resolve_playback_song(state, &lookup_song).await?;

@@ -15,6 +15,8 @@ export declare type Song = {
   coverArtUrl: string;
   streamUrl: string;
   duration: number;
+  audioFormat?: string;
+  bitrateKbps?: number;
 };
 
 export declare type Album = {

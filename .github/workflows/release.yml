@@ -173,12 +173,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
+          tauriScript: bunx tauri
           tagName: ${{ needs.prepare-release.outputs.tag }}
           releaseName: ${{ needs.prepare-release.outputs.tag }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --config src-tauri/tauri.build.conf.json --config src-tauri/tauri.release.generated.conf.json --target ${{ matrix.target }}
 

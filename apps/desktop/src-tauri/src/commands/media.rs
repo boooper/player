@@ -22,6 +22,8 @@ pub struct Song {
     pub cover_art_url: String,
     pub stream_url: String,
     pub duration: f64,
+    pub audio_format: Option<String>,
+    pub bitrate_kbps: Option<u32>,
 }
 
 #[derive(Serialize, Clone)]
