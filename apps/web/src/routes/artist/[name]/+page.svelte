@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { Play, Pause, Shuffle, ChevronLeft, ChevronRight, Sparkles, Mic2 } from '@lucide/svelte';
 
   import {
+    DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
+    desktopPlaybackCachedIds,
     fetchArtistAlbums,
     fetchAlbumSongs,
     searchSongs,
@@ -20,9 +23,11 @@
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { mergeAlbums, mergeAlbumSongs, type MergedAlbum } from '$lib/media-merge';
   import { formatClockDuration } from '$lib/utils';
   import { libraryRefresh } from '$lib/stores/ui-state';
+  import { isTauri } from '$lib/tauri';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -42,6 +47,7 @@
   let albums = $state<Album[]>([])
   let mergedAlbums = $state<MergedAlbum[]>([]);
   let showAllTracks = $state(false);
+  let cachedSongIds = $state<Set<string>>(new Set());
 
   let albumSongs = $state<Record<string, Song[]>>({});
   let albumLoading = $state<Record<string, boolean>>({});
@@ -51,6 +57,7 @@
   let carouselEl = $state<HTMLDivElement | null>(null);
   const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
   const artistIsActive = $derived($playingFrom.href === artistHref);
+  const desktopPlayback = isTauri();
 
   function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -96,6 +103,19 @@
       subsonicSongs = subResult.status === 'fulfilled' ? subResult.value : [];
       albums = albumResult.status === 'fulfilled' ? albumResult.value : [];
       mergedAlbums = mergeAlbums(albums);
+      if (!desktopPlayback) {
+        cachedSongIds = new Set();
+      } else {
+        desktopPlaybackCachedIds(subsonicSongs)
+          .then((ids) => {
+            if (loadVersion !== artistLoadVersion) return;
+            cachedSongIds = new Set(ids);
+          })
+          .catch(() => {
+            if (loadVersion !== artistLoadVersion) return;
+            cachedSongIds = new Set();
+          });
+      }
 
       if (!artistInfo && topTracks.length === 0 && subsonicSongs.length === 0 && albums.length === 0) {
         throw new Error('Failed to load artist.');
@@ -117,6 +137,21 @@
     void metadataProvider;
     void recommendationProvider;
     loadArtist(data.name);
+  });
+
+  onMount(() => {
+    if (!desktopPlayback) return;
+
+    function handleDesktopCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      if (!songId) return;
+      cachedSongIds = new Set([...cachedSongIds, songId]);
+    }
+
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    return () => {
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    };
   });
 
   function findSubsonicMatch(title: string): Song | null {
@@ -431,7 +466,13 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <p class="truncate text-sm font-medium">{sub.title}</p>
-                <ExternalSourceBadge id={sub.id} class="shrink-0" />
+                <SongTechBadge
+                  id={sub.id}
+                  cached={desktopPlayback ? cachedSongIds.has(sub.id) : null}
+                  audioFormat={sub.audioFormat}
+                  bitrateKbps={sub.bitrateKbps}
+                  compact
+                />
               </div>
               {#if lfm.listeners}
                 <p class="text-xs text-muted-foreground">{lfm.listeners.toLocaleString()} plays</p>

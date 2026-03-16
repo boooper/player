@@ -53,9 +53,11 @@
     playQueue,
     addRecentlyPlayedSong,
     markSmartShuffleTracks,
-    smartShuffleTrackIds
+    smartShuffleTrackIds,
+    restorePlaybackRequest
   } from '$lib/stores/player';
-  import { fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castConnect as castConnectCmd, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetSession as castGetSessionCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, desktopPlaybackIsCached, type CastDeviceInfo } from '$lib/servers';
+  import { showQueue } from '$lib/stores/player';
+  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castConnect as castConnectCmd, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetSession as castGetSessionCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, desktopPlaybackIsCached, type CastDeviceInfo } from '$lib/servers';
   import { getUpNextSongs } from '$lib/discovery';
   import { fetchLikedArtists, saveVolume } from '$lib/servers';
   import { EQ_FREQUENCIES, normalizeEqBands } from '$lib/audio/equalizer';
@@ -68,7 +70,6 @@
   import { backendSettings } from '$lib/stores/backend-settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
-  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { goto } from '$app/navigation';
   import { isTauri } from '$lib/tauri';
 
@@ -191,7 +192,14 @@
 
   onMount(() => {
     function handleTogglePlay() { togglePlay(); }
+    function handleDesktopCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      if (!songId || !currentTrack || songId !== currentTrack.id) return;
+      currentTrackCached = true;
+    }
+
     window.addEventListener('player:toggle-play', handleTogglePlay);
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
     let desktopPoll = 0;
 
     if (desktopPlayback) {
@@ -283,11 +291,10 @@
     }
     return () => {
       window.removeEventListener('player:toggle-play', handleTogglePlay);
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
       if (desktopPoll) clearInterval(desktopPoll);
     };
   });
-
-  import { showQueue } from '$lib/stores/player';
 
   const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
   const lastFmConnected = $derived($backendSettings.lastFmConnected);
@@ -617,6 +624,44 @@
     if (inactiveAudio && inactiveAudio.paused) inactiveAudio.volume = 0;
   });
 
+  $effect(() => {
+    const restore = $restorePlaybackRequest;
+    const track = currentTrack;
+    if (!restore || !track || restore.songId !== track.id) return;
+
+    if (desktopPlayback) {
+      if (castActive || desktopLoadedTrackId !== track.id || desktopLoadPending) return;
+      const position = restore.position;
+      restorePlaybackRequest.set(null);
+      applyRestoredPlaybackPosition(position);
+      return;
+    }
+
+    const activeAudio = getActiveAudio();
+    if (!activeAudio || !track.streamUrl || activeAudio.src !== track.streamUrl) return;
+
+    const position = restore.position;
+    const finishRestore = () => {
+      restorePlaybackRequest.set(null);
+      applyRestoredPlaybackPosition(position);
+    };
+
+    if (activeAudio.readyState > 0) {
+      finishRestore();
+      return;
+    }
+
+    const handleLoadedMetadata = () => {
+      activeAudio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      finishRestore();
+    };
+
+    activeAudio.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+    return () => {
+      activeAudio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+    };
+  });
+
   // Effect 3: preload the upcoming song into the inactive deck
   $effect(() => {
     const next = $queue[$currentIndex + 1];
@@ -756,6 +801,7 @@
     if (desktopPlayback) {
       const track = currentTrack;
       if (!track) return;
+      if (desktopLoadPending || isBuffering) return;
       if (desktopLoadedTrackId === track.id) {
         shouldAutoplay.set(false);
         desktopLoadPending = true;
@@ -1192,6 +1238,17 @@
   function fmt(seconds: number): string {
     return formatClockDuration(seconds);
   }
+
+  function applyRestoredPlaybackPosition(target: number): void {
+    const value = Math.max(0, target);
+    if (desktopPlayback) {
+      desktopPlaybackSeek(value).catch(() => undefined);
+    } else {
+      const activeAudio = getActiveAudio();
+      if (activeAudio) activeAudio.currentTime = value;
+    }
+    currentTime.set(value);
+  }
 </script>
 
 <footer class="player-bar app-shell-footer shrink-0 border-t border-border/40 px-4 py-3 {isBuffering ? 'player-bar-loading' : ''}">
@@ -1199,24 +1256,20 @@
     <!-- Track info -->
     <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
-        <SongContextMenu song={currentTrack} triggerClass="contents">
-          {#snippet children()}
-            <button
-              class="player-track-art-button shrink-0 cursor-pointer"
-              onclick={() => showQueue.update(v => !v)}
-              title="Toggle queue"
-              tabindex="-1"
-            >
-              {#if currentTrack.coverArtUrl}
-                <img class="player-track-art size-11 rounded-md object-cover shadow-sm" src={currentTrack.coverArtUrl} alt={currentTrack.title} />
-              {:else}
-                <div class="player-track-art player-track-art-fallback grid size-11 shrink-0 place-items-center rounded-md bg-gradient-to-br from-muted to-muted/60 text-xs font-bold text-muted-foreground">
-                  {initials(currentTrack.title)}
-                </div>
-              {/if}
-            </button>
-          {/snippet}
-        </SongContextMenu>
+        <button
+          class="player-track-art-button shrink-0 cursor-pointer"
+          onclick={() => showQueue.update((open) => !open)}
+          title="Toggle now playing"
+          tabindex="-1"
+        >
+          {#if currentTrack.coverArtUrl}
+            <img class="player-track-art size-11 rounded-md object-cover shadow-sm" src={currentTrack.coverArtUrl} alt={currentTrack.title} />
+          {:else}
+            <div class="player-track-art player-track-art-fallback grid size-11 shrink-0 place-items-center rounded-md bg-gradient-to-br from-muted to-muted/60 text-xs font-bold text-muted-foreground">
+              {initials(currentTrack.title)}
+            </div>
+          {/if}
+        </button>
         <div class="player-track-meta min-w-0">
           <div class="flex items-center gap-1.5">
             <div class="min-w-0 flex items-center gap-1.5">
@@ -1225,8 +1278,8 @@
                 onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
                 title={currentTrack.album}
               >{currentTrack.title}</button>
-              <ExternalSourceBadge id={currentTrack.id} class="shrink-0" />
               <SongTechBadge
+                id={currentTrack.id}
                 cached={desktopPlayback ? currentTrackCached : null}
                 audioFormat={currentTrack.audioFormat}
                 bitrateKbps={currentTrack.bitrateKbps}

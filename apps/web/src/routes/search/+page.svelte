@@ -7,7 +7,7 @@
   import { Badge, Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
-  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { readUiJson, writeUiJson } from '$lib/ui-storage';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { libraryRefresh } from '$lib/stores/ui-state';
@@ -214,7 +214,7 @@
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
               <p class="truncate text-sm font-semibold">{song.title}</p>
-              <ExternalSourceBadge id={song.id} class="shrink-0" />
+              <SongTechBadge id={song.id} audioFormat={song.audioFormat} bitrateKbps={song.bitrateKbps} compact />
             </div>
             <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
           </div>
@@ -271,7 +271,7 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
                 <p class="truncate text-sm font-semibold">{song.title}</p>
-                <ExternalSourceBadge id={song.id} class="shrink-0" />
+                <SongTechBadge id={song.id} audioFormat={song.audioFormat} bitrateKbps={song.bitrateKbps} compact />
               </div>
               <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
             </div>

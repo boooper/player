@@ -1,13 +1,16 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { fetchPlaylistDetail, type Song } from '$lib/servers';
+  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, desktopPlaybackCachedIds, fetchPlaylistDetail, type Song } from '$lib/servers';
   import { Play, Pause, Shuffle, Sparkles } from '@lucide/svelte';
   import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { formatClockDuration } from '$lib/utils';
   import { libraryRefresh } from '$lib/stores/ui-state';
+  import { isTauri } from '$lib/tauri';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -24,9 +27,11 @@
   let coverArtUrl = $state('');
   let songCount = $state(0);
   let songs = $state<Song[]>([])
+  let cachedSongIds = $state<Set<string>>(new Set());
   let playlistLoadVersion = 0;
   const playlistHref = $derived(`/playlist/${encodeURIComponent(data.id)}`);
   const playlistIsActive = $derived($playingFrom.href === playlistHref);
+  const desktopPlayback = isTauri();
 
   $effect(() => {
     const id = data.id;
@@ -42,6 +47,19 @@
         coverArtUrl = detail.playlist.coverArtUrl;
         songCount = detail.playlist.songCount;
         songs = detail.songs;
+        if (!desktopPlayback) {
+          cachedSongIds = new Set();
+        } else {
+          desktopPlaybackCachedIds(detail.songs)
+            .then((ids) => {
+              if (loadVersion !== playlistLoadVersion) return;
+              cachedSongIds = new Set(ids);
+            })
+            .catch(() => {
+              if (loadVersion !== playlistLoadVersion) return;
+              cachedSongIds = new Set();
+            });
+        }
       })
       .catch((err) => {
         if (loadVersion !== playlistLoadVersion) return;
@@ -51,6 +69,21 @@
         if (loadVersion !== playlistLoadVersion) return;
         loading = false;
       });
+  });
+
+  onMount(() => {
+    if (!desktopPlayback) return;
+
+    function handleDesktopCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      if (!songId) return;
+      cachedSongIds = new Set([...cachedSongIds, songId]);
+    }
+
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    return () => {
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    };
   });
 
   function formatDuration(seconds: number): string {
@@ -212,7 +245,16 @@
                 </div>
               {/if}
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground">{song.title}</p>
+                <div class="flex min-w-0 items-center gap-2">
+                  <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground">{song.title}</p>
+                  <SongTechBadge
+                    id={song.id}
+                    cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+                    audioFormat={song.audioFormat}
+                    bitrateKbps={song.bitrateKbps}
+                    compact
+                  />
+                </div>
                 <SongArtistLinks
                   artist={song.artist}
                   class="truncate text-xs text-muted-foreground"

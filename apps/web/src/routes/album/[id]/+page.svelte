@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { Play, Pause, Shuffle, Clock3, ArrowLeft } from '@lucide/svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
@@ -12,6 +13,8 @@
   }
 
   import {
+    DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
+    desktopPlaybackCachedIds,
     fetchAlbumDetail,
     fetchAlbumSongs,
     fetchArtistAlbums,
@@ -22,6 +25,7 @@
   import { focusTrack, playQueue, playingFrom, enableShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { formatClockDuration } from '$lib/utils';
   import {
     DropdownMenu,
@@ -32,6 +36,7 @@
   } from '$lib/components/ui/dropdown-menu';
   import { Sparkles } from '@lucide/svelte';
   import { libraryRefresh } from '$lib/stores/ui-state';
+  import { isTauri } from '$lib/tauri';
 
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
   const albumHref = $derived(`/album/${encodeURIComponent(data.id)}`);
@@ -43,8 +48,10 @@
   let error = $state('');
   let album = $state<(Album & { genre?: string }) | null>(null);
   let songs = $state<Song[]>([])
+  let cachedSongIds = $state<Set<string>>(new Set());
   let albumLoadVersion = 0;
   const ALBUM_LOAD_TIMEOUT_MS = 12000;
+  const desktopPlayback = isTauri();
 
   function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -98,6 +105,19 @@
         duration: resolvedSongs.reduce((total, song) => total + (song.duration || 0), 0)
       };
       songs = resolvedSongs;
+      if (!desktopPlayback) {
+        cachedSongIds = new Set();
+      } else {
+        desktopPlaybackCachedIds(resolvedSongs)
+          .then((ids) => {
+            if (loadVersion !== albumLoadVersion) return;
+            cachedSongIds = new Set(ids);
+          })
+          .catch(() => {
+            if (loadVersion !== albumLoadVersion) return;
+            cachedSongIds = new Set();
+          });
+      }
     } catch (err) {
       if (loadVersion !== albumLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load album.';
@@ -111,6 +131,21 @@
     const refresh = $libraryRefresh;
     void refresh;
     loadAlbum();
+  });
+
+  onMount(() => {
+    if (!desktopPlayback) return;
+
+    function handleDesktopCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      if (!songId) return;
+      cachedSongIds = new Set([...cachedSongIds, songId]);
+    }
+
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    return () => {
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    };
   });
 
   function playFrom(index: number) {
@@ -340,9 +375,17 @@
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <p class="truncate text-sm font-medium {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
-                  <ExternalSourceBadge id={song.id} class="shrink-0" />
+                  <SongTechBadge
+                    id={song.id}
+                    cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+                    audioFormat={song.audioFormat}
+                    bitrateKbps={song.bitrateKbps}
+                    compact
+                  />
                 </div>
-                <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
+                <div class="mt-0.5 flex min-w-0 items-center gap-2">
+                  <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
+                </div>
               </div>
             </div>
 

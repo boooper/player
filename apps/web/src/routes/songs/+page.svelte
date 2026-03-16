@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { Play, Pause, Music2, Search, X } from '@lucide/svelte';
 
-  import { desktopPlaybackCachedIds, searchSongs, type Song } from '$lib/servers';
+  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, desktopPlaybackCachedIds, searchSongs, type Song } from '$lib/servers';
   import { focusTrack, playQueue, playingFrom, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
@@ -96,6 +97,21 @@
     const refresh = $libraryRefresh;
     void refresh;
     loadSongs();
+  });
+
+  onMount(() => {
+    if (!desktopPlayback) return;
+
+    function handleDesktopCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      if (!songId) return;
+      cachedSongIds = new Set([...cachedSongIds, songId]);
+    }
+
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    return () => {
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    };
   });
 
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
@@ -207,18 +223,21 @@
                   </div>
                 {/if}
                 <div class="min-w-0">
-                  <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                  <div class="flex min-w-0 items-center gap-2">
+                    <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                    <SongTechBadge
+                      id={song.id}
+                      cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+                      audioFormat={song.audioFormat}
+                      bitrateKbps={song.bitrateKbps}
+                      compact
+                    />
+                  </div>
                   <div class="mt-0.5 flex min-w-0 items-center gap-2">
                     <SongArtistLinks
                       artist={song.artist}
                       class="truncate text-xs text-muted-foreground"
                       linkClass="hover:underline hover:text-foreground transition-colors duration-150"
-                    />
-                    <SongTechBadge
-                      cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
-                      audioFormat={song.audioFormat}
-                      bitrateKbps={song.bitrateKbps}
-                      compact
                     />
                   </div>
                 </div>

@@ -3,12 +3,25 @@ import type { Song } from './types';
 import type { DesktopPlaybackStatus } from './types';
 import { invoke } from './shared';
 
+export const DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT = 'player:desktop-cache-updated';
+
+function notifyDesktopPlaybackCacheUpdated(songId: string): void {
+  if (typeof window === 'undefined' || !songId) return;
+  window.dispatchEvent(
+    new CustomEvent(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, {
+      detail: { songId },
+    })
+  );
+}
+
 export async function desktopPlaybackLoad(song: Song, autoplay = false): Promise<void> {
   await invoke('playback_load', { song, autoplay });
+  notifyDesktopPlaybackCacheUpdated(song.id);
 }
 
 export async function desktopPlaybackPreload(song: Song): Promise<void> {
   await invoke('playback_preload', { song });
+  notifyDesktopPlaybackCacheUpdated(song.id);
 }
 
 export async function desktopPlaybackPlay(): Promise<void> {

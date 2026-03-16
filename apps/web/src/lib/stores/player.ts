@@ -146,6 +146,7 @@ export const subsonicPlaylists = writable<Playlist[]>([]);
 export const starredSongIds = writable<Set<string>>(new Set());
 export const showQueue = writable(false);
 const SHOW_QUEUE_KEY = 'madrify_show_now_playing';
+const PLAYBACK_SESSION_KEY = 'madrify_playback_session';
 let hasHydratedPlayerUiState = false;
 
 export type PlayingFrom = {
@@ -154,6 +155,21 @@ export type PlayingFrom = {
   href: string;
 };
 export const playingFrom = writable<PlayingFrom>({ type: null, name: '', href: '' });
+export const restorePlaybackRequest = writable<{ songId: string; position: number } | null>(null);
+
+type PlaybackSessionSnapshot = {
+  queue: Song[];
+  currentIndex: number;
+  currentTime: number;
+  playingFrom: PlayingFrom;
+  focusTrack: {
+    title: string;
+    artist: string;
+    imageUrl: string;
+    source: 'lastfm' | 'library';
+    album?: string;
+  } | null;
+};
 
 // ─── Recently Played ─────────────────────────────────────────────────────────
 
@@ -229,23 +245,111 @@ export function addRecentlyPlayedSong(song: Song): void {
   });
 }
 
+let persistPlaybackSessionTimer = 0;
+let hasInstalledPlaybackSessionPersistence = false;
+
+function buildPlaybackSessionSnapshot(): PlaybackSessionSnapshot | null {
+  const items = get(queue);
+  if (!items.length) return null;
+
+  const index = Math.max(0, Math.min(get(currentIndex), items.length - 1));
+  return {
+    queue: items,
+    currentIndex: index,
+    currentTime: Math.max(0, get(currentTime)),
+    playingFrom: get(playingFrom),
+    focusTrack: get(focusTrack),
+  };
+}
+
+function flushPersistPlaybackSession(): void {
+  if (!hasHydratedPlayerUiState) return;
+  clearTimeout(persistPlaybackSessionTimer);
+  const snapshot = buildPlaybackSessionSnapshot();
+  void writeUiJson(PLAYBACK_SESSION_KEY, snapshot);
+}
+
+function schedulePersistPlaybackSession(): void {
+  if (!hasHydratedPlayerUiState) return;
+  clearTimeout(persistPlaybackSessionTimer);
+  persistPlaybackSessionTimer = window.setTimeout(() => {
+    flushPersistPlaybackSession();
+  }, 350);
+}
+
+function installPlaybackSessionPersistence(): void {
+  if (hasInstalledPlaybackSessionPersistence || typeof window === 'undefined') return;
+  hasInstalledPlaybackSessionPersistence = true;
+
+  const flushIfHidden = () => {
+    if (document.visibilityState === 'hidden') flushPersistPlaybackSession();
+  };
+
+  window.addEventListener('pagehide', flushPersistPlaybackSession);
+  window.addEventListener('beforeunload', flushPersistPlaybackSession);
+  document.addEventListener('visibilitychange', flushIfHidden);
+}
+
 export async function hydratePlayerUiState(): Promise<void> {
-  const [recentItems, recentSongs, pinnedPlaylists, persistedShowQueue] = await Promise.all([
+  installPlaybackSessionPersistence();
+  const [recentItems, recentSongs, pinnedPlaylists, persistedShowQueue, playbackSession] = await Promise.all([
     readUiJson<RecentItem[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]),
     readUiJson<Song[]>(RECENT_SONGS_KEY, [], [LEGACY_RECENT_SONGS_KEY]),
     readUiJson<string[]>(PINNED_PLAYLISTS_KEY, []),
-    readUiJson<boolean>(SHOW_QUEUE_KEY, false)
+    readUiJson<boolean>(SHOW_QUEUE_KEY, false),
+    readUiJson<PlaybackSessionSnapshot | null>(PLAYBACK_SESSION_KEY, null),
   ]);
   recentlyPlayed.set(recentItems);
   recentlyPlayedSongs.set(recentSongs);
   pinnedPlaylistIds.set(new Set(pinnedPlaylists.filter(Boolean)));
   showQueue.set(persistedShowQueue);
+  if (playbackSession?.queue?.length) {
+    const nextQueue = playbackSession.queue.filter((song) => song?.id && song.streamUrl);
+    if (nextQueue.length) {
+      const nextIndex = Math.max(0, Math.min(playbackSession.currentIndex ?? 0, nextQueue.length - 1));
+      queue.set(nextQueue);
+      currentIndex.set(nextIndex);
+      currentTime.set(Math.max(0, playbackSession.currentTime ?? 0));
+      isPlaying.set(false);
+      shouldAutoplay.set(false);
+      focusTrack.set(playbackSession.focusTrack ?? null);
+      playingFrom.set(playbackSession.playingFrom ?? { type: null, name: '', href: '' });
+
+      const activeSong = nextQueue[nextIndex];
+      const position = Math.max(0, playbackSession.currentTime ?? 0);
+      restorePlaybackRequest.set(
+        activeSong && position > 0
+          ? { songId: activeSong.id, position }
+          : null
+      );
+    }
+  }
   hasHydratedPlayerUiState = true;
 }
 
 showQueue.subscribe((open) => {
   if (!hasHydratedPlayerUiState) return;
   void writeUiJson(SHOW_QUEUE_KEY, open);
+});
+
+queue.subscribe(() => {
+  schedulePersistPlaybackSession();
+});
+
+currentIndex.subscribe(() => {
+  schedulePersistPlaybackSession();
+});
+
+currentTime.subscribe(() => {
+  schedulePersistPlaybackSession();
+});
+
+playingFrom.subscribe(() => {
+  schedulePersistPlaybackSession();
+});
+
+focusTrack.subscribe(() => {
+  schedulePersistPlaybackSession();
 });
 
 export function playNextInQueue(song: Song): void {

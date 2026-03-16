@@ -1,11 +1,13 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { Play, Pause, Shuffle, Heart, Sparkles } from '@lucide/svelte';
 
-  import { fetchStarredSongs, type Song } from '$lib/servers';
+  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, desktopPlaybackCachedIds, fetchStarredSongs, type Song } from '$lib/servers';
   import { focusTrack, playQueue, playingFrom, starredSongIds, smartShuffleMode, shuffleEnabled, queue, currentIndex, isPlaying, togglePlayRequest, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { formatClockDuration } from '$lib/utils';
   import {
     DropdownMenu,
@@ -15,6 +17,7 @@
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
   import { libraryRefresh } from '$lib/stores/ui-state';
+  import { isTauri } from '$lib/tauri';
 
   let loading = $state(false);
   let error = $state('');
@@ -27,6 +30,8 @@
   const favoritesHref = '/favorites';
   const favoritesIsActive = $derived($playingFrom.href === favoritesHref);
   const favoriteSongCount = $derived(songs.length);
+  let cachedSongIds = $state<Set<string>>(new Set());
+  const desktopPlayback = isTauri();
 
   let favoritesLoadVersion = 0;
 
@@ -38,6 +43,19 @@
       .then((s) => {
         if (loadVersion !== favoritesLoadVersion) return;
         allStarredSongs = s;
+        if (!desktopPlayback) {
+          cachedSongIds = new Set();
+        } else {
+          desktopPlaybackCachedIds(s)
+            .then((ids) => {
+              if (loadVersion !== favoritesLoadVersion) return;
+              cachedSongIds = new Set(ids);
+            })
+            .catch(() => {
+              if (loadVersion !== favoritesLoadVersion) return;
+              cachedSongIds = new Set();
+            });
+        }
         // If the layout hasn't populated starredSongIds yet (initial direct load),
         // seed it from our result so songs is derived correctly right away.
         if ($starredSongIds.size === 0 && s.length > 0) {
@@ -58,6 +76,21 @@
     const refresh = $libraryRefresh;
     void refresh;
     loadFavorites();
+  });
+
+  onMount(() => {
+    if (!desktopPlayback) return;
+
+    function handleDesktopCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      if (!songId) return;
+      cachedSongIds = new Set([...cachedSongIds, songId]);
+    }
+
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    return () => {
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+    };
   });
 
   function formatDuration(seconds: number): string {
@@ -244,7 +277,16 @@
                 </div>
               {/if}
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                <div class="flex min-w-0 items-center gap-2">
+                  <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                  <SongTechBadge
+                    id={song.id}
+                    cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+                    audioFormat={song.audioFormat}
+                    bitrateKbps={song.bitrateKbps}
+                    compact
+                  />
+                </div>
                 <SongArtistLinks
                   artist={song.artist}
                   class="truncate text-xs text-muted-foreground"
