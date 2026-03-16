@@ -28,6 +28,18 @@
   let { open }: { open: boolean } = $props();
 
   const currentSong = $derived($queue[$currentIndex] ?? null);
+  const displaySong = $derived(currentSong ?? ($focusTrack
+    ? {
+        id: '',
+        title: $focusTrack.title,
+        artist: $focusTrack.artist,
+        album: $focusTrack.album ?? '',
+        albumId: '',
+        coverArtUrl: $focusTrack.imageUrl,
+        duration: 0,
+        streamUrl: '',
+      } as Song
+    : null));
 
   let relatedSongs = $state<Song[]>([])
   let relatedLoading = $state(false);
@@ -65,12 +77,12 @@
       }
     }
 
-    if ($focusTrack?.artist && $focusTrack.artist !== _panelArtist) {
-      _panelArtist = primarySongArtist($focusTrack.artist);
+    if (song.artist && song.artist !== _panelArtist) {
+      _panelArtist = primarySongArtist(song.artist);
       panelArtistInfo = null;
       panelArtistLoading = true;
       aboutDialogOpen = false;
-      getArtistInfo(primarySongArtist($focusTrack.artist))
+      getArtistInfo(primarySongArtist(song.artist))
         .then((info) => { panelArtistInfo = info; })
         .catch(() => {})
         .finally(() => { panelArtistLoading = false; });
@@ -121,14 +133,14 @@
   </div>
 
   <ScrollArea class="h-full flex-1 px-4 pt-4 pb-24">
-    {#if $focusTrack}
+    {#if displaySong}
       <div class="space-y-4">
         <div class="group/art relative aspect-square w-full">
-          {#if $focusTrack.imageUrl}
-            <img class="aspect-square w-full rounded-lg object-cover shadow-lg" src={$focusTrack.imageUrl} alt={$focusTrack.title} />
+          {#if displaySong.coverArtUrl}
+            <img class="aspect-square w-full rounded-lg object-cover shadow-lg" src={displaySong.coverArtUrl} alt={displaySong.title} />
           {:else}
             <div class="grid aspect-square w-full place-items-center rounded-lg bg-gradient-to-br from-slate-500 to-slate-700 text-2xl font-bold">
-              {initials($focusTrack.title)}
+              {initials(displaySong.title)}
             </div>
           {/if}
           {#if $playingFrom.type}
@@ -144,9 +156,9 @@
           {/if}
         </div>
         <div class="space-y-0.5">
-          <p class="text-base font-semibold leading-snug">{$focusTrack.title}</p>
+          <p class="text-base font-semibold leading-snug">{displaySong.title}</p>
           <SongArtistLinks
-            artist={$focusTrack.artist}
+            artist={displaySong.artist}
             class="text-sm text-muted-foreground"
             linkClass="hover:text-foreground hover:underline transition-colors"
           />
@@ -212,7 +224,7 @@
     {/if}
 
     <!-- About Artist -->
-    {#if $focusTrack}
+    {#if displaySong}
       <div class="mt-6 border-t border-border/70 pt-5">
         <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">About the Artist</h3>
         {#if panelArtistLoading}
@@ -250,7 +262,7 @@
     {/if}
 
     <!-- About Artist Dialog -->
-    {#if panelArtistInfo && $focusTrack}
+    {#if panelArtistInfo && displaySong}
       <Dialog.Root bind:open={aboutDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
@@ -304,7 +316,7 @@
             </div>
             <div class="border-t border-border/60 px-6 py-4">
               <a
-                href={`/artist/${encodeURIComponent(primarySongArtist($focusTrack.artist))}`}
+                href={`/artist/${encodeURIComponent(primarySongArtist(displaySong.artist))}`}
                 onclick={() => { aboutDialogOpen = false; }}
                 class="text-sm font-medium hover:underline"
               >Go to artist page →</a>

@@ -305,6 +305,7 @@
   const zeroEqBands = normalizeEqBands([]);
   const shuffleBtnClass = $derived($smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground');
   const transportLocked = $derived(desktopPlayback && (desktopLoadPending || isBuffering));
+  const showPauseButton = $derived(castActive ? castPlaying : ($isPlaying && !isBuffering && !desktopLoadPending));
 
   function randomInt(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -1395,13 +1396,13 @@
           <SkipBack class="size-[18px]" />
         </Button>
         <Button
-          class="player-play-button rounded-full shadow-sm {(castActive ? castPlaying : $isPlaying) ? 'is-playing' : ''} {isBuffering ? 'is-buffering' : ''}"
+          class="player-play-button rounded-full shadow-sm {showPauseButton ? 'is-playing' : ''} {isBuffering ? 'is-buffering' : ''}"
           size="icon-lg"
           onclick={togglePlay}
           disabled={!currentTrack || transportLocked}
-          aria-label={$isPlaying ? 'Pause' : 'Play'}
+          aria-label={showPauseButton ? 'Pause' : 'Play'}
         >
-          {#if castActive ? castPlaying : $isPlaying}
+          {#if showPauseButton}
             <Pause class="size-5" />
           {:else}
             <Play class="size-5" />
