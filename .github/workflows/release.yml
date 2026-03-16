@@ -15,10 +15,11 @@ jobs:
   prepare-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      release_id: ${{ steps.release.outputs.release_id }}
 
     steps:
       - uses: actions/checkout@v4
@@ -46,25 +47,70 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
+      - name: create and push tag
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            git tag "$TAG_NAME"
+          fi
+
+          if ! git ls-remote --tags origin "refs/tags/$TAG_NAME" | grep -q "$TAG_NAME"; then
+            git push origin "$TAG_NAME"
+          fi
+
+      - name: create or fetch draft release
+        id: release
+        uses: actions/github-script@v7
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            const tag = process.env.TAG_NAME;
+            const { owner, repo } = context.repo;
+
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            let release = releases.find((item) => item.tag_name === tag);
+
+            if (!release) {
+              release = (await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                name: tag,
+                draft: true,
+                generate_release_notes: true,
+                target_commitish: context.sha
+              })).data;
+            }
+
+            core.setOutput('release_id', String(release.id));
+
   build-tauri:
     needs: prepare-release
     permissions:
-      contents: read
+      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: "macos-latest"
-            artifact_name: "bundle-macos-aarch64"
-            args: "--target aarch64-apple-darwin"
-          - platform: "macos-latest"
-            artifact_name: "bundle-macos-x64"
-            args: "--target x86_64-apple-darwin"
-          - platform: "ubuntu-22.04"
-            artifact_name: "bundle-linux-x64"
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
             args: ""
-          - platform: "windows-latest"
-            artifact_name: "bundle-windows-x64"
+          - platform: windows-latest
             args: ""
 
     runs-on: ${{ matrix.platform }}
@@ -73,7 +119,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04' || matrix.platform == 'ubuntu-22.04-arm'
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -105,33 +151,21 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import re
           from pathlib import Path
 
           version = os.environ["RELEASE_VERSION"]
 
           package_json = Path("apps/desktop/package.json")
-          data = json.loads(package_json.read_text())
-          data["version"] = version
-          package_json.write_text(json.dumps(data, indent=2) + "\n")
+          package_data = json.loads(package_json.read_text())
+          package_data["version"] = version
+          package_json.write_text(json.dumps(package_data, indent=2) + "\n")
 
           tauri_conf = Path("apps/desktop/src-tauri/tauri.conf.json")
-          data = json.loads(tauri_conf.read_text())
-          data["version"] = version
-          tauri_conf.write_text(json.dumps(data, indent=2) + "\n")
-          PY
+          tauri_data = json.loads(tauri_conf.read_text())
+          tauri_data["version"] = version
+          tauri_conf.write_text(json.dumps(tauri_data, indent=2) + "\n")
 
-      - name: stamp cargo version
-        env:
-          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          version = os.environ["RELEASE_VERSION"]
           cargo_toml = Path("apps/desktop/src-tauri/Cargo.toml")
           text = cargo_toml.read_text()
           text, count = re.subn(r'^version = ".*?"$', f'version = "{version}"', text, count=1, flags=re.MULTILINE)
@@ -140,14 +174,14 @@ jobs:
           cargo_toml.write_text(text)
           PY
 
-      - name: build
+      - name: generate release config
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import base64
           import json
           import os
           from pathlib import Path
@@ -155,162 +189,62 @@ jobs:
           src = Path("apps/desktop/src-tauri/tauri.release.conf.json")
           dst = Path("apps/desktop/src-tauri/tauri.release.generated.conf.json")
 
+          pubkey = os.environ["TAURI_UPDATER_PUBKEY"].replace("\\r\\n", "\n").replace("\\n", "\n").strip()
+          if "comment" not in pubkey.lower():
+              compact = "".join(pubkey.split())
+              try:
+                  decoded = base64.b64decode(compact, validate=True).decode("utf-8").strip()
+              except Exception:
+                  decoded = None
+              if decoded and "comment" in decoded.lower():
+                  pubkey = decoded
+
           data = json.loads(src.read_text())
-          data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = os.environ["TAURI_UPDATER_PUBKEY"]
+          data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = pubkey
           dst.write_text(json.dumps(data, indent=2) + "\n")
           PY
+
+      - name: normalize signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_RAW: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 - <<'PY'
+          import base64
           import os
           from pathlib import Path
 
-          raw = os.environ["TAURI_SIGNING_PRIVATE_KEY"]
-          # Support secrets stored either as real multiline content or with literal "\n" escapes.
-          normalized = raw.replace("\\r\\n", "\n").replace("\\n", "\n")
+          raw = os.environ["TAURI_SIGNING_PRIVATE_KEY_RAW"]
+          normalized = raw.replace("\\r\\n", "\n").replace("\\n", "\n").strip()
+
+          if "comment" not in normalized.lower():
+              compact = "".join(normalized.split())
+              try:
+                  decoded = base64.b64decode(compact, validate=True).decode("utf-8").strip()
+              except Exception:
+                  decoded = None
+              if decoded and "comment" in decoded.lower():
+                  normalized = decoded
+
           key_path = Path(os.environ["RUNNER_TEMP"]) / "tauri-updater.key"
-          key_path.write_text(normalized)
+          key_path.write_text(normalized + "\n")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
               fh.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
           PY
-          bun run --cwd apps/desktop tauri build \
-            --config src-tauri/tauri.build.conf.json \
-            --config src-tauri/tauri.release.generated.conf.json \
+
+      - name: build and upload release assets
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
+          tagName: ${{ needs.prepare-release.outputs.tag }}
+          tauriScript: bun tauri
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          args: >-
+            --config src-tauri/tauri.build.conf.json
+            --config src-tauri/tauri.release.generated.conf.json
             ${{ matrix.args }}
-
-      - name: upload bundle artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/release/bundle/**/*.app.tar.gz
-            apps/desktop/src-tauri/target/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/release/bundle/**/*.rpm
-            apps/desktop/src-tauri/target/release/bundle/**/*.zip
-            apps/desktop/src-tauri/target/release/bundle/**/*.sig
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.app.tar.gz
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.rpm
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.zip
-            apps/desktop/src-tauri/target/*/release/bundle/**/*.sig
-          if-no-files-found: error
-          retention-days: 7
-
-  draft-release:
-    needs:
-      - prepare-release
-      - build-tauri
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: download built bundles
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: bundle-*
-          merge-multiple: false
-
-      - name: create and push tag
-        env:
-          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-            echo "Tag $TAG_NAME already exists locally"
-          else
-            git tag "$TAG_NAME"
-          fi
-
-          if git ls-remote --tags origin "refs/tags/$TAG_NAME" | grep -q "$TAG_NAME"; then
-            echo "Tag $TAG_NAME already exists on origin"
-          else
-            git push origin "$TAG_NAME"
-          fi
-
-      - name: generate updater manifest
-        env:
-          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
-          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          version = os.environ["RELEASE_VERSION"]
-          tag = os.environ["RELEASE_TAG"]
-          base_url = f"https://github.com/boooper/player/releases/download/{tag}"
-          dist = Path("dist")
-
-          bundles = {
-            "linux-x86_64": ("bundle-linux-x64", ".AppImage"),
-            "darwin-aarch64": ("bundle-macos-aarch64", ".app.tar.gz"),
-            "darwin-x86_64": ("bundle-macos-x64", ".app.tar.gz"),
-            "windows-x86_64": ("bundle-windows-x64", ".nsis.zip"),
-          }
-
-          platforms = {}
-          for target, (folder, suffix) in bundles.items():
-            files = sorted((dist / folder).rglob(f"*{suffix}"))
-            if not files:
-              raise SystemExit(f"Missing updater bundle for {target}")
-            bundle = files[0]
-            sig_path = Path(f"{bundle}.sig")
-            if not sig_path.is_file():
-              raise SystemExit(f"Missing signature for {bundle}")
-            signature = sig_path.read_text().strip()
-            platforms[target] = {
-              "signature": signature,
-              "url": f"{base_url}/{bundle.name}",
-            }
-
-          manifest = {
-            "version": version,
-            "notes": f"Madrify {version}",
-            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "platforms": platforms,
-          }
-
-          latest = dist / "latest.json"
-          latest.write_text(json.dumps(manifest, indent=2) + "\n")
-          print(latest)
-          PY
-
-      - name: publish draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare-release.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ needs.prepare-release.outputs.tag }}
-          draft: true
-          generate_release_notes: true
-          files: |
-            dist/**/*.AppImage
-            dist/**/*.app.tar.gz
-            dist/**/*.deb
-            dist/**/*.dmg
-            dist/**/*.exe
-            dist/**/*.msi
-            dist/**/*.rpm
-            dist/**/*.zip
-            dist/**/*.sig
-            dist/latest.json
