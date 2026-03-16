@@ -11,15 +11,15 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   prepare-release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
-      release_id: ${{ steps.release.outputs.release_id }}
 
     steps:
       - uses: actions/checkout@v4
@@ -47,71 +47,20 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-      - name: create and push tag
-        env:
-          TAG_NAME: ${{ steps.version.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if ! git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-            git tag "$TAG_NAME"
-          fi
-
-          if ! git ls-remote --tags origin "refs/tags/$TAG_NAME" | grep -q "$TAG_NAME"; then
-            git push origin "$TAG_NAME"
-          fi
-
-      - name: create or fetch draft release
-        id: release
-        uses: actions/github-script@v7
-        env:
-          TAG_NAME: ${{ steps.version.outputs.tag }}
-        with:
-          script: |
-            const tag = process.env.TAG_NAME;
-            const { owner, repo } = context.repo;
-
-            const releases = await github.paginate(github.rest.repos.listReleases, {
-              owner,
-              repo,
-              per_page: 100
-            });
-
-            let release = releases.find((item) => item.tag_name === tag);
-
-            if (!release) {
-              release = (await github.rest.repos.createRelease({
-                owner,
-                repo,
-                tag_name: tag,
-                name: tag,
-                draft: true,
-                generate_release_notes: true,
-                target_commitish: context.sha
-              })).data;
-            }
-
-            core.setOutput('release_id', String(release.id));
-
   build-tauri:
     needs: prepare-release
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
+            target: aarch64-apple-darwin
           - platform: macos-latest
-            args: --target x86_64-apple-darwin
+            target: x86_64-apple-darwin
           - platform: ubuntu-22.04
-            args: ""
+            target: x86_64-unknown-linux-gnu
           - platform: windows-latest
-            args: ""
+            target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
 
@@ -122,7 +71,13 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            pkg-config \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: setup bun
         uses: oven-sh/setup-bun@v2
@@ -132,7 +87,7 @@ jobs:
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -170,11 +125,11 @@ jobs:
           text = cargo_toml.read_text()
           text, count = re.subn(r'^version = ".*?"$', f'version = "{version}"', text, count=1, flags=re.MULTILINE)
           if count != 1:
-            raise SystemExit("Failed to update Cargo.toml version")
+              raise SystemExit("Failed to update Cargo.toml version")
           cargo_toml.write_text(text)
           PY
 
-      - name: generate release config
+      - name: generate release updater config
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         shell: bash
@@ -189,24 +144,105 @@ jobs:
           dst = Path("apps/desktop/src-tauri/tauri.release.generated.conf.json")
 
           data = json.loads(src.read_text())
-          data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = os.environ["TAURI_UPDATER_PUBKEY"].strip()
+          data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = os.environ["TAURI_UPDATER_PUBKEY"]
           dst.write_text(json.dumps(data, indent=2) + "\n")
           PY
 
       - name: build and upload release assets
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
-          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           tagName: ${{ needs.prepare-release.outputs.tag }}
-          tauriScript: bun tauri
-          uploadUpdaterJson: true
-          uploadUpdaterSignatures: true
-          args: >-
-            --config src-tauri/tauri.build.conf.json
-            --config src-tauri/tauri.release.generated.conf.json
-            ${{ matrix.args }}
+          releaseName: ${{ needs.prepare-release.outputs.tag }}
+          releaseDraft: true
+          prerelease: false
+          args: --config src-tauri/tauri.build.conf.json --config src-tauri/tauri.release.generated.conf.json --target ${{ matrix.target }}
+
+  generate-latest-json:
+    needs:
+      - prepare-release
+      - build-tauri
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG_NAME" --dir dist
+
+      - name: generate updater manifest
+        env:
+          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          tag = os.environ["RELEASE_TAG"]
+          base_url = f"https://github.com/boooper/player/releases/download/{tag}"
+          dist = Path("dist")
+
+          bundles = {
+            "linux-x86_64": ".AppImage",
+            "darwin-aarch64": ".app.tar.gz",
+            "darwin-x86_64": ".app.tar.gz",
+            "windows-x86_64": ".nsis.zip",
+          }
+
+          def pick_file(suffix, needle=None):
+              candidates = sorted(dist.rglob(f"*{suffix}"))
+              if needle:
+                  filtered = [p for p in candidates if needle in str(p)]
+                  if filtered:
+                      return filtered[0]
+              if not candidates:
+                  raise SystemExit(f"Missing bundle for suffix {suffix}")
+              return candidates[0]
+
+          platforms = {
+            "linux-x86_64": pick_file(".AppImage"),
+            "darwin-aarch64": pick_file(".app.tar.gz", "aarch64"),
+            "darwin-x86_64": pick_file(".app.tar.gz", "x64"),
+            "windows-x86_64": pick_file(".nsis.zip"),
+          }
+
+          manifest_platforms = {}
+          for target, bundle in platforms.items():
+              sig_path = Path(f"{bundle}.sig")
+              if not sig_path.is_file():
+                  raise SystemExit(f"Missing signature for {bundle}")
+              manifest_platforms[target] = {
+                  "signature": sig_path.read_text().strip(),
+                  "url": f"{base_url}/{bundle.name}",
+              }
+
+          manifest = {
+            "version": version,
+            "notes": f"Madrify {version}",
+            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "platforms": manifest_platforms,
+          }
+
+          Path("latest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
+      - name: upload latest.json to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
+        run: gh release upload "$TAG_NAME" latest.json --clobber
