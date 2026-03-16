@@ -13,7 +13,7 @@
  *   POST https://api.listenbrainz.org/1/submit-listens
  */
 
-import type { TrackRecommendation } from '$lib/recommendation';
+import type { DiscoveryRecommendation as TrackRecommendation } from '$lib/discovery';
 
 const LBZ_API = 'https://api.listenbrainz.org/1';
 

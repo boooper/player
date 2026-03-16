@@ -1,11 +1,12 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { fetchPlaylistDetail, type Song } from '$lib/api';
+  import { fetchPlaylistDetail, type Song } from '$lib/servers';
   import { Play, Shuffle, Sparkles } from '@lucide/svelte';
   import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import { Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import { formatClockDuration } from '$lib/utils';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -43,11 +44,7 @@
   });
 
   function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    return formatClockDuration(seconds);
   }
 
   function totalDuration(): number {
@@ -86,7 +83,7 @@
   }
 </script>
 
-<div class="mb-6 flex gap-4">
+<div class="page-hero mb-6 flex gap-4">
   {#if coverArtUrl}
     <img class="h-36 w-36 shrink-0 rounded-lg object-cover shadow-lg" src={coverArtUrl} alt={playlistName} />
   {:else}
@@ -163,7 +160,7 @@
 {/if}
 
 {#if songs.length}
-  <div class="mt-2">
+  <div class="page-section mt-2">
     <!-- Column headers -->
     <div class="grid items-center gap-4 border-b border-border/40 px-4 pb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/50"
          style="grid-template-columns: 2.5rem 1fr 1fr 4rem">
@@ -178,8 +175,9 @@
       {#each songs as song, index (song.id + '-' + index)}
         <SongContextMenu {song} onplay={() => playSong(index)}>
           <button
-            class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
+            class="stagger-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
             style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
+            style:--stagger-index={index}
             onclick={() => playSong(index)}
           >
             <!-- Track # / Play icon crossfade -->

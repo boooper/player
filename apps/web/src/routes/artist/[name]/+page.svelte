@@ -7,20 +7,21 @@
     searchSongs,
     type Album,
     type Song
-  } from '$lib/api';
+  } from '$lib/servers';
   import {
     getArtistInfo,
     getArtistTopTracks,
-    type ArtistInfo,
-    type Song as LastFmSong
-  } from '$lib/metadata';
+    type DiscoveryArtistInfo as ArtistInfo,
+    type DiscoverySong as LastFmSong
+  } from '$lib/discovery';
   import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
-  import { appSettings } from '$lib/stores/settings';
+  import { backendSettings } from '$lib/stores/backend-settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { mergeAlbums, mergeAlbumSongs, type MergedAlbum } from '$lib/media-merge';
+  import { formatClockDuration } from '$lib/utils';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -141,7 +142,7 @@
   // Shuffle dropdown
   let smartShuffleFetching = $state(false);
   let shuffleAllArtist = $state(false);
-  const lastFmApiKey = $derived($appSettings.lastFmApiKey);
+  const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
 
   function activateShuffle() {
     smartShuffleMode.set(false);
@@ -200,8 +201,7 @@
   }
 
   function fmt(seconds: number): string {
-    if (!isFinite(seconds) || !seconds) return '';
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    return formatClockDuration(seconds);
   }
 
   function initials(name: string): string {
@@ -210,7 +210,7 @@
 </script>
 
 <!-- Hero -->
-<div class="relative -mx-4 -mt-4 mb-6 overflow-hidden">
+<div class="page-hero relative -mx-4 -mt-4 mb-6 overflow-hidden">
   {#if artistInfo?.imageUrl}
     <div class="absolute inset-0">
       <img class="h-full w-full object-cover object-top" src={artistInfo.imageUrl} alt="" aria-hidden="true" />
@@ -323,13 +323,14 @@
     {/each}
   </div>
 {:else if playableTopTracks.length > 0}
-  <section class="mb-8">
+  <section class="page-section mb-8">
     <h2 class="mb-3 text-xl font-bold">Popular</h2>
     <div class="space-y-1">
       {#each visibleTopTracks as { lfm, sub }, i (lfm.id)}
         <SongContextMenu song={sub} onplay={() => playTopTrack(i)}>
           <button
-            class="group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent"
+            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent"
+            style:--stagger-index={i}
             onclick={() => playTopTrack(i)}
           >
             <span class="w-5 shrink-0 text-center text-sm tabular-nums text-muted-foreground group-hover:hidden">{i + 1}</span>
@@ -366,7 +367,7 @@
 
 <!-- Albums carousel -->
 {#if mergedAlbums.length > 0}
-  <section class="mb-8">
+  <section class="page-section mb-8">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="text-xl font-bold">Discography</h2>
       <div class="flex gap-1">
@@ -379,9 +380,9 @@
       </div>
     </div>
     <div bind:this={carouselEl} class="flex gap-4 overflow-x-auto pb-3" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each mergedAlbums as album (album.id)}
+      {#each mergedAlbums as album, index (album.id)}
         <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
-        <div class="group relative flex w-44 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 text-left transition hover:bg-accent">
+        <div class="stagger-item group relative flex w-44 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 text-left transition hover:bg-accent" style={`--stagger-index:${index};`}>
           <a
             href="/album/{encodeURIComponent(album.id)}"
             class="absolute inset-0 z-10 rounded-lg"
@@ -423,13 +424,14 @@
 
 <!-- Fans also like -->
 {#if artistInfo?.similarArtists?.length}
-  <section class="mb-8">
+  <section class="page-section mb-8">
     <h2 class="mb-3 text-xl font-bold">Fans also like</h2>
     <div class="flex flex-wrap gap-3">
-      {#each artistInfo.similarArtists as artist (artist.name)}
+      {#each artistInfo.similarArtists as artist, index (artist.name)}
         <a
           href="/artist/{encodeURIComponent(artist.name)}"
-          class="flex flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent"
+          class="stagger-item flex flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent"
+          style={`--stagger-index:${index};`}
         >
           {#if artist.imageUrl}
             <img class="size-16 rounded-full object-cover" src={artist.imageUrl} alt={artist.name} loading="lazy" />

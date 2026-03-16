@@ -41,5 +41,9 @@ pub fn open(path: &Path) -> Result<Connection> {
         "UPDATE profiles SET server_type = 'subsonic_legacy' WHERE use_password_auth = 1 AND server_type = 'subsonic'",
         [],
     )?;
+    conn.execute(
+        "UPDATE profiles SET username = '' WHERE server_type = 'local' AND username IS NULL",
+        [],
+    ).ok();
     Ok(conn)
 }

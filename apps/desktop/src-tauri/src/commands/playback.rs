@@ -77,3 +77,16 @@ pub fn playback_set_eq(
 pub fn playback_status(state: State<'_, AppState>) -> Result<PlaybackStatus, String> {
     playback_handle(&state).status()
 }
+
+#[tauri::command]
+pub fn playback_is_cached(state: State<'_, AppState>, song: Song) -> Result<bool, String> {
+    if playback_handle(&state).cached_track(&song.id)?.is_some() {
+        return Ok(true);
+    }
+
+    if song.stream_url.starts_with("file:") || song.stream_url.starts_with("data:") {
+        return Ok(true);
+    }
+
+    Ok(state.playback_cache.local_file_url(&song.id)?.is_some())
+}

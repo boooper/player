@@ -9,8 +9,8 @@
     updateProfile,
     type ProfileDraftPayload,
     type ProfilePayload,
-  } from '$lib/api';
-  import { libraryRefresh } from '$lib/stores/settings';
+  } from '$lib/servers';
+  import { libraryRefresh } from '$lib/stores/ui-state';
 
   type Profile = ProfilePayload;
 
@@ -28,6 +28,7 @@
     subsonic_legacy: 'Subsonic (Token Legacy)',
     jellyfin: 'Jellyfin',
     emby: 'Emby',
+    local: 'Local Folder',
   };
 
   let {
@@ -64,7 +65,7 @@
   async function saveProfile() {
     if (!profileDraft) return;
     const isNew = profileDraft.id === null;
-    if (isNew && !profileDraft.password) {
+    if (profileDraft.serverType !== 'local' && isNew && !profileDraft.password) {
       toast.error('Password is required for a new server');
       return;
     }
@@ -138,7 +139,7 @@
         <Server class="size-4 text-muted-foreground" />
         <h2 class="font-semibold">Servers</h2>
       </div>
-      <p class="mt-0.5 text-xs text-muted-foreground">Manage your Subsonic, Jellyfin, and Emby connections.</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">Manage your Subsonic, Jellyfin, Emby, and local library connections.</p>
     </div>
     <button
       class="flex items-center gap-1.5 rounded-lg border border-border bg-secondary/60 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary"
@@ -170,7 +171,9 @@
               {/if}
             </div>
             <p class="truncate text-xs text-muted-foreground">{profile.url}</p>
-            <p class="text-xs text-muted-foreground/70">{profile.username}</p>
+            {#if profile.serverType !== 'local'}
+              <p class="text-xs text-muted-foreground/70">{profile.username}</p>
+            {/if}
           </div>
           <div class="flex shrink-0 items-center gap-1">
             {#if !profile.isActive}
@@ -209,7 +212,7 @@
   <Dialog.Content class="sm:max-w-xl">
     <Dialog.Header>
       <Dialog.Title>{profileDraft?.id === null ? 'Add Server' : 'Edit Server'}</Dialog.Title>
-      <Dialog.Description>Configure your server connection. For Jellyfin/Emby, use your API key as the password.</Dialog.Description>
+      <Dialog.Description>Configure your server connection. For Jellyfin/Emby, use your API key as the password. Local Folder uses a filesystem path.</Dialog.Description>
     </Dialog.Header>
     {#if profileDraft !== null}
       <div class="space-y-4 py-2">
@@ -235,16 +238,21 @@
               <option value="subsonic_legacy">Subsonic (Token Legacy)</option>
               <option value="jellyfin">Jellyfin</option>
               <option value="emby">Emby</option>
+              <option value="local">Local Folder</option>
             </select>
           </div>
         </div>
         <div class="space-y-1.5">
-          <label class="text-sm font-medium" for="dialog-url">Server URL</label>
+          <label class="text-sm font-medium" for="dialog-url">{profileDraft.serverType === 'local' ? 'Library Folder' : 'Server URL'}</label>
           <input
             id="dialog-url"
-            type="url"
+            type={profileDraft.serverType === 'local' ? 'text' : 'url'}
             bind:value={profileDraft.url}
-            placeholder={(profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby') ? 'http://localhost:8096' : 'http://localhost:4533'}
+            placeholder={profileDraft.serverType === 'local'
+              ? 'D:\\Music or /home/user/Music'
+              : (profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby')
+                ? 'http://localhost:8096'
+                : 'http://localhost:4533'}
             class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
@@ -255,14 +263,17 @@
               id="dialog-user"
               type="text"
               bind:value={profileDraft.username}
-              placeholder="admin"
+              placeholder={profileDraft.serverType === 'local' ? 'Not used for local folders' : 'admin'}
               autocomplete="username"
-              class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              disabled={profileDraft.serverType === 'local'}
             />
           </div>
           <div class="space-y-1.5">
             <label class="text-sm font-medium" for="dialog-pass">
-              {#if profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby'}
+              {#if profileDraft.serverType === 'local'}
+                Password
+              {:else if profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby'}
                 API Key{profileDraft.id !== null ? ' (blank = keep current)' : ''}
               {:else}
                 {profileDraft.id !== null ? 'Password (blank = keep current)' : 'Password'}
@@ -273,9 +284,16 @@
                 id="dialog-pass"
                 type={showDraftPassword ? 'text' : 'password'}
                 bind:value={profileDraft.password}
-                placeholder={profileDraft.id !== null ? 'Leave blank to keep current' : (profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby') ? 'API key' : 'Password'}
+                placeholder={profileDraft.serverType === 'local'
+                  ? 'Not used for local folders'
+                  : profileDraft.id !== null
+                    ? 'Leave blank to keep current'
+                    : (profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby')
+                      ? 'API key'
+                      : 'Password'}
                 autocomplete="current-password"
-                class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                disabled={profileDraft.serverType === 'local'}
               />
               <button
                 type="button"

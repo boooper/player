@@ -90,3 +90,11 @@ pub struct PlaylistMeta {
     pub duration: f64,
     pub cover_art_url: String,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchBundle {
+    pub songs: Vec<Song>,
+    pub albums: Vec<Album>,
+    pub recommendations: Vec<Song>,
+}

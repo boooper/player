@@ -1,21 +1,31 @@
 <script lang="ts">
   import { Trash2, Loader2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import { clearDatabase } from '$lib/api';
+  import { clearCache, clearDatabase } from '$lib/servers';
 
   let {
+    onCacheCleared,
     onCleared,
   }: {
+    onCacheCleared: () => void;
     onCleared: () => void;
   } = $props();
 
   let clearDbConfirming = $state(false);
   let clearDbLoading = $state(false);
   let clearDbTimer: ReturnType<typeof setTimeout> | null = null;
+  let clearCacheConfirming = $state(false);
+  let clearCacheLoading = $state(false);
+  let clearCacheTimer: ReturnType<typeof setTimeout> | null = null;
 
   function requestClearDb() {
     clearDbConfirming = true;
     clearDbTimer = setTimeout(() => { clearDbConfirming = false; }, 4000);
+  }
+
+  function requestClearCache() {
+    clearCacheConfirming = true;
+    clearCacheTimer = setTimeout(() => { clearCacheConfirming = false; }, 4000);
   }
 
   async function confirmClearDb() {
@@ -32,6 +42,21 @@
       clearDbLoading = false;
     }
   }
+
+  async function confirmClearCache() {
+    if (clearCacheTimer) clearTimeout(clearCacheTimer);
+    clearCacheConfirming = false;
+    clearCacheLoading = true;
+    try {
+      await clearCache();
+      toast.success('Cache cleared');
+      onCacheCleared();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear cache');
+    } finally {
+      clearCacheLoading = false;
+    }
+  }
 </script>
 
 <section class="rounded-xl border border-rose-500/30 bg-card">
@@ -43,6 +68,36 @@
     <p class="mt-0.5 text-xs text-muted-foreground">Irreversible actions. Proceed with caution.</p>
   </div>
   <div class="flex items-center justify-between px-5 py-4">
+    <div>
+      <p class="text-sm font-medium">Clear cached media</p>
+      <p class="text-xs text-muted-foreground">Deletes downloaded audio and artwork cache without removing servers or settings.</p>
+    </div>
+    {#if clearCacheConfirming}
+      <button
+        class="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60"
+        onclick={confirmClearCache}
+        disabled={clearCacheLoading}
+      >
+        <Trash2 class="size-4" />
+        Confirm clear cache
+      </button>
+    {:else}
+      <button
+        class="flex items-center gap-2 rounded-lg border border-amber-500/50 px-4 py-2 text-sm font-medium text-amber-300 transition hover:bg-amber-500/10 disabled:opacity-60"
+        onclick={requestClearCache}
+        disabled={clearCacheLoading}
+      >
+        {#if clearCacheLoading}
+          <Loader2 class="size-4 animate-spin" />
+          Clearing…
+        {:else}
+          <Trash2 class="size-4" />
+          Clear Cache
+        {/if}
+      </button>
+    {/if}
+  </div>
+  <div class="border-t border-rose-500/10 flex items-center justify-between px-5 py-4">
     <div>
       <p class="text-sm font-medium">Clear all data</p>
       <p class="text-xs text-muted-foreground">Deletes all settings, servers, and saved artists from the local database.</p>

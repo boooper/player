@@ -1,9 +1,12 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { goto } from '$app/navigation';
   import { Search, Clock, X, Music, User } from '@lucide/svelte';
   import { Input } from '$lib/components/ui';
-  import { searchSongs, type Song } from '$lib/api';
-  import { fetchAudioDbArtistPhoto } from '$lib/audiodb';
+  import { searchSongs, type Song } from '$lib/servers';
+  import { getArtistArtworkMap } from '$lib/discovery';
+  import { readUiJson, writeUiJson } from '$lib/ui-storage';
 
   let {
     onPlaySong,
@@ -21,8 +24,8 @@
   let searchFocused = $state(false);
   let dropdownLoading = $state(false);
   let recentSearches = $state<string[]>([]);
-
-  const RECENT_KEY = 'naviarr_recent_searches';
+  const RECENT_KEY = 'madrify_recent_searches';
+  const LEGACY_RECENT_KEY = 'naviarr_recent_searches';
 
   export function setQuery(q: string) {
     value = q;
@@ -32,12 +35,17 @@
     dropdownOpen = false;
   }
 
-  function loadRecentSearches() {
-    try {
-      recentSearches = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
-    } catch {
-      recentSearches = [];
+  async function loadRecentSearches() {
+    recentSearches = await readUiJson<string[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]);
+  }
+
+  async function openSearchDropdown() {
+    searchFocused = true;
+    if (!recentSearches.length) {
+      await loadRecentSearches();
     }
+    dropdownOpen = true;
+    if (value.trim().length >= 2) onInput();
   }
 
   function saveRecentSearch(q: string) {
@@ -45,13 +53,13 @@
     if (!trimmed) return;
     const updated = [trimmed, ...recentSearches.filter((r) => r.toLowerCase() !== trimmed.toLowerCase())].slice(0, 8);
     recentSearches = updated;
-    localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+    void writeUiJson(RECENT_KEY, updated, [LEGACY_RECENT_KEY]);
   }
 
   function removeRecentSearch(q: string) {
     const updated = recentSearches.filter((r) => r !== q);
     recentSearches = updated;
-    localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+    void writeUiJson(RECENT_KEY, updated, [LEGACY_RECENT_KEY]);
   }
 
   let dropdownTimer = 0;
@@ -71,7 +79,7 @@
       try {
         const songs = await searchSongs(q, 8);
         dropdownSongs = songs.slice(0, 5);
-        const seen = new Set<string>();
+        const seen = new SvelteSet<string>();
         dropdownArtists = songs
           .map((s) => s.artist)
           .filter((a) => { if (seen.has(a)) return false; seen.add(a); return true; })
@@ -92,12 +100,8 @@
     const patch: Record<string, string> = {};
     for (const n of missing) patch[n] = '';
     artistPhotos = { ...artistPhotos, ...patch };
-    await Promise.all(
-      missing.map(async (name) => {
-        const url = await fetchAudioDbArtistPhoto(name);
-        artistPhotos = { ...artistPhotos, [name]: url };
-      })
-    );
+    const next = await getArtistArtworkMap(missing);
+    artistPhotos = { ...artistPhotos, ...next };
   }
 
   function onSubmit(event: SubmitEvent) {
@@ -113,24 +117,34 @@
     return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
   }
 
-  loadRecentSearches();
+  onMount(() => {
+    void loadRecentSearches();
+  });
 </script>
 
-<div class="relative transition-all duration-300 ease-in-out {searchFocused ? 'w-full max-w-2xl' : 'w-full max-w-lg'}">
+<div
+  class="search-shell relative w-full max-w-xl"
+  class:is-active={searchFocused || dropdownOpen}
+  class:is-idle={!searchFocused && !dropdownOpen}
+>
   <form onsubmit={onSubmit}>
-    <Search class="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 transition-colors duration-200 {searchFocused ? 'text-primary' : 'text-muted-foreground'}" />
-    <Input
+    <div class="search-backdrop absolute inset-0 rounded-full" aria-hidden="true"></div>
+    <div class="search-highlight absolute inset-x-10 top-0 h-px" aria-hidden="true"></div>
+    <span class="search-icon-wrap pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">
+      <Search class="size-4 {searchFocused ? 'text-primary' : 'text-muted-foreground'}" />
+    </span>
+    <div class="search-input-wrap">
+      <Input
       bind:value
-      class="h-10 rounded-full border-transparent bg-white/[0.06] pl-11 pr-4 text-sm placeholder:text-muted-foreground/60 transition-all duration-300 focus-visible:border-primary/40 focus-visible:bg-white/[0.09] focus-visible:ring-0 focus-visible:shadow-[0_0_0_3px_oklch(0.645_0.246_16.439_/_0.15)]"
+      class="relative h-11 rounded-full border-white/10 bg-white/[0.06] pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground/60 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.05)] backdrop-blur-xl focus-visible:border-primary/35 focus-visible:bg-white/[0.08] focus-visible:ring-0 focus-visible:shadow-none"
       placeholder="What do you want to play?"
       oninput={onInput}
       onfocus={() => {
-        searchFocused = true;
-        dropdownOpen = true;
-        if (value.trim().length >= 2) onInput();
+        void openSearchDropdown();
       }}
       onblur={() => { searchFocused = false; dropdownOpen = false; }}
     />
+    </div>
   </form>
 
   <!-- Recent searches dropdown -->
@@ -139,7 +153,7 @@
       role="listbox"
       aria-label="Recent searches"
       tabindex="-1"
-      class="absolute left-0 top-full z-50 mt-1 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"
+      class="search-dropdown app-glass absolute left-0 top-full z-50 mt-2 w-full max-w-lg overflow-hidden rounded-2xl"
       onmousedown={(e) => e.preventDefault()}
     >
       <div class="px-3 pb-2 pt-2">
@@ -174,7 +188,7 @@
       role="listbox"
       aria-label="Search results"
       tabindex="-1"
-      class="absolute left-0 top-full z-50 mt-1 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"
+      class="search-dropdown app-glass absolute left-0 top-full z-50 mt-2 w-full max-w-lg overflow-hidden rounded-2xl"
       onmousedown={(e) => e.preventDefault()}
     >
       {#if dropdownLoading}
@@ -241,3 +255,98 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .search-shell {
+    transition: transform 220ms ease, filter 220ms ease;
+  }
+
+  .search-shell.is-idle {
+    transform: translateY(0) scale(1);
+  }
+
+  .search-shell.is-active {
+    transform: translateY(1px) scale(1.012);
+  }
+
+  .search-backdrop {
+    background:
+      radial-gradient(circle at 14% 50%, hsl(var(--primary) / 0.2), transparent 18%),
+      linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.015)),
+      rgb(20 20 24 / 0.52);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    box-shadow:
+      0 14px 32px rgb(0 0 0 / 0.18),
+      inset 0 1px 0 rgb(255 255 255 / 0.06);
+    opacity: 0.92;
+    transition:
+      opacity 220ms ease,
+      transform 220ms ease,
+      box-shadow 220ms ease,
+      border-color 220ms ease;
+  }
+
+  .search-highlight {
+    opacity: 0.4;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.32), transparent);
+    transition: opacity 220ms ease, transform 220ms ease;
+  }
+
+  .search-icon-wrap {
+    transition: color 180ms ease, transform 220ms ease, opacity 180ms ease;
+    opacity: 0.82;
+  }
+
+  .search-input-wrap :global(input) {
+    transition:
+      background-color 220ms ease,
+      border-color 220ms ease,
+      color 220ms ease;
+  }
+
+  .search-dropdown {
+    transform-origin: top center;
+    animation: search-dropdown-in 190ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  }
+
+  .search-shell.is-active .search-backdrop {
+    opacity: 1;
+    border-color: rgb(255 255 255 / 0.11);
+    box-shadow:
+      0 18px 40px rgb(0 0 0 / 0.22),
+      0 0 0 1px hsl(var(--primary) / 0.12),
+      inset 0 1px 0 rgb(255 255 255 / 0.08);
+  }
+
+  .search-shell.is-active .search-highlight {
+    opacity: 0.72;
+    transform: scaleX(1.04);
+  }
+
+  .search-shell.is-active .search-icon-wrap {
+    transform: translateY(-50%) scale(1.06);
+    opacity: 1;
+  }
+
+  .search-shell :global(input::placeholder) {
+    transition: color 180ms ease, opacity 180ms ease, letter-spacing 180ms ease;
+  }
+
+  .search-shell.is-active :global(input::placeholder),
+  .search-shell :global(input:hover::placeholder) {
+    color: rgb(255 255 255 / 0.5);
+    letter-spacing: 0.01em;
+  }
+
+  @keyframes search-dropdown-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.985);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+</style>

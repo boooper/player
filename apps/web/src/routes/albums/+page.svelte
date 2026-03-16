@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { Play, Disc3, RefreshCw } from '@lucide/svelte';
 
-  import { fetchAlbumList, fetchAlbumSongs, type Album } from '$lib/api';
+  import { fetchAlbumList, fetchAlbumSongs, type Album } from '$lib/servers';
   import { focusTrack, playQueue, playingFrom, addRecentlyPlayed } from '$lib/stores/player';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
 
@@ -109,9 +109,9 @@
         </div>
       {/each}
     {:else}
-      {#each albums as album (album.id)}
+      {#each albums as album, index (album.id)}
         <AlbumContextMenu {album} onplay={() => playAlbum(album)}>
-        <div class="group relative flex flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
+        <div class="album-tile group relative flex flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent" style={`--tile-index:${index};`}>
           <a href={`/album/${encodeURIComponent(album.id)}`} class="absolute inset-0 rounded-lg" aria-label={album.name}></a>
           <div class="relative">
             {#if album.coverArtUrl}
@@ -148,3 +148,34 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .album-tile {
+    animation: media-tile-in 340ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+    animation-delay: min(calc(var(--tile-index) * 22ms), 320ms);
+    transform-origin: center bottom;
+    transition:
+      transform 180ms ease,
+      background-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .album-tile:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      0 14px 24px rgb(0 0 0 / 0.16),
+      inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+
+  @keyframes media-tile-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+</style>

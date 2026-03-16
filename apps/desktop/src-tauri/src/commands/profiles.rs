@@ -55,14 +55,25 @@ pub fn get_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, String> 
 #[tauri::command]
 pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<Profile, String> {
     let name = data.name.trim().to_string();
-    let url = data.url.trim().trim_end_matches('/').to_string();
     let username = data.username.trim().to_string();
     let password = data.password.unwrap_or_default().trim().to_string();
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "local"]
+        .contains(&data.server_type.as_str())
+    {
+        data.server_type.clone()
+    } else {
+        "subsonic".to_string()
+    };
+    let url = if server_type == "local" {
+        data.url.trim().to_string()
+    } else {
+        data.url.trim().trim_end_matches('/').to_string()
+    };
 
     if name.is_empty() { return Err("name is required".to_string()); }
     if url.is_empty() { return Err("url is required".to_string()); }
-    if username.is_empty() { return Err("username is required".to_string()); }
-    if password.is_empty() { return Err("password is required".to_string()); }
+    if server_type != "local" && username.is_empty() { return Err("username is required".to_string()); }
+    if server_type != "local" && password.is_empty() { return Err("password is required".to_string()); }
 
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let count: i64 = db
@@ -70,18 +81,17 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
         .map_err(|e| e.to_string())?;
     let is_active = count == 0;
 
-    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby"]
-        .contains(&data.server_type.as_str())
-    {
-        data.server_type.clone()
-    } else {
-        "subsonic".to_string()
-    };
-
     db.execute(
         "INSERT INTO profiles (name, url, username, password, server_type, is_active, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
-        rusqlite::params![name, url, username, password, server_type, is_active as i64],
+        rusqlite::params![
+            name,
+            url,
+            if server_type == "local" { String::new() } else { username },
+            if server_type == "local" { String::new() } else { password },
+            server_type,
+            is_active as i64
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -113,8 +123,19 @@ pub fn update_profile(
     }
 
     let name = data.name.trim().to_string();
-    let url = data.url.trim().trim_end_matches('/').to_string();
     let username = data.username.trim().to_string();
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "local"]
+        .contains(&data.server_type.as_str())
+    {
+        data.server_type.clone()
+    } else {
+        "subsonic".to_string()
+    };
+    let url = if server_type == "local" {
+        data.url.trim().to_string()
+    } else {
+        data.url.trim().trim_end_matches('/').to_string()
+    };
 
     if !name.is_empty() {
         db.execute(
@@ -130,7 +151,13 @@ pub fn update_profile(
         )
         .map_err(|e| e.to_string())?;
     }
-    if !username.is_empty() {
+    if server_type == "local" {
+        db.execute(
+            "UPDATE profiles SET username = '', updated_at = datetime('now') WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else if !username.is_empty() {
         db.execute(
             "UPDATE profiles SET username = ?1, updated_at = datetime('now') WHERE id = ?2",
             rusqlite::params![username, id],
@@ -139,7 +166,13 @@ pub fn update_profile(
     }
     if let Some(pw) = data.password {
         let pw = pw.trim().to_string();
-        if !pw.is_empty() {
+        if server_type == "local" {
+            db.execute(
+                "UPDATE profiles SET password = '', updated_at = datetime('now') WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .map_err(|e| e.to_string())?;
+        } else if !pw.is_empty() {
             db.execute(
                 "UPDATE profiles SET password = ?1, updated_at = datetime('now') WHERE id = ?2",
                 rusqlite::params![pw, id],
@@ -147,13 +180,6 @@ pub fn update_profile(
             .map_err(|e| e.to_string())?;
         }
     }
-    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby"]
-        .contains(&data.server_type.as_str())
-    {
-        data.server_type.clone()
-    } else {
-        "subsonic".to_string()
-    };
     db.execute(
         "UPDATE profiles SET server_type = ?1, updated_at = datetime('now') WHERE id = ?2",
         rusqlite::params![server_type, id],

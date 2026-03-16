@@ -1,7 +1,7 @@
 [package]
-name = "naviarr"
+name = "madrify"
 version = "0.1.0"
-description = "Naviarr — Music Recommendations for Navidrome/Subsonic"
+description = "Madrify — Music Recommendations for Navidrome/Subsonic"
 authors = []
 license = ""
 repository = ""
@@ -11,7 +11,7 @@ rust-version = "1.77.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "naviarr_lib"
+name = "madrify_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -25,7 +25,9 @@ tauri = { version = "2.10.3", features = [] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-os = "2"
+tauri-plugin-store = "2"
 tauri-plugin-drpc = "*"
+tauri-plugin-updater = "2"
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
@@ -42,3 +44,6 @@ futures-util = "0.3"
 biquad = "0.5"
 cpal = "0.15"
 symphonia = { version = "0.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
+walkdir = "2"
+lofty = "0.21"
+base64 = "0.22"

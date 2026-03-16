@@ -39,7 +39,9 @@ pub async fn get_library_stats(state: State<'_, AppState>) -> Result<LibraryStat
 
     // Fetch live counts if a profile is configured
     let (playlist_count, total_playlist_songs, starred_songs) = if let Some(ref p) = profile {
-        if p.server_type == "jellyfin" || p.server_type == "emby" {
+        if p.server_type == "local" {
+            (None, None, None)
+        } else if p.server_type == "jellyfin" || p.server_type == "emby" {
             match crate::commands::jellyfin::library_counts(&state.http, p).await {
                 Ok((pc, tps, ss)) => (Some(pc), Some(tps), Some(ss)),
                 Err(_) => (None, None, None),

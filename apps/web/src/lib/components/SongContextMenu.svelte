@@ -16,8 +16,8 @@
     unstarSong,
     addSongToPlaylist,
     type Song
-  } from '$lib/api';
-  import { appSettings } from '$lib/stores/settings';
+  } from '$lib/servers';
+  import { backendSettings } from '$lib/stores/backend-settings';
   import { primarySongArtist } from '$lib/song-artists';
 
   let { song, onplay, children, triggerClass }: {
@@ -27,7 +27,7 @@
     triggerClass?: string;
   } = $props();
 
-  const lastFmApiKey = $derived($appSettings.lastFmApiKey);
+  const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
 
   const isStarred = $derived($starredSongIds.has(song.id));
 

@@ -1,7 +1,8 @@
 import { getContext, setContext } from 'svelte';
 import { toast } from 'svelte-sonner';
 import { platform } from '@tauri-apps/plugin-os';
-import { appSettings, libraryRefresh } from '$lib/stores/settings';
+import { backendSettings, defaultBackendSettings } from '$lib/stores/backend-settings';
+import { libraryRefresh } from '$lib/stores/ui-state';
 import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
 import {
   fetchAppSettings,
@@ -10,7 +11,7 @@ import {
   getAutostart,
   updateAppSettings,
   type ProfilePayload,
-} from '$lib/api';
+} from '$lib/servers';
 
 class SettingsController {
   profiles = $state<ProfilePayload[]>([]);
@@ -30,6 +31,7 @@ class SettingsController {
   eqEnabled = $state(false);
   eqPreset = $state<EqPresetId>('flat');
   eqBands = $state<EqBandValues>(DEFAULT_EQ_BANDS);
+  discordRpcEnabled = $state(true);
   saving = $state(false);
   statsRefreshKey = $state(0);
 
@@ -75,10 +77,11 @@ class SettingsController {
         this.eqEnabled = settings.eqEnabled;
         this.eqPreset = settings.eqPreset;
         this.eqBands = settings.eqBands;
+        this.discordRpcEnabled = settings.discordRpcEnabled;
         this.lfmConnected = lfmStatus.connected;
         this.lfmUsername = lfmStatus.username;
 
-        appSettings.set({
+        backendSettings.set({
           lastFmApiKey: this.lastFmApiKey,
           recommendationProvider: this.recommendationProvider,
           metadataProvider: this.metadataProvider,
@@ -90,6 +93,7 @@ class SettingsController {
           eqEnabled: this.eqEnabled,
           eqPreset: this.eqPreset,
           eqBands: this.eqBands,
+          discordRpcEnabled: this.discordRpcEnabled,
         });
       } catch {
         toast.error('Failed to load settings');
@@ -112,11 +116,12 @@ class SettingsController {
         eqEnabled: this.eqEnabled,
         eqPreset: this.eqPreset,
         eqBands: this.eqBands,
+        discordRpcEnabled: this.discordRpcEnabled,
         listenBrainzToken: this.listenBrainzToken,
         lastFmSharedSecret: this.lastFmSharedSecret,
       });
 
-      appSettings.set({
+      backendSettings.set({
         lastFmApiKey: this.lastFmApiKey,
         recommendationProvider: this.recommendationProvider,
         metadataProvider: this.metadataProvider,
@@ -128,6 +133,7 @@ class SettingsController {
         eqEnabled: this.eqEnabled,
         eqPreset: this.eqPreset,
         eqBands: this.eqBands,
+        discordRpcEnabled: this.discordRpcEnabled,
       });
 
       libraryRefresh.update((value) => value + 1);
@@ -156,8 +162,9 @@ class SettingsController {
   };
 
   handleCleared = () => {
+    backendSettings.set(defaultBackendSettings);
     this.profiles = [];
-    this.lastFmApiKey = '';
+    this.lastFmApiKey = defaultBackendSettings.lastFmApiKey;
     this.lastFmSharedSecret = '';
     this.lastFmSharedSecretConfigured = false;
     this.lfmConnected = false;
@@ -165,12 +172,13 @@ class SettingsController {
     this.listenBrainzUsername = '';
     this.listenBrainzToken = '';
     this.listenBrainzTokenConfigured = false;
-    this.recommendationProvider = 'lastfm';
-    this.metadataProvider = 'both';
-    this.crossfadeSeconds = 4;
-    this.eqEnabled = false;
-    this.eqPreset = 'flat';
-    this.eqBands = DEFAULT_EQ_BANDS;
+    this.recommendationProvider = defaultBackendSettings.recommendationProvider;
+    this.metadataProvider = defaultBackendSettings.metadataProvider;
+    this.crossfadeSeconds = defaultBackendSettings.crossfadeSeconds;
+    this.eqEnabled = defaultBackendSettings.eqEnabled;
+    this.eqPreset = defaultBackendSettings.eqPreset;
+    this.eqBands = defaultBackendSettings.eqBands;
+    this.discordRpcEnabled = defaultBackendSettings.discordRpcEnabled;
     this.statsRefreshKey += 1;
   };
 }

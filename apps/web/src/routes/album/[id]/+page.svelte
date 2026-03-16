@@ -18,11 +18,12 @@
     fetchArtistAlbums,
     type Album,
     type Song
-  } from '$lib/api';
+  } from '$lib/servers';
   import { findAlbumGroupIds, mergeAlbumSongs } from '$lib/media-merge';
   import { focusTrack, playQueue, playingFrom, enableShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import { formatClockDuration } from '$lib/utils';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -92,10 +93,7 @@
   function deactivateShuffle() { disableShuffle(); }
 
   function fmt(seconds: number): string {
-    if (!isFinite(seconds) || !seconds) return '';
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    return formatClockDuration(seconds);
   }
 
   function fmtDuration(totalSeconds: number): string {
@@ -123,7 +121,7 @@
   </button>
 
   <!-- Hero -->
-  <div class="mb-8 flex flex-col gap-6 sm:flex-row sm:items-end">
+  <div class="page-hero mb-8 flex flex-col gap-6 sm:flex-row sm:items-end">
     {#if loading}
       <div class="aspect-square w-48 shrink-0 animate-pulse rounded-lg bg-muted shadow-2xl"></div>
     {:else if album?.coverArtUrl}
@@ -228,7 +226,7 @@
   {/if}
 
   <!-- Track list -->
-  <div class="rounded-lg">
+  <div class="page-section rounded-lg">
     <!-- Header row -->
     <div class="mb-1 grid items-center gap-3 border-b px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
       style="grid-template-columns: 2rem 1fr 6rem"
@@ -252,8 +250,9 @@
         {@const isCurrentTrack = song.id === currentTrackId}
         <SongContextMenu {song} onplay={() => playFrom(i)}>
           <button
-            class="group grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent {isCurrentTrack ? 'bg-primary/5' : ''}"
+            class="stagger-row group grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent {isCurrentTrack ? 'bg-primary/5' : ''}"
             style="grid-template-columns: 2rem 1fr 6rem"
+            style:--stagger-index={i}
             onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playFrom(i)}
           >
             <span class="text-center text-sm tabular-nums text-muted-foreground {isCurrentTrack ? 'hidden' : 'group-hover:hidden'}">{i + 1}</span>

@@ -19,10 +19,11 @@
     fetchSimilarSongs,
     fetchAlbumDetail,
     type Song,
-  } from '$lib/api';
-  import { getArtistInfo, type ArtistInfo } from '$lib/metadata';
+  } from '$lib/servers';
+  import { getArtistInfo, type DiscoveryArtistInfo as ArtistInfo } from '$lib/discovery';
   import { primarySongArtist } from '$lib/song-artists';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import { formatClockDuration } from '$lib/utils';
 
   let { open }: { open: boolean } = $props();
 
@@ -95,8 +96,8 @@
   }
 </script>
 
-<aside class="hidden h-full shrink-0 flex-col border-border/70 bg-background xl:flex overflow-hidden transition-[width] duration-300 ease-in-out {open ? 'w-72 border-l' : 'w-0'}">
-  <div class="flex items-center justify-between border-b border-border/60 px-4 py-4 shrink-0 w-72">
+<aside class="app-shell-rail hidden h-full shrink-0 flex-col overflow-hidden transition-[width] duration-300 ease-in-out xl:flex {open ? 'w-72 border-l border-border/40' : 'w-0'}">
+  <div class="flex w-72 shrink-0 items-center justify-between border-b border-border/40 px-4 py-4">
     {#if $playingFrom.type}
       <div class="flex min-w-0 flex-1 flex-col">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -223,7 +224,7 @@
         {:else if panelArtistInfo}
           <button class="group/about w-full text-left" onclick={() => { aboutDialogOpen = true; }}>
             {#if panelArtistInfo.imageUrl}
-              <div class="relative mb-3 h-28 w-full overflow-hidden rounded-lg">
+            <div class="relative mb-3 h-28 w-full overflow-hidden rounded-2xl">
                 <img src={panelArtistInfo.imageUrl} alt={panelArtistInfo.name} class="h-full w-full object-cover object-top shadow transition-transform duration-300 group-hover/about:scale-105" />
                 <div class="absolute inset-0 rounded-lg bg-black/0 transition-colors group-hover/about:bg-black/20"></div>
               </div>
@@ -253,7 +254,7 @@
       <Dialog.Root bind:open={aboutDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
-          <Dialog.Content class="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-background shadow-2xl outline-none overflow-hidden">
+          <Dialog.Content class="app-glass fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[28px] outline-none overflow-hidden">
             {#if panelArtistInfo.imageUrl}
               <div class="relative h-56 w-full">
                 <img src={panelArtistInfo.imageUrl} alt={panelArtistInfo.name} class="h-full w-full object-cover object-top" />
@@ -355,7 +356,7 @@
             {#if currentSong.duration}
               <div>
                 <p class="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-0.5">Duration</p>
-                <p class="text-sm font-medium">{Math.floor(currentSong.duration / 60)}:{String(currentSong.duration % 60).padStart(2, '0')}</p>
+                <p class="text-sm font-medium">{formatClockDuration(currentSong.duration)}</p>
               </div>
             {/if}
           {/if}

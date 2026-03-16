@@ -1,16 +1,17 @@
 <script lang="ts">
   import { Music2, Eye, EyeOff, User, Unlink, Link, ExternalLink, Loader2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import { appSettings } from '$lib/stores/settings';
+  import { backendSettings } from '$lib/stores/backend-settings';
   import { openUrl } from '$lib/tauri';
   import {
     lfmBeginAuth,
     lfmCompleteAuth,
     lfmDisconnect,
-  } from '$lib/api';
+  } from '$lib/servers';
   import * as Select from '$lib/components/ui/select';
 
   const META_LABELS: Record<string, string> = {
+    local: 'Local library first',
     both: 'Both (Last.fm + TheAudioDB)',
     lastfm: 'Last.fm only',
     audiodb: 'TheAudioDB only',
@@ -51,7 +52,7 @@
   let lfmDisconnecting = $state(false);
 
   $effect(() => {
-    appSettings.update((s) => ({ ...s, lastFmConnected: lfmConnected, lastFmUsername: lfmUsername }));
+    backendSettings.update((s) => ({ ...s, lastFmConnected: lfmConnected, lastFmUsername: lfmUsername }));
   });
 
   async function connectLastFm() {
@@ -265,6 +266,7 @@
           {META_LABELS[metadataProvider] ?? metadataProvider}
         </Select.Trigger>
         <Select.Content>
+          <Select.Item value="local" label="Local library first" />
           <Select.Item value="both" label="Both (Last.fm + TheAudioDB)" />
           <Select.Item value="lastfm" label="Last.fm only" />
           <Select.Item value="audiodb" label="TheAudioDB only" />

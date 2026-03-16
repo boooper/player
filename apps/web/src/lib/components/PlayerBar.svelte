@@ -23,7 +23,9 @@
     Heart,
     Disc3,
     User2,
-    Cast
+    Cast,
+    HardDrive,
+    Cloud
   } from '@lucide/svelte';
   import {
     focusTrack,
@@ -55,15 +57,17 @@
     markSmartShuffleTracks,
     smartShuffleTrackIds
   } from '$lib/stores/player';
-  import { fetchUpNextSongs, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, type CastDeviceInfo } from '$lib/api';
-  import { fetchLikedArtists, saveVolume } from '$lib/api';
+  import { fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, desktopPlaybackIsCached, type CastDeviceInfo } from '$lib/servers';
+  import { getUpNextSongs } from '$lib/discovery';
+  import { fetchLikedArtists, saveVolume } from '$lib/servers';
   import { EQ_FREQUENCIES, normalizeEqBands } from '$lib/audio/equalizer';
-  import { lbzNowPlaying, lbzScrobble } from '$lib/listenbrainz';
+  import { formatClockDuration } from '$lib/utils';
+  import { lbzNowPlaying, lbzScrobble } from '$lib/providers/recommendation/listenbrainz';
   import { toast } from 'svelte-sonner';
   import { formatSongArtists, primarySongArtist } from '$lib/song-artists';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import { Button, Slider } from '$lib/components/ui';
-  import { appSettings } from '$lib/stores/settings';
+  import { backendSettings } from '$lib/stores/backend-settings';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { goto } from '$app/navigation';
@@ -80,6 +84,12 @@
   let desktopEndedTrackId = $state<string | null>(null);
   let desktopPreloadedTrackId = $state<string | null>(null);
   let desktopLoadPending = $state(false);
+  let currentTrackCached = $state(false);
+  let seekVal = $state<number[]>([0]);
+  let seekDragging = $state(false);
+  let isBuffering = $state(false);
+  let volVal = $state<number[]>([$volume * 100]);
+  let volDragging = $state(false);
 
   async function discoverDevices() {
     if (castActive || discovering) return;
@@ -231,12 +241,12 @@
 
   import { showQueue } from '$lib/stores/player';
 
-  const lastFmApiKey = $derived($appSettings.lastFmApiKey);
-  const lastFmConnected = $derived($appSettings.lastFmConnected);
-  const lbzToken = $derived($appSettings.listenBrainzToken);
-  const crossfadeMs = $derived(Math.max(0, Math.round(($appSettings.crossfadeSeconds ?? 4) * 1000)));
-  const eqEnabled = $derived($appSettings.eqEnabled ?? false);
-  const eqBands = $derived(normalizeEqBands($appSettings.eqBands));
+  const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
+  const lastFmConnected = $derived($backendSettings.lastFmConnected);
+  const lbzToken = $derived($backendSettings.listenBrainzToken);
+  const crossfadeMs = $derived(Math.max(0, Math.round(($backendSettings.crossfadeSeconds ?? 4) * 1000)));
+  const eqEnabled = $derived($backendSettings.eqEnabled ?? false);
+  const eqBands = $derived(normalizeEqBands($backendSettings.eqBands));
   const zeroEqBands = normalizeEqBands([]);
   const shuffleBtnClass = $derived($smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground');
   const transportLocked = $derived(desktopPlayback && (desktopLoadPending || isBuffering));
@@ -244,6 +254,27 @@
   function randomInt(min: number, max: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
+
+  $effect(() => {
+    const track = currentTrack;
+    if (!desktopPlayback || !track) {
+      currentTrackCached = false;
+      return;
+    }
+
+    let cancelled = false;
+    desktopPlaybackIsCached(track)
+      .then((cached) => {
+        if (!cancelled) currentTrackCached = cached;
+      })
+      .catch(() => {
+        if (!cancelled) currentTrackCached = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  });
 
   function shuffleItems<T>(items: T[]): T[] {
     const next = [...items];
@@ -354,6 +385,19 @@
     deckBEl?.pause();
   }
 
+  function shouldPreloadUpcomingTrack(positionSeconds: number, durationSeconds: number): boolean {
+    if (durationSeconds <= 0) return false;
+
+    // Preload no earlier than 80% played unless the configured crossfade window
+    // would otherwise leave too little time to fetch and prepare the next track.
+    const preloadLeadSeconds = Math.max(($backendSettings.crossfadeSeconds ?? 4) + 2, 4);
+    const percentThreshold = durationSeconds * 0.8;
+    const timeThreshold = Math.max(0, durationSeconds - preloadLeadSeconds);
+    const triggerAt = Math.min(percentThreshold, timeThreshold);
+
+    return positionSeconds >= triggerAt;
+  }
+
   $effect(() => {
     if (desktopPlayback) return;
     if (!eqFilterChains.length) return;
@@ -451,16 +495,11 @@
   }
 
   // Local state for the seek slider — synced from $currentTime when not dragging
-  let seekVal = $state<number[]>([0]);
-  let seekDragging = $state(false);
-  let isBuffering = $state(false);
   $effect(() => {
     if (!seekDragging) seekVal = [$currentTime];
   });
 
   // Local state for the volume slider
-  let volVal = $state<number[]>([$volume * 100]);
-  let volDragging = $state(false);
   $effect(() => {
     if (!volDragging) volVal = [$volume * 100];
   });
@@ -532,13 +571,17 @@
 
   // Effect 3: preload the upcoming song into the inactive deck
   $effect(() => {
+    const next = $queue[$currentIndex + 1];
+    const trackDuration = currentTrack?.duration && currentTrack.duration > 0 ? currentTrack.duration : $duration;
+    const readyToPreload = shouldPreloadUpcomingTrack($currentTime, trackDuration);
+
     if (desktopPlayback) {
       if (castActive) return;
-      const next = $queue[$currentIndex + 1];
       if (!next?.streamUrl) {
         desktopPreloadedTrackId = null;
         return;
       }
+      if (!readyToPreload) return;
       if (desktopPreloadedTrackId === next.id) return;
       desktopPreloadedTrackId = next.id;
       desktopPlaybackPreload(next).catch(() => {
@@ -546,13 +589,13 @@
       });
       return;
     }
-    const next = $queue[$currentIndex + 1];
     const inactiveAudio = getInactiveAudio();
     if (!inactiveAudio || crossfadeInProgress || castActive) return;
     if (!next?.streamUrl) {
       preloadedIndex = -1;
       return;
     }
+    if (!readyToPreload) return;
     if (preloadedIndex === $currentIndex + 1 && inactiveAudio.src === next.streamUrl) return;
     inactiveAudio.src = next.streamUrl;
     inactiveAudio.preload = 'auto';
@@ -807,14 +850,14 @@
     const { artist, title, id } = track;
 
     const fetchLimit = randomInt(SMART_SHUFFLE_MIN_FETCH, SMART_SHUFFLE_MAX_FETCH);
-    const doFetch: Promise<import('$lib/api').Song[]> = lastFmApiKey
+    const doFetch: Promise<import('$lib/servers').Song[]> = lastFmApiKey
       ? Promise.all([
           fetchLikedArtists().then(stored => stored.map(a => a.name)).catch((): string[] => []),
           lfmUserTaste().catch((): string[] => [])
         ]).then(([liked, taste]) => {
           // Merge liked artists + Last.fm top artists, deduplicated
           const merged = [...new Set([...liked, ...taste])];
-          return fetchUpNextSongs({ apiKey: lastFmApiKey, artist, title, likedArtists: merged, limit: fetchLimit });
+          return getUpNextSongs({ artist, title, likedArtists: merged, limit: fetchLimit });
         })
       : fetchSimilarSongs(id, fetchLimit);
 
@@ -868,8 +911,7 @@
       .then((stored) => stored.map((a) => a.name))
       .catch(() => [] as string[])
       .then((liked) =>
-        fetchUpNextSongs({
-          apiKey: lastFmApiKey,
+        getUpNextSongs({
           artist: track.artist,
           title: track.title,
           likedArtists: liked,
@@ -1058,46 +1100,55 @@
   }
 
   function fmt(seconds: number): string {
-    if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
-    const safe = Math.max(0, Math.floor(seconds));
-    const mm = Math.floor(safe / 60);
-    const ss = safe % 60;
-    return `${mm}:${ss.toString().padStart(2, '0')}`;
+    return formatClockDuration(seconds);
   }
 </script>
 
-<footer class="player-bar shrink-0 border-t border-border/80 bg-background/95 px-4 py-3 backdrop-blur {isBuffering ? 'player-bar-loading' : ''}">
+<footer class="player-bar app-shell-footer shrink-0 border-t border-border/40 px-4 py-3 {isBuffering ? 'player-bar-loading' : ''}">
   <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
     <!-- Track info -->
-    <div class="flex min-w-0 items-center gap-3">
+    <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
         <SongContextMenu song={currentTrack} triggerClass="contents">
           {#snippet children()}
             <button
-              class="shrink-0 cursor-pointer"
+              class="player-track-art-button shrink-0 cursor-pointer"
               onclick={() => showQueue.update(v => !v)}
               title="Toggle queue"
               tabindex="-1"
             >
               {#if currentTrack.coverArtUrl}
-                <img class="size-11 rounded-md object-cover shadow-sm hover:opacity-80 transition-opacity" src={currentTrack.coverArtUrl} alt={currentTrack.title} />
+                <img class="player-track-art size-11 rounded-md object-cover shadow-sm" src={currentTrack.coverArtUrl} alt={currentTrack.title} />
               {:else}
-                <div class="grid size-11 shrink-0 place-items-center rounded-md bg-gradient-to-br from-muted to-muted/60 text-xs font-bold text-muted-foreground hover:opacity-80 transition-opacity">
+                <div class="player-track-art player-track-art-fallback grid size-11 shrink-0 place-items-center rounded-md bg-gradient-to-br from-muted to-muted/60 text-xs font-bold text-muted-foreground">
                   {initials(currentTrack.title)}
                 </div>
               {/if}
             </button>
           {/snippet}
         </SongContextMenu>
-        <div class="min-w-0">
+        <div class="player-track-meta min-w-0">
           <div class="flex items-center gap-1.5">
             <div class="min-w-0 flex items-center gap-1.5">
               <button
-                class="block truncate text-sm font-semibold leading-tight hover:underline cursor-pointer max-w-full text-left"
+                class="player-track-title block max-w-full truncate text-left text-sm font-semibold leading-tight"
                 onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
                 title={currentTrack.album}
               >{currentTrack.title}</button>
               <ExternalSourceBadge id={currentTrack.id} class="shrink-0" />
+              {#if desktopPlayback}
+                <span
+                  class="player-status-icon shrink-0 text-muted-foreground {currentTrackCached ? 'is-cached' : ''}"
+                  title={currentTrackCached ? 'Cached locally' : 'Not cached locally'}
+                  aria-label={currentTrackCached ? 'Cached locally' : 'Not cached locally'}
+                >
+                  {#if currentTrackCached}
+                    <HardDrive class="size-3.5 text-emerald-400" />
+                  {:else}
+                    <Cloud class="size-3.5" />
+                  {/if}
+                </span>
+              {/if}
               {#if isSmartShuffleTrack}
                 <span class="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
                   Smart Shuffle
@@ -1106,7 +1157,7 @@
             </div>
             <button
               onclick={toggleFavorite}
-              class="shrink-0 text-muted-foreground transition-colors duration-150 hover:text-foreground {isStarred ? '!text-rose-500' : ''}"
+              class="player-favorite-button shrink-0 text-muted-foreground {isStarred ? '!text-rose-500' : ''}"
               aria-label={isStarred ? 'Remove from favorites' : 'Add to favorites'}
               title={isStarred ? 'Remove from favorites' : 'Add to favorites'}
             >
@@ -1125,8 +1176,8 @@
     </div>
 
     <!-- Playback controls -->
-    <div class="flex flex-col items-center gap-1.5">
-      <div class="flex items-center gap-1">
+    <div class="player-center-column flex flex-col items-center gap-1.5">
+      <div class="player-transport flex items-center gap-1">
         <!-- Shuffle button -->
         <DropdownMenu>
           <DropdownMenuTrigger>
@@ -1135,7 +1186,7 @@
                 {...props}
                 variant="ghost"
                 size="icon-sm"
-                class={shuffleBtnClass}
+                class={`player-transport-button ${shuffleBtnClass}`}
                 aria-label="Shuffle options"
                 title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
               >
@@ -1201,14 +1252,14 @@
         <Button
           variant="ghost"
           size="icon-sm"
-          class="text-muted-foreground hover:text-foreground"
+          class="player-transport-button text-muted-foreground hover:text-foreground"
           onclick={prevTrack}
           aria-label="Previous track"
         >
           <SkipBack class="size-[18px]" />
         </Button>
         <Button
-          class="rounded-full shadow-sm"
+          class="player-play-button rounded-full shadow-sm {(castActive ? castPlaying : $isPlaying) ? 'is-playing' : ''} {isBuffering ? 'is-buffering' : ''}"
           size="icon-lg"
           onclick={togglePlay}
           disabled={!currentTrack || transportLocked}
@@ -1223,7 +1274,7 @@
         <Button
           variant="ghost"
           size="icon-sm"
-          class="text-muted-foreground hover:text-foreground"
+          class="player-transport-button text-muted-foreground hover:text-foreground"
           onclick={nextTrack}
           aria-label="Next track"
         >
@@ -1232,7 +1283,7 @@
         <Button
           variant="ghost"
           size="icon-sm"
-          class={$repeatMode !== 'off' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+          class={`player-transport-button ${$repeatMode !== 'off' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
           onclick={cycleRepeatMode}
           aria-label="Cycle repeat mode"
         >
@@ -1243,19 +1294,21 @@
           {/if}
         </Button>
       </div>
-      <div class="flex w-full items-center gap-2">
-        <span class="w-10 text-right text-[11px] tabular-nums text-muted-foreground">{fmt($currentTime)}</span>
-        <div class="relative flex-1 {isBuffering ? 'opacity-60' : ''}">
+      <div class="player-progress-row flex w-full items-center gap-2">
+        <span class="player-time-label w-10 text-right text-[11px] tabular-nums text-muted-foreground">{fmt($currentTime)}</span>
+        <div class="player-progress-shell relative flex-1 {isBuffering ? 'opacity-75 is-buffering' : ''}">
           {#if isBuffering}
             <div class="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center">
-              <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div class="h-full w-1/3 animate-[buffering_1.2s_ease-in-out_infinite] rounded-full bg-primary/50"></div>
+              <div class="player-buffer-track h-1.5 w-full overflow-hidden rounded-full bg-muted/80">
+                <div class="player-buffer-bar h-full w-1/3 rounded-full bg-primary/55"></div>
               </div>
             </div>
           {/if}
           <Slider
+            class="player-seek-slider"
             type="multiple"
             bind:value={seekVal}
+            disabled={!currentTrack}
             min={0}
             max={isFinite($duration) && $duration > 0 ? $duration : 1}
             step={1}
@@ -1265,12 +1318,12 @@
             aria-label="Playback position"
           />
         </div>
-        <span class="w-10 text-[11px] tabular-nums text-muted-foreground">{fmt($duration)}</span>
+        <span class="player-time-label w-10 text-[11px] tabular-nums text-muted-foreground">{fmt($duration)}</span>
       </div>
     </div>
 
     <!-- Volume -->
-    <div class="flex items-center justify-end gap-2">
+    <div class="player-actions flex items-center justify-end gap-2">
       <!-- Cast -->
       <DropdownMenu onOpenChange={(open) => { if (open && !castActive && !discovering) discoverDevices(); }}>
         <DropdownMenuTrigger>
@@ -1279,10 +1332,10 @@
               {...props}
               variant="ghost"
               size="icon-sm"
-              class={castActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+              class={`player-transport-button ${castActive ? 'text-primary is-active' : 'text-muted-foreground hover:text-foreground'}`}
               aria-label="Cast"
             >
-              <Cast class="size-[18px] {castActive ? 'animate-[cast-pulse_2s_ease-in-out_infinite]' : ''}" />
+              <Cast class="size-[18px] {castActive ? 'player-cast-icon' : ''}" />
             </Button>
           {/snippet}
         </DropdownMenuTrigger>
@@ -1321,28 +1374,30 @@
       <Button
         variant="ghost"
         size="icon-sm"
-        class={$showLyrics ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+        class={`player-transport-button ${$showLyrics ? 'text-primary is-active' : 'text-muted-foreground hover:text-foreground'}`}
         onclick={() => showLyrics.update((v) => !v)}
         aria-label="Lyrics"
       >
         <Mic2 class="size-[18px]" />
       </Button>
       <div
-        class="flex w-full items-center gap-2 md:max-w-44"
+        class="player-volume-group flex w-full items-center gap-2 md:max-w-44"
         onwheel={onVolumeWheel}
         role="group"
         aria-label="Volume"
       >
         {#if $volume <= 0.01}
-          <button onclick={toggleMute} aria-label="Unmute" class="shrink-0 text-muted-foreground hover:text-foreground transition-colors">
+          <button onclick={toggleMute} aria-label="Unmute" class="player-volume-button shrink-0 text-muted-foreground hover:text-foreground">
             <VolumeX class="size-[18px]" />
           </button>
         {:else}
-          <button onclick={toggleMute} aria-label="Mute" class="shrink-0 text-muted-foreground hover:text-foreground transition-colors">
+          <button onclick={toggleMute} aria-label="Mute" class="player-volume-button shrink-0 text-muted-foreground hover:text-foreground">
             <Volume2 class="size-[18px]" />
           </button>
         {/if}
-        <Slider
+        <div class="player-volume-shell">
+         <Slider
+          class="player-volume-slider"
           type="multiple"
           bind:value={volVal}
           min={0}
@@ -1353,6 +1408,7 @@
           onValueCommit={commitVolume}
           aria-label="Volume"
         />
+        </div>
       </div>
     </div>
   </div>
@@ -1393,27 +1449,318 @@
 
 <style>
   .player-bar {
+    position: relative;
+    overflow: hidden;
     transition:
-      box-shadow 180ms ease,
+      opacity 180ms ease,
+      background-color 220ms ease,
+      border-color 220ms ease;
+  }
+
+  .player-bar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, hsl(var(--foreground) / 0.035), transparent 42%),
+      radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.12), transparent 48%);
+    opacity: 0.7;
+    transition: opacity 220ms ease;
+  }
+
+  .player-bar-loading {
+    opacity: 0.9;
+  }
+
+  .player-bar-loading::before {
+    opacity: 1;
+  }
+
+  .player-track-info,
+  .player-center-column,
+  .player-actions {
+    position: relative;
+    z-index: 1;
+  }
+
+  .player-track-art-button {
+    border-radius: 0.9rem;
+    transition:
+      transform 180ms ease,
+      filter 180ms ease;
+  }
+
+  .player-track-art-button:hover {
+    transform: translateY(-1px);
+  }
+
+  .player-track-art {
+    transition:
+      transform 220ms ease,
+      filter 220ms ease,
+      box-shadow 220ms ease;
+    box-shadow:
+      0 10px 26px hsl(var(--background) / 0.28),
+      0 0 0 1px hsl(var(--foreground) / 0.06);
+  }
+
+  .player-track-art-button:hover .player-track-art {
+    transform: scale(1.025);
+    filter: saturate(1.03);
+    box-shadow:
+      0 16px 32px hsl(var(--background) / 0.34),
+      0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+
+  .player-track-title {
+    transition:
+      color 180ms ease,
+      transform 180ms ease,
+      opacity 180ms ease;
+  }
+
+  .player-track-title:hover {
+    transform: translateX(1px);
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+  }
+
+  .player-status-icon,
+  .player-favorite-button,
+  .player-volume-button {
+    transition:
+      transform 180ms ease,
+      color 180ms ease,
+      opacity 180ms ease;
+  }
+
+  .player-favorite-button:hover,
+  .player-volume-button:hover,
+  .player-status-icon.is-cached {
+    transform: translateY(-1px);
+  }
+
+  .player-status-icon.is-cached {
+    animation: player-cache-pulse 2.8s ease-in-out infinite;
+  }
+
+  .player-transport {
+    gap: 0.3rem;
+  }
+
+  :global(.player-transport-button) {
+    position: relative;
+    transition:
+      transform 180ms ease,
+      color 180ms ease,
       background-color 180ms ease,
       opacity 180ms ease;
   }
 
-  .player-bar-loading {
-    animation: player-bar-pulse 1.4s ease-in-out infinite;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  :global(.player-transport-button:hover:not(:disabled)) {
+    transform: translateY(-1px);
   }
 
-  @keyframes player-bar-pulse {
+  :global(.player-transport-button.is-active::after) {
+    content: '';
+    position: absolute;
+    bottom: 0.2rem;
+    left: 50%;
+    width: 0.28rem;
+    height: 0.28rem;
+    border-radius: 999px;
+    background: hsl(var(--primary));
+    transform: translateX(-50%);
+    box-shadow: 0 0 12px hsl(var(--primary) / 0.42);
+  }
+
+  :global(.player-play-button) {
+    position: relative;
+    overflow: visible;
+    transition:
+      transform 180ms ease,
+      box-shadow 220ms ease,
+      filter 220ms ease;
+    box-shadow:
+      0 12px 28px hsl(var(--primary) / 0.2),
+      0 0 0 1px hsl(var(--foreground) / 0.06);
+  }
+
+  :global(.player-play-button::before) {
+    content: '';
+    position: absolute;
+    inset: -0.4rem;
+    z-index: -1;
+    border-radius: 999px;
+    background: radial-gradient(circle, hsl(var(--primary) / 0.24), transparent 68%);
+    opacity: 0;
+    transform: scale(0.88);
+    transition:
+      opacity 220ms ease,
+      transform 220ms ease;
+  }
+
+  :global(.player-play-button:hover:not(:disabled)) {
+    transform: translateY(-1px) scale(1.015);
+    box-shadow:
+      0 16px 30px hsl(var(--primary) / 0.26),
+      0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+
+  :global(.player-play-button:hover:not(:disabled)::before),
+  :global(.player-play-button.is-playing::before) {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  :global(.player-play-button.is-playing) {
+    animation: player-play-glow 2.6s ease-in-out infinite;
+  }
+
+  :global(.player-play-button.is-buffering) {
+    animation: player-buffer-breathe 1.1s ease-in-out infinite;
+  }
+
+  :global(.player-play-button:disabled) {
+    transform: none;
+    box-shadow:
+      0 8px 18px hsl(var(--background) / 0.18),
+      0 0 0 1px hsl(var(--foreground) / 0.04);
+  }
+
+  .player-progress-row {
+    gap: 0.65rem;
+  }
+
+  .player-time-label {
+    line-height: 1;
+    align-self: center;
+    transform: translateY(-0.5px);
+  }
+
+  .player-progress-shell {
+    min-height: 1rem;
+    display: flex;
+    align-items: center;
+    transition:
+      opacity 180ms ease,
+      transform 180ms ease;
+  }
+
+  .player-progress-shell.is-buffering {
+    transform: translateY(-0.5px);
+  }
+
+  .player-buffer-track {
+    box-shadow: inset 0 0 0 1px hsl(var(--foreground) / 0.04);
+  }
+
+  .player-buffer-bar {
+    animation: player-buffer-slide 1.35s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  }
+
+  :global(.player-seek-slider),
+  :global(.player-volume-slider) {
+    min-height: 1rem;
+    position: relative;
+    z-index: 2;
+  }
+
+  :global(.player-seek-slider [data-slot='slider-track']),
+  :global(.player-volume-slider [data-slot='slider-track']) {
+    width: 100%;
+  }
+
+  :global(.player-seek-slider[data-slot='slider']),
+  :global(.player-volume-slider[data-slot='slider']) {
+    min-height: 1rem;
+  }
+
+  .player-actions {
+    gap: 0.35rem;
+  }
+
+  .player-volume-group {
+    padding-left: 0.25rem;
+  }
+
+  .player-volume-shell {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 1rem;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.player-cast-icon) {
+    animation: player-cast-pulse 2.1s ease-in-out infinite;
+  }
+
+  @keyframes player-buffer-slide {
+    0% {
+      transform: translateX(-140%) scaleX(0.85);
+      opacity: 0.35;
+    }
+
+    55% {
+      opacity: 0.95;
+    }
+
+    100% {
+      transform: translateX(320%) scaleX(1.1);
+      opacity: 0.3;
+    }
+  }
+
+  @keyframes player-buffer-breathe {
     0%,
     100% {
-      opacity: 1;
-      background-color: rgb(10 10 10 / 0.95);
+      transform: scale(1);
+      filter: saturate(1);
     }
 
     50% {
-      opacity: 0.88;
-      background-color: rgb(18 18 18 / 0.98);
+      transform: scale(0.97);
+      filter: saturate(0.92);
     }
   }
+
+  @keyframes player-play-glow {
+    0%,
+    100% {
+      box-shadow:
+        0 12px 28px hsl(var(--primary) / 0.2),
+        0 0 0 1px hsl(var(--foreground) / 0.06);
+    }
+
+    50% {
+      box-shadow:
+        0 16px 34px hsl(var(--primary) / 0.28),
+        0 0 0 1px hsl(var(--foreground) / 0.08);
+    }
+  }
+
+  @keyframes player-cache-pulse {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 0 hsl(var(--primary) / 0));
+    }
+
+    50% {
+      filter: drop-shadow(0 0 10px hsl(var(--primary) / 0.24));
+    }
+  }
+
+  @keyframes player-cast-pulse {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 0 hsl(var(--primary) / 0));
+    }
+
+    50% {
+      filter: drop-shadow(0 0 10px hsl(var(--primary) / 0.3));
+    }
+  }
+
 </style>

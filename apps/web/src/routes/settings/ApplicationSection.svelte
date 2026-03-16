@@ -2,7 +2,7 @@
   import { SlidersHorizontal, Power, AudioLines } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import { DEFAULT_EQ_BANDS, EQ_FREQUENCIES, EQ_MAX_GAIN, EQ_MIN_GAIN, EQ_PRESETS, findEqPresetId, normalizeEqBands, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
-  import { setAutostart } from '$lib/api';
+  import { setAutostart } from '$lib/servers';
   import * as Select from '$lib/components/ui/select';
 
   let {

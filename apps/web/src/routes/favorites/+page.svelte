@@ -3,10 +3,11 @@
   import { goto } from '$app/navigation';
   import { Play, Pause, Shuffle, Heart, Sparkles } from '@lucide/svelte';
 
-  import { fetchStarredSongs, type Song } from '$lib/api';
+  import { fetchStarredSongs, type Song } from '$lib/servers';
   import { focusTrack, playQueue, playingFrom, starredSongIds, smartShuffleMode, shuffleEnabled, queue, currentIndex, isPlaying, togglePlayRequest, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import { formatClockDuration } from '$lib/utils';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -41,11 +42,7 @@
   });
 
   function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    return formatClockDuration(seconds);
   }
 
   function totalDuration(): number {
@@ -86,7 +83,7 @@
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
 </script>
 
-<div class="mb-6 flex gap-4">
+<div class="page-hero mb-6 flex gap-4">
   <div class="flex h-36 w-36 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-pink-700 shadow-lg">
     <Heart class="size-14 fill-white text-white" />
   </div>
@@ -159,7 +156,7 @@
 {/if}
 
 {#if songs.length}
-  <div class="mt-2">
+  <div class="page-section mt-2">
     <!-- Column headers -->
     <div class="grid items-center gap-4 border-b border-border/40 px-4 pb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/50"
          style="grid-template-columns: 2.5rem 1fr 1fr 4rem">
@@ -175,8 +172,9 @@
         {@const isCurrentTrack = song.id === currentTrackId}
         <SongContextMenu {song} onplay={() => playSong(index)}>
           <button
-            class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
+            class="stagger-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
             style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
+            style:--stagger-index={index}
             onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playSong(index)}
           >
             <!-- Track # / Play icon crossfade -->

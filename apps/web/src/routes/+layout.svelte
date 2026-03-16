@@ -1,8 +1,6 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
-  import { fly, fade } from 'svelte/transition';
-  import { cubicOut, cubicIn } from 'svelte/easing';
   import { afterNavigate, goto } from '$app/navigation';
 
   import { Home, Settings, ChevronLeft, ChevronRight, Library } from '@lucide/svelte';
@@ -10,7 +8,7 @@
   import SearchBar from '$lib/components/SearchBar.svelte';
   import NowPlayingPanel from '$lib/components/NowPlayingPanel.svelte';
   import LibraryList from '$lib/components/LibraryList.svelte';
-  import { fetchAudioDbArtistPhoto } from '$lib/audiodb';
+  import { getArtistArtworkMap } from '$lib/discovery';
   import { openUrl } from '$lib/tauri';
   import { initDrpc } from '$lib/drpc';
   import {
@@ -25,10 +23,11 @@
     fetchLyrics,
     type LyricsResult,
     type Song,
-  } from '$lib/api';
+  } from '$lib/servers';
   import {
     currentIndex,
     focusTrack,
+    hydratePlayerUiState,
     isPlaying,
     playQueue,
     queue,
@@ -46,7 +45,8 @@
     smartShuffleMode,
     repeatMode,
   } from '$lib/stores/player';
-  import { appSettings, libraryRefresh } from '$lib/stores/settings';
+  import { backendSettings } from '$lib/stores/backend-settings';
+  import { libraryRefresh } from '$lib/stores/ui-state';
   import { Button, ScrollArea, Toaster, SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarTrigger, SidebarRail, SidebarInset } from '$lib/components/ui';
 
   let { children } = $props();
@@ -118,6 +118,8 @@
   const rightOpen = $derived($showQueue);
 
   let playbackPrefsReady = $state(false);
+  let cleanupDrpc: () => void = () => {};
+  let drpcReady = false;
 
   async function bootstrapAppSettings() {
     try {
@@ -125,7 +127,7 @@
         fetchAppSettings(),
         fetchListenBrainzToken().catch(() => '')
       ]);
-      appSettings.update((current) => ({
+      backendSettings.update((current) => ({
         ...current,
         lastFmApiKey: settings.lastFmApiKey,
         recommendationProvider: settings.recommendationProvider,
@@ -136,6 +138,7 @@
         eqEnabled: settings.eqEnabled,
         eqPreset: settings.eqPreset,
         eqBands: settings.eqBands,
+        discordRpcEnabled: settings.discordRpcEnabled,
       }));
       volume.set(settings.volume);
       shuffleEnabled.set(settings.shuffleEnabled);
@@ -156,6 +159,13 @@
     const rm = $repeatMode;
     clearTimeout(_prefsSaveTimer);
     _prefsSaveTimer = window.setTimeout(() => savePlaybackPrefs(s, sm, rm), 300);
+  });
+
+  $effect(() => {
+    if (!drpcReady) return;
+    const enabled = $backendSettings.discordRpcEnabled;
+    cleanupDrpc();
+    cleanupDrpc = enabled ? initDrpc() : () => {};
   });
 
   $effect(() => {
@@ -219,12 +229,8 @@
     const patch: Record<string, string> = {};
     for (const n of missing) patch[n] = '';
     artistPhotos = { ...artistPhotos, ...patch };
-    await Promise.all(
-      missing.map(async (name) => {
-        const url = await fetchAudioDbArtistPhoto(name);
-        artistPhotos = { ...artistPhotos, [name]: url };
-      })
-    );
+    const next = await getArtistArtworkMap(missing);
+    artistPhotos = { ...artistPhotos, ...next };
   }
 
   function playSongFromDropdown(song: Song) {
@@ -242,7 +248,7 @@
 
   onMount(() => {
     document.documentElement.classList.add('dark');
-    const cleanupDrpc = initDrpc();
+    drpcReady = true;
 
     function handleExternalLink(e: MouseEvent) {
       const target = (e.target as HTMLElement).closest('a');
@@ -267,12 +273,14 @@
     document.addEventListener('click', handleExternalLink);
     document.addEventListener('keydown', handleKeydown);
 
+    void hydratePlayerUiState();
     Promise.all([bootstrapAppSettings(), reloadLibraryData()]);
 
     return () => {
       document.removeEventListener('click', handleExternalLink);
       document.removeEventListener('keydown', handleKeydown);
       cleanupDrpc();
+      drpcReady = false;
     };
   });
 
@@ -282,7 +290,7 @@
 </script>
 
 <!-- Full-width top bar -->
-<header class="fixed left-0 right-0 top-0 z-20 flex h-14 shrink-0 items-center border-b border-border/30 bg-background/95 px-4 backdrop-blur-md">
+<header class="app-shell-surface fixed left-0 right-0 top-0 z-20 flex h-14 shrink-0 items-center border-b border-border/40 px-4">
   <div class="flex shrink-0 items-center gap-1 pr-3">
     <Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.back()}><ChevronLeft class="size-4" /></Button>
     <Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.forward()}><ChevronRight class="size-4" /></Button>
@@ -313,7 +321,7 @@
 </header>
 
 <SidebarProvider style="margin-top: 3.5rem; height: calc(100svh - 3.5rem); min-height: calc(100svh - 3.5rem); overflow: hidden;">
-  <Sidebar collapsible="icon" class="border-r border-border/20 bg-background" style="top: 3.5rem; height: calc(100svh - 3.5rem);">
+  <Sidebar collapsible="icon" class="app-shell-rail border-r border-border/40" style="top: 3.5rem; height: calc(100svh - 3.5rem);">
     <SidebarHeader class="px-2 pt-4 pb-2">
       <div class="flex items-center justify-between px-2 group-data-[collapsible=icon]:justify-center">
         <div class="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
@@ -339,16 +347,12 @@
     <SidebarRail />
   </Sidebar>
 
-  <SidebarInset class="flex h-full flex-col overflow-hidden">
+  <SidebarInset class="app-shell-main flex h-full flex-col overflow-hidden">
     <div class="flex min-h-0 flex-1 overflow-hidden">
       <ScrollArea class="h-full flex-1 min-w-0" bind:viewportRef={lyricsScrollRef}>
         {#if $showLyrics}
           {@const track = $queue[$currentIndex] ?? null}
-          <div
-            class="relative min-h-full"
-            in:fly={{ y: 20, duration: 380, easing: cubicOut }}
-            out:fly={{ y: 20, duration: 250, easing: cubicIn }}
-          >
+          <div class="relative min-h-full">
             {#if track?.coverArtUrl}
               <img
                 src={track.coverArtUrl}
@@ -419,11 +423,7 @@
             </div>
           </div>
         {:else}
-          <div
-            class="px-8 pt-8 pb-8"
-            in:fade={{ duration: 220, easing: cubicOut }}
-            out:fade={{ duration: 150 }}
-          >
+          <div class="px-8 pt-8 pb-8">
             {@render children()}
           </div>
         {/if}

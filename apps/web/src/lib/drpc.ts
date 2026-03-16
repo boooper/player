@@ -1,7 +1,7 @@
 import { derived } from 'svelte/store';
 import { queue, currentIndex, isPlaying } from './stores/player';
 import { isTauri } from './tauri';
-import type { Song } from './api';
+import type { Song } from './servers';
 
 const APPLICATION_ID = '1189808615012450304'; // replace with your Discord app ID
 
@@ -113,7 +113,12 @@ export function initDrpc(): () => void {
     unsubPlaying();
     unsubSong();
     if (started || startPromise) {
-      import('tauri-plugin-drpc').then(({ stop }) => stop()).catch(() => {});
+      import('tauri-plugin-drpc')
+        .then(async ({ clearActivity, stop }) => {
+          await clearActivity().catch(() => {});
+          await stop();
+        })
+        .catch(() => {});
     }
     started = false;
     startPromise = null;

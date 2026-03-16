@@ -141,7 +141,15 @@ jobs:
           PY
 
       - name: build
-        run: bun run --cwd apps/desktop tauri build --config src-tauri/tauri.build.conf.json ${{ matrix.args }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: >-
+          bun run --cwd apps/desktop tauri build
+          --config src-tauri/tauri.build.conf.json
+          --config src-tauri/tauri.release.conf.json
+          ${{ matrix.args }}
 
       - name: upload bundle artifacts
         uses: actions/upload-artifact@v4
@@ -155,6 +163,8 @@ jobs:
             apps/desktop/src-tauri/target/release/bundle/**/*.exe
             apps/desktop/src-tauri/target/release/bundle/**/*.msi
             apps/desktop/src-tauri/target/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/release/bundle/**/*.zip
+            apps/desktop/src-tauri/target/release/bundle/**/*.sig
             apps/desktop/src-tauri/target/*/release/bundle/**/*.AppImage
             apps/desktop/src-tauri/target/*/release/bundle/**/*.app.tar.gz
             apps/desktop/src-tauri/target/*/release/bundle/**/*.deb
@@ -162,6 +172,8 @@ jobs:
             apps/desktop/src-tauri/target/*/release/bundle/**/*.exe
             apps/desktop/src-tauri/target/*/release/bundle/**/*.msi
             apps/desktop/src-tauri/target/*/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.zip
+            apps/desktop/src-tauri/target/*/release/bundle/**/*.sig
           if-no-files-found: error
           retention-days: 7
 
@@ -206,6 +218,58 @@ jobs:
             git push origin "$TAG_NAME"
           fi
 
+      - name: generate updater manifest
+        env:
+          RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          tag = os.environ["RELEASE_TAG"]
+          base_url = f"https://github.com/boooper/player/releases/download/{tag}"
+          dist = Path("dist")
+
+          bundles = {
+            "linux-x86_64": ("bundle-linux-x64", ".AppImage"),
+            "darwin-aarch64": ("bundle-macos-aarch64", ".app.tar.gz"),
+            "darwin-x86_64": ("bundle-macos-x64", ".app.tar.gz"),
+            "windows-x86_64": ("bundle-windows-x64", ".nsis.zip"),
+          }
+
+          platforms = {}
+          for target, (folder, suffix) in bundles.items():
+            files = sorted((dist / folder).rglob(f"*{suffix}"))
+            if not files:
+              raise SystemExit(f"Missing updater bundle for {target}")
+            bundle = files[0]
+            sig_path = Path(f"{bundle}.sig")
+            if not sig_path.is_file():
+              raise SystemExit(f"Missing signature for {bundle}")
+            signature = sig_path.read_text().strip()
+            platforms[target] = {
+              "signature": signature,
+              "url": f"{base_url}/{bundle.name}",
+            }
+
+          manifest = {
+            "version": version,
+            "notes": f"Madrify {version}",
+            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "platforms": platforms,
+          }
+
+          latest = dist / "latest.json"
+          latest.write_text(json.dumps(manifest, indent=2) + "\n")
+          print(latest)
+          PY
+
       - name: publish draft release
         uses: softprops/action-gh-release@v2
         with:
@@ -222,3 +286,6 @@ jobs:
             dist/**/*.exe
             dist/**/*.msi
             dist/**/*.rpm
+            dist/**/*.zip
+            dist/**/*.sig
+            dist/latest.json

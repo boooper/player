@@ -12,6 +12,8 @@
       "allow": [{ "url": "https://**" }, { "url": "http://**" }]
     },
     "drpc:default",
+    "store:default",
+    "updater:default",
     "autostart:default",
     "os:default"
   ]

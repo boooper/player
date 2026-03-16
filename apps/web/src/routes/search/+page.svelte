@@ -1,130 +1,41 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { afterNavigate, goto } from '$app/navigation';
-
   import { Clock, X } from '@lucide/svelte';
-  import { searchSongs as searchLastFmSongs, type Song as LastFmSong } from '$lib/metadata';
-  import { getRecommendations, getTrackTopGenre, type TrackRecommendation } from '$lib/recommendation';
-  import { fetchLikedArtists, fetchSimilarSongs, searchAlbums, searchSongs, type Album, type Song } from '$lib/api';
+
+  import { searchBundle, type SearchBundlePayload, type Song } from '$lib/servers';
   import { focusTrack, playQueue } from '$lib/stores/player';
-  import { appSettings } from '$lib/stores/settings';
   import { Badge, Button } from '$lib/components/ui';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
-  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
+  import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
+  import { readUiJson, writeUiJson } from '$lib/ui-storage';
 
   let { data } = $props<{ data: { q: string } }>();
-
-  const lastFmApiKey = $derived($appSettings.lastFmApiKey);
-  const hasLastFmKey = $derived(Boolean(lastFmApiKey));
 
   const query = $derived((data.q ?? '').trim());
   let loading = $state(false);
   let error = $state('');
-
-  let likedArtists = $state<string[]>([]);
-  let lastfmSongs = $state<LastFmSong[]>([]);
-  let subsonicSongs = $state<Song[]>([]);
-  let subsonicAlbums = $state<Album[]>([]);
-  let subsonicSimilar = $state<Song[]>([])
-
-  type HybridRecommendation = {
-    id: string;
-    title: string;
-    artist: string;
-    url: string;
-    matchScore: number;
-    genreScore: number;
-    combinedScore: number;
-    playable: boolean;
-    subsonicSong: Song | null;
-    source: 'hybrid';
-  };
-
-  type SelectedItem = {
-    id: string;
-    title: string;
-    artist: string;
-    imageUrl: string;
-    source: 'lastfm' | 'library';
-    subsonicSong?: Song | null;
-  };
-
-  let selected = $state<SelectedItem | null>(null);
-  let recs = $state<TrackRecommendation[]>([]);
-  let recError = $state('');
-  let recLoading = $state(false);
-  let hybridRecs = $state<HybridRecommendation[]>([])
+  let results = $state<SearchBundlePayload>({ songs: [], albums: [], recommendations: [] });
+  let selectedSongId = $state<string | null>(null);
   let lastExecutedQuery = '';
 
-  const RECENT_KEY = 'naviarr_recent_searches';
+  const RECENT_KEY = 'madrify_recent_searches';
+  const LEGACY_RECENT_KEY = 'naviarr_recent_searches';
   let recentSearches = $state<string[]>([]);
 
-  function loadRecentSearches() {
-    try {
-      recentSearches = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
-    } catch {
-      recentSearches = [];
-    }
+  async function loadRecentSearches() {
+    recentSearches = await readUiJson<string[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]);
   }
 
   function removeRecentSearch(q: string) {
     const updated = recentSearches.filter((r) => r !== q);
     recentSearches = updated;
-    localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+    void writeUiJson(RECENT_KEY, updated, [LEGACY_RECENT_KEY]);
   }
-
-  const merged = $derived.by(() => {
-    const items: Array<{
-      id: string;
-      title: string;
-      artist: string;
-      imageUrl: string;
-      source: 'lastfm' | 'library';
-      subsonicSong: Song | null;
-    }> = [];
-    const seen: Record<string, boolean> = {};
-
-    subsonicSongs.forEach((song) => {
-      const key = `${song.artist.toLowerCase()}::${song.title.toLowerCase()}`;
-      if (seen[key]) return;
-      seen[key] = true;
-      items.push({
-        id: `sub-${song.id}`,
-        title: song.title,
-        artist: song.artist,
-        imageUrl: song.coverArtUrl,
-        source: 'library',
-        subsonicSong: song
-      });
-    });
-
-    lastfmSongs.forEach((song) => {
-      const key = `${song.artist.toLowerCase()}::${song.title.toLowerCase()}`;
-      if (seen[key]) return;
-      seen[key] = true;
-      items.push({
-        id: song.id,
-        title: song.title,
-        artist: song.artist,
-        imageUrl: song.imageUrl,
-        source: 'lastfm',
-        subsonicSong: null
-      });
-    });
-
-    return items;
-  });
 
   onMount(async () => {
     loadRecentSearches();
-    try {
-      const artists = await fetchLikedArtists();
-      likedArtists = artists.map((entry) => entry.name);
-    } catch {
-      likedArtists = [];
-    }
-
     await runQuerySearch();
   });
 
@@ -135,7 +46,7 @@
   async function runQuerySearch() {
     if (!query || loading || lastExecutedQuery === query) return;
     lastExecutedQuery = query;
-    await searchAll(query);
+    await loadSearch(query);
   }
 
   function initials(name: string): string {
@@ -147,177 +58,67 @@
       .join('');
   }
 
-  async function searchAll(queryText: string) {
+  async function loadSearch(queryText: string) {
     if (!queryText.trim() || loading) return;
 
     loading = true;
     error = '';
-    recs = [];
-    hybridRecs = [];
-    recError = '';
+    results = { songs: [], albums: [], recommendations: [] };
+    selectedSongId = null;
 
     try {
-      const [lfm, sub, albums] = await Promise.all([
-        hasLastFmKey ? searchLastFmSongs(queryText, 24) : Promise.resolve([]),
-        searchSongs(queryText, 24),
-        searchAlbums(queryText, 12)
-      ]);
+      results = await searchBundle(queryText, 24, 12, 16);
 
-      lastfmSongs = lfm;
-      subsonicSongs = sub;
-      subsonicAlbums = albums;
-      subsonicSimilar = [];
-
-      selected = merged[0] ?? null;
-      if (selected) {
+      if (results.songs[0]) {
+        const song = results.songs[0];
+        selectedSongId = song.id;
         focusTrack.set({
-          title: selected.title,
-          artist: selected.artist,
-          imageUrl: selected.imageUrl,
-          source: selected.source
+          title: song.title,
+          artist: song.artist,
+          imageUrl: song.coverArtUrl,
+          source: 'library',
+          album: song.album
         });
-        await loadRecommendations(selected.title, selected.artist);
       }
 
-      if (!lfm.length && !sub.length && !albums.length) {
+      if (!results.songs.length && !results.albums.length && !results.recommendations.length) {
         error = 'No results found for this search.';
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Search failed.';
-      lastfmSongs = [];
-      subsonicSongs = [];
-      subsonicAlbums = [];
     } finally {
       loading = false;
     }
   }
 
-  function findBestMatch(candidates: Song[], recArtist: string, recTitle: string): Song | null {
-    if (!candidates.length) return null;
-    const norm = (s: string) => s.toLowerCase().trim().replace(/^the\s+/, '');
-
-    // 1. Exact artist + exact title
-    const exact = candidates.find(
-      (s) => norm(s.artist) === norm(recArtist) && norm(s.title) === norm(recTitle)
-    );
-    if (exact) return exact;
-
-    // 2. Artist contains/contained + title contains/contained (handles "The X" vs "X", remasters, feat. tags, etc.)
-    const loose = candidates.find(
-      (s) =>
-        (norm(s.artist).includes(norm(recArtist)) || norm(recArtist).includes(norm(s.artist))) &&
-        (norm(s.title).includes(norm(recTitle)) || norm(recTitle).includes(norm(s.title)))
-    );
-    if (loose) return loose;
-
-    // 3. If the search was already targeted ("Artist Title"), trust the first result
-    //    rather than declaring it un-playable.
-    return candidates[0] ?? null;
-  }
-
-  async function loadRecommendations(title: string, artist: string) {
-    if (!hasLastFmKey) return;
-    recLoading = true;
-    recError = '';
-    try {
-      const genre = await getTrackTopGenre(artist, title);
-      const lastfmRecs = await getRecommendations({
-        seedArtist: artist,
-        seedSongTitle: title,
-        seedGenre: genre,
-        likedArtists,
-        limit: 18
-      });
-
-      recs = lastfmRecs;
-
-      // Search Subsonic/octo-fiesta (Deezer) directly for each recommendation.
-      // This is the only reliable way to know if a track is streamable — the old
-      // approach of matching against a pre-fetched pool missed anything not by
-      // the seed artist.
-      const subMatches = await Promise.all(
-        lastfmRecs.map((rec) =>
-          searchSongs(`${rec.artist} ${rec.title}`, 5)
-            .then((songs) => findBestMatch(songs, rec.artist, rec.title))
-            .catch(() => null)
-        )
-      );
-
-      const hybrid = lastfmRecs.map((track, i) => {
-        const subMatch = subMatches[i] ?? null;
-        const subBoost = subMatch ? 0.3 : 0;
-        const combinedScore = Math.min(1, track.score + subBoost);
-        return {
-          id: track.id,
-          title: track.title,
-          artist: track.artist,
-          url: track.url,
-          matchScore: track.matchScore,
-          genreScore: track.genreScore,
-          combinedScore,
-          playable: Boolean(subMatch),
-          subsonicSong: subMatch,
-          source: 'hybrid' as const
-        };
-      });
-
-      hybridRecs = hybrid.sort((a, b) => b.combinedScore - a.combinedScore);
-    } catch (err) {
-      recError = err instanceof Error ? err.message : 'Failed to load recommendations.';
-      recs = [];
-      hybridRecs = [];
-    } finally {
-      recLoading = false;
-    }
-  }
-
-  async function pick(item: { id: string; title: string; artist: string; imageUrl: string; source: 'lastfm' | 'library' }) {
-    selected = item;
+  function pick(song: Song) {
+    selectedSongId = song.id;
     focusTrack.set({
-      title: item.title,
-      artist: item.artist,
-      imageUrl: item.imageUrl,
-      source: item.source
+      title: song.title,
+      artist: song.artist,
+      imageUrl: song.coverArtUrl,
+      source: 'library',
+      album: song.album
     });
-
-    if (item.source === 'library') {
-      const id = item.id.replace('sub-', '');
-      const startIndex = subsonicSongs.findIndex((song) => song.id === id);
-      if (startIndex >= 0) {
-        playQueue(subsonicSongs, startIndex);
-      }
-
-      try {
-        subsonicSimilar = await fetchSimilarSongs(id, 16);
-      } catch {
-        subsonicSimilar = [];
-      }
+    const startIndex = results.songs.findIndex((item) => item.id === song.id);
+    if (startIndex >= 0) {
+      playQueue(results.songs, startIndex);
+    } else {
+      playQueue([song], 0);
     }
-
-    await loadRecommendations(item.title, item.artist);
   }
 
-  function playSimilar(index: number) {
-    if (!subsonicSimilar.length) return;
-    playQueue(subsonicSimilar, index);
-  }
-
-  function useRecommendation(rec: HybridRecommendation) {
-    if (rec.subsonicSong) {
-      focusTrack.set({
-        title: rec.subsonicSong.title,
-        artist: rec.subsonicSong.artist,
-        imageUrl: rec.subsonicSong.coverArtUrl,
-        source: 'library',
-        album: rec.subsonicSong.album
-      });
-      playQueue([rec.subsonicSong], 0);
-      return;
-    }
-
-    if (rec.url) {
-      window.open(rec.url, '_blank', 'noopener,noreferrer');
-    }
+  function playRecommendation(index: number) {
+    if (!results.recommendations.length) return;
+    const song = results.recommendations[index];
+    focusTrack.set({
+      title: song.title,
+      artist: song.artist,
+      imageUrl: song.coverArtUrl,
+      source: 'library',
+      album: song.album
+    });
+    playQueue(results.recommendations, index);
   }
 </script>
 
@@ -330,13 +131,14 @@
 
 {#if !query}
   {#if recentSearches.length > 0}
-    <div class="mb-6">
+    <div class="page-section mb-6">
       <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recent searches</h3>
       <div class="divide-y divide-border overflow-hidden rounded-lg border border-input">
-        {#each recentSearches as term (term)}
+        {#each recentSearches as term, index (term)}
           <div class="flex items-center">
             <button
-              class="flex flex-1 items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
+              class="stagger-row flex flex-1 items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
+              style:--stagger-index={index}
               onclick={() => goto(`/search?q=${encodeURIComponent(term)}`)}
             >
               <Clock class="size-4 shrink-0 text-muted-foreground" />
@@ -357,100 +159,26 @@
     <p class="text-sm text-muted-foreground">Enter a query in the top bar to search.</p>
   {/if}
 {:else}
+  {#if error}
+    <p class="mb-3 text-sm text-destructive">{error}</p>
+  {/if}
 
-{#if error}
-  <p class="mb-3 text-sm text-destructive">{error}</p>
-{/if}
-
-<div class="mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
-  {#each merged as item (item.id)}
-    {#if item.subsonicSong}
-      <SongContextMenu song={item.subsonicSong} onplay={() => pick(item)}>
-        <button
-          class={selected?.id === item.id
-            ? 'flex w-full items-center gap-3 bg-accent px-3 py-2.5 text-left ring-1 ring-inset ring-primary'
-            : 'flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent'}
-          onclick={() => pick(item)}
-        >
-          {#if item.imageUrl}
-            <img class="h-9 w-9 shrink-0 rounded object-cover" src={item.imageUrl} alt={item.title} loading="lazy" />
-          {:else}
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
-              {initials(item.title)}
-            </div>
-          {/if}
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <p class="truncate text-sm font-semibold">{item.title}</p>
-              <ExternalSourceBadge id={item.subsonicSong?.id ?? item.id} class="shrink-0" />
-            </div>
-            <p class="truncate text-xs text-muted-foreground">{item.artist}</p>
-          </div>
-        </button>
-      </SongContextMenu>
-    {:else}
-      <button
-        class={selected?.id === item.id
-          ? 'flex w-full items-center gap-3 bg-accent px-3 py-2.5 text-left ring-1 ring-inset ring-primary'
-          : 'flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent'}
-        onclick={() => pick(item)}
-      >
-        {#if item.imageUrl}
-          <img class="h-9 w-9 shrink-0 rounded object-cover" src={item.imageUrl} alt={item.title} loading="lazy" />
-        {:else}
-          <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
-            {initials(item.title)}
-          </div>
-        {/if}
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <p class="truncate text-sm font-semibold">{item.title}</p>
-            <ExternalSourceBadge id={item.subsonicSong?.id ?? item.id} class="shrink-0" />
-          </div>
-          <p class="truncate text-xs text-muted-foreground">{item.artist}</p>
-        </div>
-      </button>
+  <div class="mb-2 flex items-center justify-between">
+    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Songs</h3>
+    {#if loading}
+      <p class="text-sm text-muted-foreground">Loading...</p>
     {/if}
-  {/each}
-</div>
-
-{#if subsonicAlbums.length > 0}
-  <div class="mb-2 flex items-center justify-between">
-    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Albums</h3>
   </div>
-  <div class="mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
-    {#each subsonicAlbums as album (album.id)}
-      <AlbumContextMenu {album}>
+  <div class="page-section mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
+    {#each results.songs as song, index (song.id)}
+      <SongContextMenu {song} onplay={() => pick(song)}>
         <button
-          class="flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
-          onclick={() => goto(`/album/${encodeURIComponent(album.id)}`)}
+          class={`stagger-row w-full ${selectedSongId === song.id
+            ? 'flex items-center gap-3 bg-accent px-3 py-2.5 text-left ring-1 ring-inset ring-primary'
+            : 'flex items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent'}`}
+          style:--stagger-index={index}
+          onclick={() => pick(song)}
         >
-          {#if album.coverArtUrl}
-            <img class="h-10 w-10 shrink-0 rounded object-cover" src={album.coverArtUrl} alt={album.name} loading="lazy" />
-          {:else}
-            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
-              {initials(album.name)}
-            </div>
-          {/if}
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">{album.name}</p>
-            <p class="truncate text-xs text-muted-foreground">{album.artist}</p>
-          </div>
-          <Badge variant="outline">Album</Badge>
-        </button>
-      </AlbumContextMenu>
-    {/each}
-  </div>
-{/if}
-
-{#if subsonicSimilar.length > 0}
-  <div class="mb-2 flex items-center justify-between">
-    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Subsonic similar</h3>
-  </div>
-  <div class="mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
-    {#each subsonicSimilar as song, index (song.id)}
-      <SongContextMenu {song} onplay={() => playSimilar(index)}>
-        <button class="flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent" onclick={() => playSimilar(index)}>
           {#if song.coverArtUrl}
             <img class="h-9 w-9 shrink-0 rounded object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
           {:else}
@@ -469,51 +197,63 @@
       </SongContextMenu>
     {/each}
   </div>
-{/if}
 
-<div class="mb-2 flex items-center justify-between">
-  <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Smart recommendations</h3>
-  {#if recLoading}
-    <p class="text-sm text-muted-foreground">Loading...</p>
-  {/if}
-</div>
-{#if recError}
-  <p class="mb-3 text-sm text-destructive">{recError}</p>
-{/if}
-
-<div class="divide-y divide-border overflow-hidden rounded-lg border border-input">
-  {#each hybridRecs as track (track.id)}
-    {#if track.playable && track.subsonicSong}
-      <SongContextMenu song={track.subsonicSong} onplay={() => useRecommendation(track)}>
-        <div class="flex items-center gap-3 bg-secondary px-3 py-2.5">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <p class="truncate text-sm font-semibold">{track.title}</p>
-              <ExternalSourceBadge id={track.subsonicSong?.id} class="shrink-0" />
+  {#if results.albums.length > 0}
+    <div class="mb-2 flex items-center justify-between">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Albums</h3>
+    </div>
+    <div class="page-section mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
+      {#each results.albums as album, index (album.id)}
+        <AlbumContextMenu {album}>
+          <button
+            class="stagger-row flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
+            style:--stagger-index={index}
+            onclick={() => goto(`/album/${encodeURIComponent(album.id)}`)}
+          >
+            {#if album.coverArtUrl}
+              <img class="h-10 w-10 shrink-0 rounded object-cover" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+            {:else}
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
+                {initials(album.name)}
+              </div>
+            {/if}
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-semibold">{album.name}</p>
+              <p class="truncate text-xs text-muted-foreground">{album.artist}</p>
             </div>
-            <p class="truncate text-xs text-muted-foreground">{track.artist}</p>
+            <Badge variant="outline">Album</Badge>
+          </button>
+        </AlbumContextMenu>
+      {/each}
+    </div>
+  {/if}
+
+  {#if results.recommendations.length > 0}
+    <div class="mb-2 flex items-center justify-between">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recommendations</h3>
+    </div>
+    <div class="page-section divide-y divide-border overflow-hidden rounded-lg border border-input">
+      {#each results.recommendations as song, index (song.id)}
+        <SongContextMenu {song} onplay={() => playRecommendation(index)}>
+          <div class="stagger-row flex items-center gap-3 bg-secondary px-3 py-2.5" style:--stagger-index={index}>
+            {#if song.coverArtUrl}
+              <img class="h-9 w-9 shrink-0 rounded object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+            {:else}
+              <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
+                {initials(song.title)}
+              </div>
+            {/if}
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <p class="truncate text-sm font-semibold">{song.title}</p>
+                <ExternalSourceBadge id={song.id} class="shrink-0" />
+              </div>
+              <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
+            </div>
+            <Button size="sm" onclick={() => playRecommendation(index)}>Play</Button>
           </div>
-          <div class="flex shrink-0 items-center gap-2">
-            <Badge class="bg-emerald-500/20 text-emerald-200">Playable</Badge>
-            <Button size="sm" onclick={() => useRecommendation(track)}>Play</Button>
-          </div>
-        </div>
-      </SongContextMenu>
-    {:else}
-      <div class="flex items-center gap-3 bg-secondary px-3 py-2.5">
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2">
-            <p class="truncate text-sm font-semibold">{track.title}</p>
-            <ExternalSourceBadge id={track.id} class="shrink-0" />
-          </div>
-          <p class="truncate text-xs text-muted-foreground">{track.artist}</p>
-        </div>
-        <div class="flex shrink-0 items-center gap-2">
-          <Badge variant="outline">Last.fm only</Badge>
-          <Button size="sm" variant="secondary" onclick={() => useRecommendation(track)}>Open</Button>
-        </div>
-      </div>
-    {/if}
-  {/each}
-</div>
+        </SongContextMenu>
+      {/each}
+    </div>
+  {/if}
 {/if}

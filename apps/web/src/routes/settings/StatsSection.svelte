@@ -12,7 +12,7 @@
     Music2,
   } from '@lucide/svelte';
   import { onMount } from 'svelte';
-  import { fetchLibraryStats, fetchServiceHealth, type LibraryStatsPayload } from '$lib/api';
+  import { fetchLibraryStats, fetchServiceHealth, type LibraryStatsPayload } from '$lib/servers';
   import type { ServiceStatus } from '@player/shared/contracts';
 
   // Increment from outside to trigger a health + stats reload

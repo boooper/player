@@ -1,4 +1,4 @@
-# Naviarr
+# Madrify
 
 A cross-platform desktop music player for Subsonic and Jellyfin servers, built with Tauri and SvelteKit.
 

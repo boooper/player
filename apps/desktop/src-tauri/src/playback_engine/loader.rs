@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use reqwest::header::CONTENT_TYPE;
 use tauri::State;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
+use url::Url;
 
 use crate::{
     commands::{library::resolve_playback_song, media::Song},
@@ -11,6 +12,54 @@ use crate::{
 };
 
 use super::{decode::decode_audio, output::PlaybackHandle};
+
+fn is_local_stream(stream_url: &str) -> bool {
+    if let Ok(url) = Url::parse(stream_url) {
+        if url.scheme() == "file" {
+            return true;
+        }
+    }
+
+    std::path::Path::new(stream_url).exists()
+}
+
+async fn read_stream_bytes(
+    state: &State<'_, AppState>,
+    stream_url: &str,
+) -> Result<(Vec<u8>, String), String> {
+    if let Ok(url) = Url::parse(stream_url) {
+        if url.scheme() == "file" {
+            let path = url
+                .to_file_path()
+                .map_err(|_| "Invalid local file path for playback".to_string())?;
+            let bytes = tokio::fs::read(&path).await.map_err(|error| error.to_string())?;
+            return Ok((bytes, String::new()));
+        }
+    }
+
+    if std::path::Path::new(stream_url).exists() {
+        let bytes = tokio::fs::read(stream_url).await.map_err(|error| error.to_string())?;
+        return Ok((bytes, String::new()));
+    }
+
+    let response = state
+        .http
+        .get(stream_url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+
+    Ok((bytes.to_vec(), content_type))
+}
 
 async fn begin_inflight(
     inflight: &AsyncMutex<HashMap<String, Arc<Notify>>>,
@@ -59,21 +108,27 @@ pub async fn load_track_payload(
         }
 
         let result = async {
-            let response = state
-                .http
-                .get(&playback_song.stream_url)
-                .send()
-                .await
-                .map_err(|error| error.to_string())?
-                .error_for_status()
-                .map_err(|error| error.to_string())?;
-            let content_type = response
-                .headers()
-                .get(CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+            let cacheable = !is_local_stream(&playback_song.stream_url);
+            let (bytes, content_type) = if cacheable {
+                match state.playback_cache.read(&requested_song.id)? {
+                    Some(cached) => cached,
+                    None => {
+                        let fetched = read_stream_bytes(state, &playback_song.stream_url).await?;
+                        state
+                            .playback_cache
+                            .write(
+                                &requested_song.id,
+                                "audio",
+                                &playback_song.stream_url,
+                                &fetched.1,
+                                &fetched.0,
+                            )?;
+                        fetched
+                    }
+                }
+            } else {
+                read_stream_bytes(state, &playback_song.stream_url).await?
+            };
 
             if bytes.len() >= 16 {
                 eprintln!(
@@ -92,7 +147,7 @@ pub async fn load_track_payload(
 
             let (output_channels, output_sample_rate) = playback_handle(state)?.output_config()?;
             let (samples, _channels, _sample_rate) =
-                decode_audio(bytes.to_vec(), &content_type, output_channels, output_sample_rate)?;
+                decode_audio(bytes, &content_type, output_channels, output_sample_rate)?;
 
             let payload = TrackPayload {
                 song: requested_song.clone(),

@@ -2,7 +2,7 @@
   import { Heart, ListMusic, Play, Pause, Music2, Disc3, Mic2 } from '@lucide/svelte';
   import { page } from '$app/state';
   import { isPlaying, subsonicPlaylists, starredSongIds } from '$lib/stores/player';
-  import type { Song } from '$lib/api';
+  import type { Song } from '$lib/servers';
   import PlaylistContextMenu from '$lib/components/PlaylistContextMenu.svelte';
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
 
@@ -38,9 +38,9 @@
     <li>
       <a
         href={nav.href}
-        class="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-white/10 {page.url.pathname === nav.href ? 'bg-white/10 text-foreground' : 'text-muted-foreground'}"
+        class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {page.url.pathname === nav.href ? 'bg-white/[0.06] text-foreground' : 'text-muted-foreground hover:bg-white/[0.04] hover:text-foreground'}"
       >
-        <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-secondary">
+        <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.04]">
           <nav.Icon class="size-4 text-muted-foreground" />
         </div>
         <div class="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
@@ -51,13 +51,13 @@
     </li>
   {/each}
 
-  <li class="px-2 py-1 group-data-[collapsible=icon]:hidden"><div class="h-px bg-white/5"></div></li>
+  <li class="px-2 py-1 group-data-[collapsible=icon]:hidden"><div class="h-px bg-border"></div></li>
 
   <!-- Liked Songs -->
   <li>
     <a
       href="/favorites"
-      class="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-white/10"
+      class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
     >
       <div class="relative size-10 shrink-0 flex-none overflow-hidden rounded-md">
         {#if starredSongs.length >= 4}
@@ -86,13 +86,13 @@
       <PlaylistContextMenu {playlist} onplay={() => onPlayPlaylist(playlist.id)} triggerClass="block w-full">
         <a
           href={`/playlist/${encodeURIComponent(playlist.id)}`}
-          class="group/row flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-white/10 {isActive ? 'bg-white/5' : ''}"
+          class="group/row flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {isActive ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}"
         >
           <div class="group/cover relative size-10 shrink-0 flex-none overflow-hidden rounded-md">
             {#if playlist.coverArtUrl}
               <img src={playlist.coverArtUrl} alt={playlist.name} class="h-full w-full object-cover" />
             {:else}
-              <div class="flex h-full w-full items-center justify-center bg-secondary">
+              <div class="flex h-full w-full items-center justify-center rounded-md bg-white/[0.04]">
                 <ListMusic class="size-4 text-muted-foreground" />
               </div>
             {/if}
@@ -124,7 +124,7 @@
   {/each}
 
   {#if likedArtists.length > 0}
-    <li class="px-2 py-1 group-data-[collapsible=icon]:hidden"><div class="h-px bg-white/5"></div></li>
+    <li class="px-2 py-1 group-data-[collapsible=icon]:hidden"><div class="h-px bg-border"></div></li>
   {/if}
 
   <!-- Liked Artists -->
@@ -133,7 +133,7 @@
       <ArtistContextMenu name={artist} triggerClass="block w-full">
         <a
           href={`/artist/${encodeURIComponent(artist)}`}
-          class="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-white/10"
+          class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
         >
           <div class="size-10 shrink-0 flex-none overflow-hidden rounded-full">
             {#if artistPhotos[artist]}

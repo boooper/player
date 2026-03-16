@@ -3,6 +3,7 @@ pub mod health;
 pub mod jellyfin;
 pub mod lastfm;
 pub mod library;
+pub mod local;
 pub mod liked_artists;
 pub mod lyrics;
 pub mod media;

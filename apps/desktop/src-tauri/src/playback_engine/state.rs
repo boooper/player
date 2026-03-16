@@ -176,6 +176,12 @@ impl PlaybackState {
         self.cache.get(song_id).cloned()
     }
 
+    pub fn clear_cached_tracks(&mut self) {
+        self.preloaded = None;
+        self.cache.clear();
+        self.cache_order.clear();
+    }
+
     pub fn play(&mut self) {
         if self.track.is_some() {
             self.playing = true;

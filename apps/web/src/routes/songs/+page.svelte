@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { Play, Pause, Music2, Search, X, Clock } from '@lucide/svelte';
+  import { Play, Pause, Music2, Search, X } from '@lucide/svelte';
 
-  import { searchSongs, type Song } from '$lib/api';
-  import { focusTrack, playQueue, playingFrom, recentlyPlayedSongs, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { searchSongs, type Song } from '$lib/servers';
+  import { focusTrack, playQueue, playingFrom, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import { formatClockDuration } from '$lib/utils';
 
   // All songs loaded from the library on mount.
   let allSongs = $state<Song[]>([]);
@@ -33,11 +34,7 @@
   }
 
   function formatDuration(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    return `${m}:${String(s).padStart(2, '0')}`;
+    return formatClockDuration(seconds);
   }
 
   function initials(name: string): string {
@@ -95,53 +92,6 @@
     {/if}
   </div>
 
-  <!-- Recently Played -->
-  {#if $recentlyPlayedSongs.length > 0 && !query.trim()}
-    <div class="space-y-2">
-      <div class="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/60">
-        <Clock class="size-3.5" />
-        <span>Recently Played</span>
-      </div>
-      <div class="space-y-0.5">
-        {#each $recentlyPlayedSongs.slice(0, 5) as song (song.id)}
-          <SongContextMenu {song} onplay={() => { focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album }); playQueue([song], 0); playingFrom.set({ type: 'search', name: 'All Songs', href: '/songs' }); }}>
-            <button
-              class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
-              style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
-              onclick={() => { focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album }); playQueue([song], 0); playingFrom.set({ type: 'search', name: 'All Songs', href: '/songs' }); }}
-            >
-              <span class="relative flex size-7 shrink-0 items-center justify-center mx-auto">
-                <Clock class="absolute inset-0 m-auto size-3.5 text-muted-foreground/50 transition-all duration-150 group-hover:scale-50 group-hover:opacity-0" />
-                <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
-                  <Play class="size-4" fill="currentColor" />
-                </span>
-              </span>
-              <div class="flex min-w-0 items-center gap-3">
-                {#if song.coverArtUrl}
-                  <img class="size-10 shrink-0 rounded-md object-cover shadow-md" src={song.coverArtUrl} alt={song.title} loading="lazy" />
-                {:else}
-                  <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold shadow-md">
-                    <Music2 class="size-4 text-white/50" />
-                  </div>
-                {/if}
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground">{song.title}</p>
-                  <SongArtistLinks
-                    artist={song.artist}
-                    class="truncate text-xs text-muted-foreground"
-                    linkClass="hover:underline hover:text-foreground transition-colors duration-150"
-                  />
-                </div>
-              </div>
-              <span class="hidden truncate text-sm text-muted-foreground md:block">{song.album}</span>
-              <span class="text-right text-xs tabular-nums text-muted-foreground">{formatDuration(song.duration ?? 0)}</span>
-            </button>
-          </SongContextMenu>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
   <!-- Search / filter bar -->
   <div class="relative">
     <Search class="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -182,8 +132,9 @@
           {@const isCurrentTrack = song.id === currentTrackId}
           <SongContextMenu {song} onplay={() => playSong(index)}>
             <button
-              class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
+              class="song-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
               style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
+              style:--row-index={index}
               onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playSong(index)}
             >
               <!-- Track # / Play icon crossfade -->
@@ -255,3 +206,31 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .song-row {
+    animation: song-row-in 280ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+    animation-delay: min(calc(var(--row-index) * 11ms), 260ms);
+    transition:
+      transform 150ms ease,
+      background-color 150ms ease,
+      box-shadow 150ms ease;
+  }
+
+  .song-row:hover {
+    transform: translateX(2px);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+  }
+
+  @keyframes song-row-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>

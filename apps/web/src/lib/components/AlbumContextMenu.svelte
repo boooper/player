@@ -6,7 +6,7 @@
   import * as ContextMenu from '$lib/components/ui/context-menu';
   import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists } from '$lib/stores/player';
   import { get } from 'svelte/store';
-  import { createPlaylist, fetchAlbumSongs, fetchPlaylists, materializeSong, searchSongs, type Album } from '$lib/api';
+  import { createPlaylist, fetchAlbumSongs, fetchPlaylists, materializeSong, searchSongs, type Album } from '$lib/servers';
 
   let { album, onplay, children, triggerClass }: {
     album: Album;

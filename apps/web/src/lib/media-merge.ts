@@ -1,4 +1,4 @@
-import type { Album, Song } from '$lib/api';
+import type { Album, Song } from '$lib/servers';
 
 export type MergedAlbum = Album & {
   sourceIds: string[];

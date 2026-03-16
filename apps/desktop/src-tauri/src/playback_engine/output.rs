@@ -141,6 +141,13 @@ impl PlaybackHandle {
             Ok(())
         })
     }
+
+    pub fn clear_cached_tracks(&self) -> Result<(), String> {
+        self.with_state(|state| {
+            state.clear_cached_tracks();
+            Ok(())
+        })
+    }
 }
 
 fn build_stream<T>(

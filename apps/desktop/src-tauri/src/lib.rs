@@ -22,6 +22,8 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub cast_session: Mutex<Option<CastSessionInfo>>,
     pub playback: playback_engine::PlaybackHandle,
+    pub playback_cache: playback_engine::DiskCache,
+    pub artwork_cache: playback_engine::DiskCache,
 }
 
 // AppState is Send + Sync because:
@@ -32,6 +34,10 @@ unsafe impl Sync for AppState {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let updater_pubkey = option_env!("TAURI_UPDATER_PUBKEY")
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Show a message then bring the existing window to front
@@ -44,10 +50,12 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .setup(|app| {
+        .setup(move |app| {
             // Initialise SQLite database in app data directory
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            let cache_dir = app.path().app_cache_dir()?;
+            std::fs::create_dir_all(&cache_dir)?;
             let db_path = data_dir.join("player.db");
             let conn = db::open(&db_path).expect("failed to open database");
 
@@ -56,6 +64,10 @@ pub fn run() {
                 http: reqwest::Client::new(),
                 cast_session: Mutex::new(None),
                 playback: playback_engine::PlaybackHandle::new()
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
+                playback_cache: playback_engine::DiskCache::new(cache_dir.join("audio"))
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
+                artwork_cache: playback_engine::DiskCache::new(cache_dir.join("artwork"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
             });
 
@@ -70,7 +82,15 @@ pub fn run() {
             app.handle().plugin(tauri_plugin_dialog::init())?;
             app.handle().plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))?;
             app.handle().plugin(tauri_plugin_os::init())?;
+            app.handle().plugin(tauri_plugin_store::Builder::default().build())?;
             app.handle().plugin(tauri_plugin_drpc::init())?;
+            if let Some(pubkey) = updater_pubkey {
+                app.handle().plugin(
+                    tauri_plugin_updater::Builder::new()
+                        .pubkey(pubkey)
+                        .build(),
+                )?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -78,6 +98,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::clear_database,
+            commands::settings::clear_cache,
             // profiles
             commands::profiles::get_profiles,
             commands::profiles::create_profile,
@@ -101,6 +122,7 @@ pub fn run() {
             commands::lastfm::lfm_status,
             // library (provider-agnostic — dispatches to Subsonic or Jellyfin)
             commands::library::library_search,
+            commands::library::library_search_bundle,
             commands::library::library_similar,
             commands::library::library_playlists,
             commands::library::library_playlist,
@@ -135,6 +157,7 @@ pub fn run() {
             commands::playback::playback_set_volume,
             commands::playback::playback_set_eq,
             commands::playback::playback_status,
+            commands::playback::playback_is_cached,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

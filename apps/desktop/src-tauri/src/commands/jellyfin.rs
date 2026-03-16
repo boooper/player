@@ -12,7 +12,7 @@ use crate::commands::media::{AlbumDetail, AlbumFull, Album, Playlist, PlaylistDe
 
 fn auth_header(p: &ActiveProfile) -> String {
     format!(
-        r#"MediaBrowser Client="naviarr", Device="Desktop", DeviceId="naviarr-desktop", Version="1.0.0", Token="{}""#,
+        r#"MediaBrowser Client="madrify", Device="Desktop", DeviceId="madrify-desktop", Version="1.0.0", Token="{}""#,
         p.password
     )
 }

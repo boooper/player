@@ -7,9 +7,13 @@
 </script>
 
 <div class="space-y-8">
-  <StatsSection refreshKey={settings.statsRefreshKey} />
-  <ServersSection
-    bind:profiles={settings.profiles}
-    onHealthChange={settings.refreshStats}
-  />
+  <div class="page-section">
+    <StatsSection refreshKey={settings.statsRefreshKey} />
+  </div>
+  <div class="page-section">
+    <ServersSection
+      bind:profiles={settings.profiles}
+      onHealthChange={settings.refreshStats}
+    />
+  </div>
 </div>

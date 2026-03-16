@@ -23,6 +23,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "EQ_ENABLED",
     "EQ_PRESET",
     "EQ_BANDS",
+    "DISCORD_RPC_ENABLED",
 ];
 
 #[tauri::command]
@@ -105,4 +106,12 @@ pub fn clear_database(state: State<'_, AppState>) -> Result<(), String> {
          DELETE FROM liked_artists;"
     )
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
+    state.playback.clear_cached_tracks()?;
+    state.playback_cache.clear()?;
+    state.artwork_cache.clear()?;
+    Ok(())
 }

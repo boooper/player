@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { Mic2, Search, X } from '@lucide/svelte';
 
-  import { fetchAlbumList } from '$lib/api';
-  import { fetchAudioDbArtistPhoto } from '$lib/audiodb';
+  import { fetchAlbumList } from '$lib/servers';
+  import { getArtistArtworkMap } from '$lib/discovery';
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
 
   type ArtistEntry = { name: string; imageUrl: string };
@@ -31,7 +32,7 @@
     try {
       // Fetch a large album list and extract unique artist names.
       const albums = await fetchAlbumList('newest', 500);
-      const seen = new Set<string>();
+      const seen = new SvelteSet<string>();
       const entries: ArtistEntry[] = [];
       for (const album of albums) {
         if (album.artist && !seen.has(album.artist)) {
@@ -43,11 +44,11 @@
       entries.sort((a, b) => a.name.localeCompare(b.name));
       allArtists = entries;
 
-      // Hydrate photos progressively in the background.
-      entries.forEach((entry, i) => {
-        fetchAudioDbArtistPhoto(entry.name).then((url) => {
-          if (url) allArtists[i] = { ...allArtists[i], imageUrl: url };
-        });
+      getArtistArtworkMap(entries.map((entry) => entry.name)).then((images) => {
+        allArtists = allArtists.map((artist) => ({
+          ...artist,
+          imageUrl: images[artist.name] || artist.imageUrl
+        }));
       });
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load artists.';
@@ -96,11 +97,12 @@
   <!-- Grid -->
   {#if artists.length > 0}
     <div class="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-4">
-      {#each artists as artist (artist.name)}
+      {#each artists as artist, index (artist.name)}
         <ArtistContextMenu name={artist.name}>
         <a
           href={`/artist/${encodeURIComponent(artist.name)}`}
-          class="group flex flex-col items-center gap-3 rounded-xl p-4 transition-colors hover:bg-white/5"
+          class="artist-tile group flex flex-col items-center gap-3 rounded-xl p-4 transition-colors hover:bg-white/5"
+          style={`--tile-index:${index};`}
         >
           <div class="size-24 shrink-0 overflow-hidden rounded-full shadow-md ring-1 ring-white/10">
             {#if artist.imageUrl}
@@ -132,3 +134,34 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .artist-tile {
+    animation: artist-tile-in 340ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+    animation-delay: min(calc(var(--tile-index) * 18ms), 260ms);
+    transform-origin: center bottom;
+    transition:
+      transform 180ms ease,
+      background-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .artist-tile:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      0 14px 24px rgb(0 0 0 / 0.14),
+      inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+
+  @keyframes artist-tile-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.985);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+</style>

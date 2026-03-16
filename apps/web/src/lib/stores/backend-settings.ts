@@ -1,7 +1,7 @@
+import { get, writable } from 'svelte/store';
 import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
-import { writable, get } from 'svelte/store';
 
-export type AppSettings = {
+export type BackendSettings = {
   lastFmApiKey: string;
   recommendationProvider: string;
   metadataProvider: string;
@@ -13,9 +13,10 @@ export type AppSettings = {
   eqEnabled: boolean;
   eqPreset: EqPresetId;
   eqBands: EqBandValues;
+  discordRpcEnabled: boolean;
 };
 
-export const appSettings = writable<AppSettings>({
+export const defaultBackendSettings: BackendSettings = {
   lastFmApiKey: '',
   recommendationProvider: 'lastfm',
   metadataProvider: 'both',
@@ -26,29 +27,28 @@ export const appSettings = writable<AppSettings>({
   crossfadeSeconds: 4,
   eqEnabled: false,
   eqPreset: 'flat',
-  eqBands: DEFAULT_EQ_BANDS
-});
+  eqBands: DEFAULT_EQ_BANDS,
+  discordRpcEnabled: true,
+};
+
+export const backendSettings = writable<BackendSettings>(defaultBackendSettings);
 
 export function getLastFmApiKey(): string {
-  return get(appSettings).lastFmApiKey;
+  return get(backendSettings).lastFmApiKey;
 }
 
 export function getRecommendationProviderSetting(): string {
-  return get(appSettings).recommendationProvider;
+  return get(backendSettings).recommendationProvider;
 }
 
 export function getMetadataProviderSetting(): string {
-  return get(appSettings).metadataProvider;
+  return get(backendSettings).metadataProvider;
 }
 
 export function getListenBrainzUsername(): string {
-  return get(appSettings).listenBrainzUsername;
+  return get(backendSettings).listenBrainzUsername;
 }
 
 export function getListenBrainzToken(): string {
-  return get(appSettings).listenBrainzToken;
+  return get(backendSettings).listenBrainzToken;
 }
-
-// Increment this to signal to the layout that library data should be reloaded
-// (playlists, starred songs, status indicators, liked artists).
-export const libraryRefresh = writable(0);

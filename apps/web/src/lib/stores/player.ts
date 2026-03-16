@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 
-import type { Song, Playlist } from '$lib/api';
+import type { Song, Playlist } from '$lib/servers';
+import { readUiJson, writeUiJson } from '$lib/ui-storage';
 
 export const queue = writable<Song[]>([]);
 export const currentIndex = writable(0);
@@ -162,50 +163,43 @@ export type RecentItem = {
   type: 'album' | 'playlist' | 'artist';
 };
 
-const RECENT_KEY = 'naviarr_recently_played';
+const RECENT_KEY = 'madrify_recently_played';
+const LEGACY_RECENT_KEY = 'naviarr_recently_played';
 
-function loadRecent(): RecentItem[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
-  } catch {
-    return [];
-  }
-}
-
-export const recentlyPlayed = writable<RecentItem[]>(loadRecent());
+export const recentlyPlayed = writable<RecentItem[]>([]);
 
 export function addRecentlyPlayed(item: RecentItem): void {
   recentlyPlayed.update((list) => {
     const filtered = list.filter((i) => i.id !== item.id);
     const next = [item, ...filtered].slice(0, 8);
-    try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch {}
+    void writeUiJson(RECENT_KEY, next, [LEGACY_RECENT_KEY]);
     return next;
   });
 }
 
 // ─── Recently Played Songs ────────────────────────────────────────────────────
 
-const RECENT_SONGS_KEY = 'naviarr_recently_played_songs';
+const RECENT_SONGS_KEY = 'madrify_recently_played_songs';
+const LEGACY_RECENT_SONGS_KEY = 'naviarr_recently_played_songs';
 
-function loadRecentSongs(): Song[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    return JSON.parse(localStorage.getItem(RECENT_SONGS_KEY) ?? '[]');
-  } catch {
-    return [];
-  }
-}
-
-export const recentlyPlayedSongs = writable<Song[]>(loadRecentSongs());
+export const recentlyPlayedSongs = writable<Song[]>([]);
 
 export function addRecentlyPlayedSong(song: Song): void {
   recentlyPlayedSongs.update((list) => {
     const filtered = list.filter((s) => s.id !== song.id);
     const next = [song, ...filtered].slice(0, 20);
-    try { localStorage.setItem(RECENT_SONGS_KEY, JSON.stringify(next)); } catch {}
+    void writeUiJson(RECENT_SONGS_KEY, next, [LEGACY_RECENT_SONGS_KEY]);
     return next;
   });
+}
+
+export async function hydratePlayerUiState(): Promise<void> {
+  const [recentItems, recentSongs] = await Promise.all([
+    readUiJson<RecentItem[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]),
+    readUiJson<Song[]>(RECENT_SONGS_KEY, [], [LEGACY_RECENT_SONGS_KEY])
+  ]);
+  recentlyPlayed.set(recentItems);
+  recentlyPlayedSongs.set(recentSongs);
 }
 
 export function playNextInQueue(song: Song): void {
@@ -253,8 +247,8 @@ export async function startRadio(
   apiKey: string,
   limit = 25
 ): Promise<{ queued: number }> {
-  const { fetchUpNextSongs } = await import('$lib/api');
-  const tracks = await fetchUpNextSongs({ apiKey, artist: song.artist, title: song.title, limit });
+  const { getUpNextSongs } = await import('$lib/discovery');
+  const tracks = await getUpNextSongs({ artist: song.artist, title: song.title, limit });
   if (!tracks.length) return { queued: 0 };
   const all = [song, ...tracks];
   queue.set(all);

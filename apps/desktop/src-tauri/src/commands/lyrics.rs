@@ -214,7 +214,7 @@ pub async fn fetch_lyrics(
                     ("album_name",  album.as_str()),
                     ("duration",    dur.as_str()),
                 ])
-                .header("Lrclib-Client", "Naviarr")
+                .header("Lrclib-Client", "Madrify")
                 .timeout(std::time::Duration::from_secs(10))
                 .send().await.ok()?;
             if !r.status().is_success() { return None; }
@@ -224,7 +224,7 @@ pub async fn fetch_lyrics(
             let r = state.http
                 .get("https://lrclib.net/api/search")
                 .query(&[("track_name", title.as_str()), ("artist_name", artist.as_str())])
-                .header("Lrclib-Client", "Naviarr")
+                .header("Lrclib-Client", "Madrify")
                 .timeout(std::time::Duration::from_secs(10))
                 .send().await.ok()?;
             if !r.status().is_success() { return None; }

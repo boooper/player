@@ -6,8 +6,8 @@
     fetchLikedArtists, saveLikedArtist, removeLikedArtist,
     fetchStarredSongs, fetchAlbumList, fetchAlbumSongs, fetchPlaylistSongs,
     type Song, type Album, type Playlist
-  } from '$lib/api';
-  import { getTopArtists, type Artist } from '$lib/metadata';
+  } from '$lib/servers';
+  import { getTopArtists, type DiscoveryArtist as Artist } from '$lib/discovery';
   import {
     recentlyPlayed, subsonicPlaylists, focusTrack, playQueue, playingFrom,
     addRecentlyPlayed, isPlaying, togglePlayRequest, type RecentItem
@@ -17,6 +17,7 @@
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
   import PlaylistContextMenu from '$lib/components/PlaylistContextMenu.svelte';
   import { goto } from '$app/navigation';
+  import { formatClockDuration } from '$lib/utils';
 
   let liked = $state<string[]>([]);
   let top = $state<Artist[]>([]);
@@ -149,7 +150,7 @@
 </script>
 
 <!-- Greeting -->
-<h1 class="mb-8 text-3xl font-bold tracking-tight">{greeting()}</h1>
+<h1 class="app-section-title mb-8 text-3xl font-bold tracking-tight">{greeting()}</h1>
 
 {#if error}
   <p class="mb-3 text-sm text-destructive">{error}</p>
@@ -157,14 +158,11 @@
 
 <!-- Recently played grid -->
 {#if $recentlyPlayed.length > 0}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <h2 class="mb-4 text-xl font-bold">Recently played</h2>
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {#each $recentlyPlayed as item (item.id)}
-        <a
-          href={item.href}
-          class="group relative flex items-center gap-3 overflow-hidden rounded-md bg-secondary/80 transition hover:bg-accent"
-        >
+      {#each $recentlyPlayed as item, index (item.id)}
+        <a href={item.href} class="app-card app-hover stagger-item group relative flex items-center gap-3 overflow-hidden rounded-2xl" style={`--stagger-index:${index};`}>
           {#if item.coverArtUrl}
             <img class="size-16 shrink-0 object-cover" src={item.coverArtUrl} alt={item.name} loading="lazy" />
           {:else}
@@ -194,21 +192,18 @@
 
 <!-- Playlists carousel -->
 {#if $subsonicPlaylists.length > 0}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xl font-bold">Your playlists</h2>
+      <h2 class="app-section-title text-xl font-bold">Your playlists</h2>
       <div class="flex gap-1">
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(playlistCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(playlistCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(playlistCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(playlistCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
       </div>
     </div>
     <div bind:this={playlistCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each $subsonicPlaylists as pl (pl.id)}
+      {#each $subsonicPlaylists as pl, index (pl.id)}
         <PlaylistContextMenu playlist={pl} triggerClass="contents">
-          <a
-            href={`/playlist/${encodeURIComponent(pl.id)}`}
-            class="group flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent"
-          >
+          <a href={`/playlist/${encodeURIComponent(pl.id)}`} class="app-card app-hover stagger-item group flex w-40 shrink-0 flex-col gap-2 rounded-2xl p-3" style={`--stagger-index:${index};`}>
             <div class="relative">
               {#if pl.coverArtUrl}
                 <img class="aspect-square w-full rounded-md object-cover shadow-md" src={pl.coverArtUrl} alt={pl.name} loading="lazy" />
@@ -244,12 +239,12 @@
 
 <!-- Newly added albums carousel -->
 {#if newestAlbums.length > 0 || loading}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xl font-bold">Newly added</h2>
+      <h2 class="app-section-title text-xl font-bold">Newly added</h2>
       <div class="flex gap-1">
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(newestCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(newestCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(newestCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(newestCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
       </div>
     </div>
     <div bind:this={newestCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
@@ -261,9 +256,9 @@
           </div>
         {/each}
       {:else}
-        {#each newestAlbums as album (album.id)}
+        {#each newestAlbums as album, index (album.id)}
           <AlbumContextMenu {album} onplay={() => playAlbum(album)} triggerClass="contents">
-            <div class="group relative flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
+            <div class="app-card app-hover stagger-item group relative flex w-40 shrink-0 flex-col gap-2 rounded-2xl p-3" style={`--stagger-index:${index};`}>
             <a href={`/album/${encodeURIComponent(album.id)}`} class="absolute inset-0 rounded-lg" aria-label={album.name}></a>
             <div class="relative">
               {#if album.coverArtUrl}
@@ -299,9 +294,9 @@
 
 <!-- Starred songs strip -->
 {#if starredSongs.length > 0}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xl font-bold">Liked songs</h2>
+      <h2 class="app-section-title text-xl font-bold">Liked songs</h2>
       <a href="/favorites" class="text-sm text-muted-foreground hover:text-foreground">See all</a>
     </div>
     <!-- Column headers -->
@@ -316,8 +311,9 @@
       {#each starredSongs.slice(0, 6) as song, i (song.id)}
         <SongContextMenu {song} onplay={() => playSong(starredSongs, i)}>
           <button
-            class="group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
+            class="app-card-soft stagger-row group grid w-full items-center gap-4 rounded-xl px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
             style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
+            style:--stagger-index={i}
             onclick={() => playSong(starredSongs, i)}
           >
             <!-- Track # / Play icon crossfade -->
@@ -348,7 +344,7 @@
               onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); } }}
             >{song.album}</span>
             <!-- Duration -->
-            <span class="text-right text-xs tabular-nums text-muted-foreground">{song.duration ? `${Math.floor(song.duration / 60)}:${String(song.duration % 60).padStart(2, '0')}` : '—'}</span>
+            <span class="text-right text-xs tabular-nums text-muted-foreground">{song.duration ? formatClockDuration(song.duration) : '—'}</span>
           </button>
         </SongContextMenu>
       {/each}
@@ -358,18 +354,18 @@
 
 <!-- Random picks carousel -->
 {#if randomAlbums.length > 0}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xl font-bold">You might like</h2>
+      <h2 class="app-section-title text-xl font-bold">You might like</h2>
       <div class="flex gap-1">
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(randomCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(randomCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(randomCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(randomCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
       </div>
     </div>
     <div bind:this={randomCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each randomAlbums as album (album.id)}
+      {#each randomAlbums as album, index (album.id)}
         <AlbumContextMenu {album} onplay={() => playAlbum(album)} triggerClass="contents">
-          <div class="group relative flex w-40 shrink-0 flex-col gap-2 rounded-lg bg-secondary/60 p-3 transition hover:bg-accent">
+          <div class="app-card app-hover stagger-item group relative flex w-40 shrink-0 flex-col gap-2 rounded-2xl p-3" style={`--stagger-index:${index};`}>
           <a href={`/album/${encodeURIComponent(album.id)}`} class="absolute inset-0 rounded-lg" aria-label={album.name}></a>
           <div class="relative">
             {#if album.coverArtUrl}
@@ -404,21 +400,18 @@
 
 <!-- Your Artists carousel -->
 {#if liked.length > 0}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xl font-bold">Your artists</h2>
+      <h2 class="app-section-title text-xl font-bold">Your artists</h2>
       <div class="flex gap-1">
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(likedCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(likedCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(likedCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(likedCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
       </div>
     </div>
     <div bind:this={likedCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each liked as artist (artist)}
+      {#each liked as artist, index (artist)}
         <ArtistContextMenu name={artist} triggerClass="contents">
-          <a
-            href={`/artist/${encodeURIComponent(artist)}`}
-            class="group flex w-36 shrink-0 flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent"
-          >
+          <a href={`/artist/${encodeURIComponent(artist)}`} class="app-card app-hover stagger-item group flex w-36 shrink-0 flex-col items-center gap-2 rounded-2xl p-3 text-center" style={`--stagger-index:${index};`}>
           <div class="grid size-20 place-items-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-lg font-bold">
             {artist.slice(0, 2).toUpperCase()}
           </div>
@@ -433,18 +426,18 @@
 
 <!-- Trending Artists carousel -->
 {#if top.length > 0}
-  <section class="mb-10">
+  <section class="page-section mb-10">
     <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-xl font-bold">Trending artists</h2>
+      <h2 class="app-section-title text-xl font-bold">Trending artists</h2>
       <div class="flex gap-1">
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(trendingCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
-        <button class="grid size-8 place-items-center rounded-full bg-secondary hover:bg-accent" onclick={() => scroll(trendingCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(trendingCarouselEl, -1)} aria-label="Scroll left"><ChevronLeft class="size-4" /></button>
+        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scroll(trendingCarouselEl, 1)} aria-label="Scroll right"><ChevronRight class="size-4" /></button>
       </div>
     </div>
     <div bind:this={trendingCarouselEl} class="flex gap-4 overflow-x-auto pb-2" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each top as artist (artist.id)}
+      {#each top as artist, index (artist.id)}
         <ArtistContextMenu name={artist.name} triggerClass="contents">
-          <div class="group relative flex w-36 shrink-0 flex-col items-center gap-2 rounded-lg p-3 text-center transition hover:bg-accent">
+          <div class="app-card app-hover stagger-item group relative flex w-36 shrink-0 flex-col items-center gap-2 rounded-2xl p-3 text-center" style={`--stagger-index:${index};`}>
           <a href={`/artist/${encodeURIComponent(artist.name)}`} class="absolute inset-0 rounded-lg" aria-label={artist.name}></a>
           {#if artist.imageUrl}
             <img class="size-20 rounded-full object-cover" src={artist.imageUrl} alt={artist.name} loading="lazy" />
