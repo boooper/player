@@ -23,6 +23,7 @@ class SettingsController {
   listenBrainzUsername = $state('');
   listenBrainzToken = $state('');
   listenBrainzTokenConfigured = $state(false);
+  lyricsProvider = $state('auto');
   metadataProvider = $state('both');
   recommendationProvider = $state('lastfm');
   isMobile = $state(false);
@@ -73,6 +74,7 @@ class SettingsController {
         this.metadataProvider = settings.metadataProvider;
         this.listenBrainzUsername = settings.listenBrainzUsername;
         this.listenBrainzTokenConfigured = settings.listenBrainzTokenConfigured;
+        this.lyricsProvider = settings.lyricsProvider ?? 'auto';
         this.crossfadeSeconds = settings.crossfadeSeconds;
         this.eqEnabled = settings.eqEnabled;
         this.eqPreset = settings.eqPreset;
@@ -94,6 +96,7 @@ class SettingsController {
           eqPreset: this.eqPreset,
           eqBands: this.eqBands,
           discordRpcEnabled: this.discordRpcEnabled,
+          lyricsProvider: this.lyricsProvider,
         });
       } catch {
         toast.error('Failed to load settings');
@@ -111,6 +114,7 @@ class SettingsController {
         lastFmApiKey: this.lastFmApiKey,
         recommendationProvider: this.recommendationProvider,
         metadataProvider: this.metadataProvider,
+        lyricsProvider: this.lyricsProvider,
         listenBrainzUsername: this.listenBrainzUsername,
         crossfadeSeconds: this.crossfadeSeconds,
         eqEnabled: this.eqEnabled,
@@ -134,6 +138,7 @@ class SettingsController {
         eqPreset: this.eqPreset,
         eqBands: this.eqBands,
         discordRpcEnabled: this.discordRpcEnabled,
+        lyricsProvider: this.lyricsProvider,
       });
 
       requestLibraryRefresh();
@@ -179,6 +184,7 @@ class SettingsController {
     this.eqPreset = defaultBackendSettings.eqPreset;
     this.eqBands = defaultBackendSettings.eqBands;
     this.discordRpcEnabled = defaultBackendSettings.discordRpcEnabled;
+    this.lyricsProvider = defaultBackendSettings.lyricsProvider ?? 'auto';
     this.statsRefreshKey += 1;
   };
 }

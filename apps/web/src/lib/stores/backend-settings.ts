@@ -14,6 +14,7 @@ export type BackendSettings = {
   eqPreset: EqPresetId;
   eqBands: EqBandValues;
   discordRpcEnabled: boolean;
+  lyricsProvider?: string;
 };
 
 export const defaultBackendSettings: BackendSettings = {
@@ -29,6 +30,7 @@ export const defaultBackendSettings: BackendSettings = {
   eqPreset: 'flat',
   eqBands: DEFAULT_EQ_BANDS,
   discordRpcEnabled: true,
+  lyricsProvider: 'auto',
 };
 
 export const backendSettings = writable<BackendSettings>(defaultBackendSettings);

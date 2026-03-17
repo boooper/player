@@ -15,6 +15,7 @@
     "store:default",
     "updater:default",
     "autostart:default",
-    "os:default"
+    "os:default",
+    "cache:default"
   ]
 }

@@ -25,6 +25,7 @@ export type AppSettingsPayload = {
   eqPreset: EqPresetId;
   eqBands: EqBandValues;
   discordRpcEnabled: boolean;
+  lyricsProvider?: string;
   shuffleEnabled: boolean;
   smartShuffleMode: boolean;
   repeatMode: 'off' | 'all' | 'one';

@@ -29,6 +29,7 @@ export async function fetchAppSettings(): Promise<AppSettingsPayload> {
     eqPreset,
     eqBands,
     discordRpcEnabled: s.DISCORD_RPC_ENABLED !== 'false',
+    lyricsProvider: s.LYRICS_PROVIDER || 'auto',
     shuffleEnabled: s.SHUFFLE === 'true',
     smartShuffleMode: s.SMART_SHUFFLE === 'true',
     repeatMode: rawRepeat === 'all' || rawRepeat === 'one' ? rawRepeat : 'off'
@@ -49,6 +50,7 @@ export async function updateAppSettings(data: {
   lastFmApiKey: string;
   recommendationProvider: string;
   metadataProvider: string;
+  lyricsProvider?: string;
   listenBrainzUsername: string;
   crossfadeSeconds: number;
   eqEnabled: boolean;
@@ -62,6 +64,7 @@ export async function updateAppSettings(data: {
     LASTFM_API_KEY: data.lastFmApiKey,
     RECOMMENDATION_PROVIDER: data.recommendationProvider,
     METADATA_PROVIDER: data.metadataProvider,
+    ...(data.lyricsProvider ? { LYRICS_PROVIDER: data.lyricsProvider } : {}),
     LISTENBRAINZ_USERNAME: data.listenBrainzUsername,
     CROSSFADE_SECONDS: String(Math.max(0, Math.min(12, data.crossfadeSeconds))),
     EQ_ENABLED: String(data.eqEnabled),

@@ -24,6 +24,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "EQ_PRESET",
     "EQ_BANDS",
     "DISCORD_RPC_ENABLED",
+    "LYRICS_PROVIDER",
 ];
 
 #[tauri::command]

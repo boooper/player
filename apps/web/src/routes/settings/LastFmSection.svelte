@@ -29,6 +29,7 @@
     listenBrainzTokenConfigured = $bindable(false),
     metadataProvider = $bindable('both'),
     recommendationProvider = $bindable('lastfm'),
+    lyricsProvider = $bindable('auto'),
     onHealthChange,
   }: {
     lastFmApiKey: string;
@@ -41,6 +42,7 @@
     listenBrainzTokenConfigured: boolean;
     metadataProvider: string;
     recommendationProvider: string;
+    lyricsProvider: string;
     onHealthChange: () => void;
   } = $props();
 
@@ -53,6 +55,11 @@
 
   $effect(() => {
     backendSettings.update((s) => ({ ...s, lastFmConnected: lfmConnected, lastFmUsername: lfmUsername }));
+  });
+
+  $effect(() => {
+    // Keep backendSettings in sync for the lyrics provider when changed in this section.
+    backendSettings.update((s) => ({ ...s, lyricsProvider }));
   });
 
   async function connectLastFm() {
@@ -282,6 +289,19 @@
         <Select.Content>
           <Select.Item value="lastfm" label="Last.fm" />
           <Select.Item value="listenbrainz" label="ListenBrainz" />
+        </Select.Content>
+      </Select.Root>
+    </div>
+    <div class="space-y-1.5">
+      <p class="text-sm font-medium">Lyrics Provider</p>
+      <Select.Root type="single" bind:value={lyricsProvider}>
+        <Select.Trigger class="w-full">
+          {lyricsProvider}
+        </Select.Trigger>
+        <Select.Content>
+          <Select.Item value="auto" label="Automatic (Musixmatch → Genius fallback)" />
+          <Select.Item value="musixmatch" label="Musixmatch" />
+          <Select.Item value="genius" label="Genius" />
         </Select.Content>
       </Select.Root>
     </div>
