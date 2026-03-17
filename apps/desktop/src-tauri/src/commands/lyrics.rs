@@ -1,5 +1,4 @@
-use tauri::State;
-use tauri_plugin_cache::CacheExt;
+use tauri::{Manager, State};
 
 use crate::AppState;
 
