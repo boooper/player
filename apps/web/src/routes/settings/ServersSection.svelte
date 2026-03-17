@@ -28,8 +28,8 @@
   };
 
   const SERVER_TYPE_LABELS: Record<string, string> = {
-    subsonic: 'Subsonic (Token Modern)',
-    subsonic_legacy: 'Subsonic (Token Legacy)',
+    subsonic: 'Subsonic / OpenSubsonic',
+    subsonic_legacy: 'Subsonic Legacy',
     jellyfin: 'Jellyfin',
     emby: 'Emby',
     plex: 'Plex',
@@ -240,7 +240,7 @@
         <Server class="size-4 text-muted-foreground" />
         <h2 class="font-semibold">Servers</h2>
       </div>
-      <p class="mt-0.5 text-xs text-muted-foreground">Manage your Subsonic, Jellyfin, Emby, Plex, and local library connections.</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">Manage your Subsonic-compatible, Jellyfin, Emby, Plex, and local library connections.</p>
     </div>
     <button
       class="flex items-center gap-1.5 rounded-lg border border-border bg-secondary/60 px-3 py-1.5 text-xs font-medium transition hover:bg-secondary"
@@ -255,7 +255,7 @@
     <div class="px-5 py-10 text-center">
       <Server class="mx-auto mb-3 size-8 text-muted-foreground/40" />
       <p class="text-sm font-medium text-muted-foreground">No servers configured</p>
-      <p class="mt-1 text-xs text-muted-foreground/70">Add your first Subsonic, Jellyfin, Emby, Plex, or local library above.</p>
+      <p class="mt-1 text-xs text-muted-foreground/70">Add your first Subsonic-compatible, Jellyfin, Emby, Plex, or local library above.</p>
     </div>
   {:else}
     <ul class="divide-y divide-border/50">
@@ -313,7 +313,7 @@
   <Dialog.Content class="sm:max-w-xl">
     <Dialog.Header>
       <Dialog.Title>{profileDraft?.id === null ? 'Add Server' : 'Edit Server'}</Dialog.Title>
-      <Dialog.Description>Configure your server connection. Jellyfin, Emby, and Plex use an API or auth token as the password. Local Folder uses a filesystem path.</Dialog.Description>
+      <Dialog.Description>Configure your server connection. Subsonic-compatible servers like Navidrome and Octo-Fiesta use the Subsonic options. Jellyfin, Emby, and Plex use an API or auth token as the password. Local Folder uses a filesystem path.</Dialog.Description>
     </Dialog.Header>
     {#if profileDraft !== null}
       <div class="space-y-4 py-2">
@@ -335,8 +335,8 @@
               bind:value={profileDraft.serverType}
               class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="subsonic">Subsonic (Token Modern)</option>
-              <option value="subsonic_legacy">Subsonic (Token Legacy)</option>
+              <option value="subsonic">Subsonic / OpenSubsonic</option>
+              <option value="subsonic_legacy">Subsonic Legacy</option>
               <option value="jellyfin">Jellyfin</option>
               <option value="emby">Emby</option>
               <option value="plex">Plex</option>

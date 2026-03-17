@@ -413,12 +413,24 @@
                             {#if track.coverArtUrl}
                               <img src={track.coverArtUrl} class="size-16 rounded-xl object-cover shadow-lg ring-1 ring-white/10" alt={track.title} />
                             {/if}
-                            <div>
-                              <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Lyrics</p>
-                              <p class="text-2xl font-bold leading-tight">{track.title}</p>
-                              <p class="mt-0.5 text-sm text-muted-foreground">{track.artist}</p>
-                            </div>
+                          <div>
+                            <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Lyrics</p>
+                            <p class="text-2xl font-bold leading-tight">{track.title}</p>
+                            <p class="mt-0.5 text-sm text-muted-foreground">{track.artist}</p>
+                            {#if lyricsData?.provider}
+                              <div class="mt-2 flex items-center gap-2">
+                                <span class="rounded-full border border-border/70 bg-background/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {lyricsData.provider}
+                                </span>
+                                {#if lyricsData.cached}
+                                  <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                                    Cached
+                                  </span>
+                                {/if}
+                              </div>
+                            {/if}
                           </div>
+                        </div>
                         {/if}
                         {#if lyricsLoading}
                           <div class="flex h-48 items-center justify-center">
@@ -505,6 +517,18 @@
                           <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Lyrics</p>
                           <p class="text-2xl font-bold leading-tight">{track.title}</p>
                           <p class="mt-0.5 text-sm text-muted-foreground">{track.artist}</p>
+                          {#if lyricsData?.provider}
+                            <div class="mt-2 flex items-center gap-2">
+                              <span class="rounded-full border border-border/70 bg-background/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                {lyricsData.provider}
+                              </span>
+                              {#if lyricsData.cached}
+                                <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
+                                  Cached
+                                </span>
+                              {/if}
+                            </div>
+                          {/if}
                         </div>
                       </div>
                     {/if}

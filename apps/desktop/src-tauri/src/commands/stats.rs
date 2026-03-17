@@ -2,7 +2,6 @@ use serde::Serialize;
 use tauri::State;
 use crate::AppState;
 use crate::commands::profiles::get_active_profile;
-use crate::commands::library::request;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,39 +51,10 @@ pub async fn get_library_stats(state: State<'_, AppState>) -> Result<LibraryStat
                 Err(_) => (None, None, None),
             }
         } else {
-        let playlists_result = request(&state.http, p, "getPlaylists", &[]).await;
-        let (pc, tps) = playlists_result
-            .ok()
-            .and_then(|body| body.get("playlists").cloned())
-            .and_then(|pl| {
-                let arr = match pl.get("playlist") {
-                    Some(serde_json::Value::Array(a)) => a.clone(),
-                    Some(item) => vec![item.clone()],
-                    None => vec![],
-                };
-                let count = arr.len() as i64;
-                let total: i64 = arr.iter()
-                    .filter_map(|p| p.get("songCount").and_then(|v| v.as_i64()))
-                    .sum();
-                Some((count, total))
-            })
-            .map(|(c, t)| (Some(c), Some(t)))
-            .unwrap_or((None, None));
-
-        let starred_result = request(&state.http, p, "getStarred2", &[]).await;
-        let sc = starred_result
-            .ok()
-            .and_then(|body| body.get("starred2").cloned())
-            .map(|s2| {
-                let songs = match s2.get("song") {
-                    Some(serde_json::Value::Array(a)) => a.len() as i64,
-                    Some(_) => 1,
-                    None => 0,
-                };
-                songs
-            });
-
-        (pc, tps, sc)
+            match crate::commands::subsonic::library_counts(&state.http, p).await {
+                Ok((pc, tps, ss)) => (Some(pc), Some(tps), Some(ss)),
+                Err(_) => (None, None, None),
+            }
         }
     } else {
         (None, None, None)

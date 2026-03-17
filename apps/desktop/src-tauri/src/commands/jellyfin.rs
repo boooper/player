@@ -3,18 +3,23 @@
 //! Authentication: `X-Emby-Authorization` header with the API key stored in `profile.password`.
 //! The `username` field is the display name; user ID is fetched from `/Users/Me` when needed.
 
-use url::Url;
+use jellyfin_sdk::JellyfinClient;
 use serde_json::Value;
 use crate::commands::profiles::ActiveProfile;
 use crate::commands::media::{AlbumDetail, AlbumFull, Album, Playlist, PlaylistDetail, PlaylistMeta, Song};
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
-fn auth_header(p: &ActiveProfile) -> String {
-    format!(
-        r#"MediaBrowser Client="madrify", Device="Desktop", DeviceId="madrify-desktop", Version="1.0.0", Token="{}""#,
-        p.password
-    )
+fn client_from_profile(p: &ActiveProfile) -> Result<JellyfinClient, String> {
+    JellyfinClient::builder(&p.url)
+        .map_err(|e| e.to_string())?
+        .token(&p.password)
+        .client_name("madrify")
+        .device_name("Desktop")
+        .device_id("madrify-desktop")
+        .client_version(env!("CARGO_PKG_VERSION"))
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 // ── URL helpers ───────────────────────────────────────────────────────────────
@@ -48,62 +53,43 @@ fn stream_url(p: &ActiveProfile, id: &str) -> String {
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
 pub(crate) async fn get(
-    http: &reqwest::Client,
+    _http: &reqwest::Client,
     p: &ActiveProfile,
     path: &str,
     params: &[(&str, &str)],
 ) -> Result<Value, String> {
-    let base = format!("{}{}", p.url.trim_end_matches('/'), path);
-    let mut url = Url::parse(&base).map_err(|e| e.to_string())?;
-    for (k, v) in params {
-        url.query_pairs_mut().append_pair(k, v);
-    }
-    let resp = http
-        .get(url.as_str())
-        .header("X-Emby-Authorization", auth_header(p))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    resp.json::<Value>().await.map_err(|e| e.to_string())
+    let client = client_from_profile(p)?;
+    let req = client
+        .request(reqwest::Method::GET, path)
+        .map_err(|e| e.to_string())?
+        .query(params);
+    client.send_json::<Value>(req).await.map_err(|e| e.to_string())
 }
 
-async fn post_empty(http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
-    let url = format!("{}{}", p.url.trim_end_matches('/'), path);
-    http.post(&url)
-        .header("X-Emby-Authorization", auth_header(p))
-        .header("Content-Length", "0")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+async fn post_empty(_http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
+    let client = client_from_profile(p)?;
+    let req = client
+        .request(reqwest::Method::POST, path)
+        .map_err(|e| e.to_string())?
+        .header("Content-Length", "0");
+    client.send_unit(req).await.map_err(|e| e.to_string())
 }
 
-async fn post_json(http: &reqwest::Client, p: &ActiveProfile, path: &str, body: &Value) -> Result<Value, String> {
-    let url = format!("{}{}", p.url.trim_end_matches('/'), path);
-    let resp = http
-        .post(&url)
-        .header("X-Emby-Authorization", auth_header(p))
-        .json(body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    resp.json::<Value>().await.map_err(|e| e.to_string())
+async fn post_json(_http: &reqwest::Client, p: &ActiveProfile, path: &str, body: &Value) -> Result<Value, String> {
+    let client = client_from_profile(p)?;
+    let req = client
+        .request(reqwest::Method::POST, path)
+        .map_err(|e| e.to_string())?
+        .json(body);
+    client.send_json::<Value>(req).await.map_err(|e| e.to_string())
 }
 
-async fn delete(http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
-    let url = format!("{}{}", p.url.trim_end_matches('/'), path);
-    http.delete(&url)
-        .header("X-Emby-Authorization", auth_header(p))
-        .send()
-        .await
+async fn delete(_http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
+    let client = client_from_profile(p)?;
+    let req = client
+        .request(reqwest::Method::DELETE, path)
         .map_err(|e| e.to_string())?;
-    Ok(())
+    client.send_unit(req).await.map_err(|e| e.to_string())
 }
 
 // ── User ID (needed for favourite endpoints) ──────────────────────────────────
@@ -532,15 +518,9 @@ pub(crate) async fn rename_playlist(
 
 /// Returns true if the server responds successfully to a ping.
 pub(crate) async fn ping(http: &reqwest::Client, p: &ActiveProfile) -> Result<bool, String> {
-    let url = format!("{}/System/Ping", p.url.trim_end_matches('/'));
-    let resp = http
-        .get(&url)
-        .header("X-Emby-Authorization", auth_header(p))
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(resp.status().is_success())
+    let client = client_from_profile(p)?;
+    let _ = http;
+    client.system().ping().await.map(|_| true).map_err(|e| e.to_string())
 }
 
 /// Playlists and starred song counts for library stats.

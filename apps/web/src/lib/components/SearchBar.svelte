@@ -209,7 +209,7 @@
                     <span class="grid size-8 place-items-center rounded bg-secondary text-[10px] font-bold">{initials(song.title)}</span>
                   {/if}
                   <span class="min-w-0 flex-1">
-                    <span class="block truncate text-sm font-medium">{song.title}</span>
+                    <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{song.title}</span>
                     <span class="block truncate text-xs text-muted-foreground">{song.artist}</span>
                   </span>
                   <Music class="ml-auto size-3.5 shrink-0 text-muted-foreground" />

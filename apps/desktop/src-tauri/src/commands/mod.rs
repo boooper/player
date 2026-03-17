@@ -12,3 +12,4 @@ pub mod plex;
 pub mod profiles;
 pub mod settings;
 pub mod stats;
+pub mod subsonic;

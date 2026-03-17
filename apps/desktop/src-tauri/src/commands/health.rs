@@ -1,7 +1,5 @@
-use rand::Rng;
 use serde::Serialize;
 use tauri::State;
-use url::Url;
 use crate::AppState;
 use crate::commands::profiles::get_active_profile;
 
@@ -58,45 +56,8 @@ pub async fn get_service_health(state: State<'_, AppState>) -> Result<ServiceHea
             }
         }
         Some(p) => {
-            let salt: String = rand::thread_rng()
-                .sample_iter(&rand::distributions::Alphanumeric)
-                .take(12)
-                .map(char::from)
-                .collect();
-            let token = format!("{:x}", md5::compute(format!("{}{}", p.password, salt).as_bytes()));
-
-            let ping_base = format!("{}/rest/ping.view", p.url.trim_end_matches('/'));
-            let mut url = Url::parse(&ping_base).unwrap_or_else(|_| Url::parse("http://localhost").unwrap());
-            {
-                let mut q = url.query_pairs_mut();
-                q.append_pair("u", &p.username);
-                q.append_pair("v", "1.16.1");
-                q.append_pair("c", "madrify");
-                q.append_pair("f", "json");
-                if p.server_type == "subsonic_legacy" || p.password.starts_with("enc:") {
-                    q.append_pair("p", &p.password);
-                } else {
-                    q.append_pair("t", &token);
-                    q.append_pair("s", &salt);
-                }
-            }
-
-            let result = state.http
-                .get(url.as_str())
-                .timeout(std::time::Duration::from_secs(5))
-                .send()
-                .await;
-
-            match result {
-                Ok(resp) if resp.status().is_success() => {
-                    // Also verify the Subsonic response status field
-                    let ok = resp.json::<serde_json::Value>().await
-                        .ok()
-                        .and_then(|j| j.get("subsonic-response").cloned())
-                        .and_then(|r| r.get("status").and_then(|s| s.as_str()).map(|s| s == "ok"))
-                        .unwrap_or(false);
-                    if ok { "online".to_string() } else { "offline".to_string() }
-                }
+            match crate::commands::subsonic::ping(&state.http, &p).await {
+                Ok(true) => "online".to_string(),
                 _ => "offline".to_string(),
             }
         }

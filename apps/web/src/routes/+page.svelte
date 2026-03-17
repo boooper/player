@@ -348,7 +348,7 @@
                 <div class="grid size-10 shrink-0 place-items-center rounded-md bg-secondary text-xs font-bold">{song.title.slice(0, 2).toUpperCase()}</div>
               {/if}
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium group-hover:text-foreground transition-colors duration-150">{song.title}</p>
+                <p class="whitespace-normal break-words text-sm font-medium leading-tight group-hover:text-foreground transition-colors duration-150">{song.title}</p>
                 <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
               </div>
             </div>

@@ -1275,7 +1275,7 @@
           <div class="flex items-center gap-1.5">
             <div class="min-w-0 flex items-center gap-1.5">
               <button
-                class="player-track-title block max-w-full truncate text-left text-sm font-semibold leading-tight"
+                class="player-track-title block max-w-full whitespace-normal break-words text-left text-sm font-semibold leading-tight"
                 onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
                 title={currentTrack.album}
               >{currentTrack.title}</button>

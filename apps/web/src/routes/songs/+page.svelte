@@ -224,7 +224,7 @@
                 {/if}
                 <div class="min-w-0">
                   <div class="flex min-w-0 items-center gap-2">
-                    <p class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                    <p class="whitespace-normal break-words text-sm font-medium leading-tight transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
                     <SongTechBadge
                       id={song.id}
                       cached={desktopPlayback ? cachedSongIds.has(song.id) : null}

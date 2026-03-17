@@ -24,6 +24,7 @@ pub struct AppState {
     pub playback: playback_engine::PlaybackHandle,
     pub playback_cache: playback_engine::DiskCache,
     pub artwork_cache: playback_engine::DiskCache,
+    pub lyrics_cache: playback_engine::DiskCache,
 }
 
 // AppState is Send + Sync because:
@@ -68,6 +69,8 @@ pub fn run() {
                 playback_cache: playback_engine::DiskCache::new(cache_dir.join("audio"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
                 artwork_cache: playback_engine::DiskCache::new(cache_dir.join("artwork"))
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
+                lyrics_cache: playback_engine::DiskCache::new(cache_dir.join("lyrics"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
             });
 

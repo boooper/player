@@ -6,7 +6,7 @@ authors = []
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -32,7 +32,7 @@ tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "query", "rustls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 url = "2"
 md5 = "0.7"
@@ -48,3 +48,9 @@ walkdir = "2"
 lofty = "0.21"
 base64 = "0.22"
 roxmltree = "0.20"
+opensubsonic = "0.1.0"
+jellyfin-sdk = "0.1.0"
+lastfm-client = "2.1.0"
+rustfm-scrobble = "1.1.1"
+musixmatch-inofficial = "0.4.0"
+genius_lyrics = "1.0.4"

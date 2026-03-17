@@ -1,21 +1,23 @@
-use serde::Serialize;
+use std::collections::HashSet;
+
+use genius_lyrics::get_lyrics_from_url;
+use musixmatch_inofficial::{
+    models::{SortOrder, SubtitleFormat, TrackId},
+    Error as MusixmatchError, Musixmatch,
+};
+use serde::{Deserialize, Serialize};
 use tauri::State;
+
 use crate::AppState;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LyricsResult {
     pub plain_lyrics: Option<String>,
     pub synced_lyrics: Option<String>,
     pub instrumental: bool,
-}
-
-fn from_json(v: &serde_json::Value) -> LyricsResult {
-    LyricsResult {
-        plain_lyrics:  v.get("plainLyrics").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        synced_lyrics: v.get("syncedLyrics").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(String::from),
-        instrumental:  v.get("instrumental").and_then(|x| x.as_bool()).unwrap_or(false),
-    }
+    pub provider: Option<String>,
+    pub cached: bool,
 }
 
 fn normalize_whitespace(value: &str) -> String {
@@ -24,10 +26,7 @@ fn normalize_whitespace(value: &str) -> String {
 
 fn normalize_artist(value: &str) -> String {
     let lower = value.to_lowercase();
-    let primary = lower
-        .split(&[',', ';', '&'][..])
-        .next()
-        .unwrap_or("");
+    let primary = lower.split(&[',', ';', '&'][..]).next().unwrap_or("");
     normalize_whitespace(primary)
 }
 
@@ -83,113 +82,187 @@ fn normalize_album(value: &str) -> String {
     normalize_title(value)
 }
 
-fn duration_matches(candidate: &serde_json::Value, duration: f64, tolerance: f64) -> bool {
-    let Some(candidate_duration) = candidate.get("duration").and_then(|v| v.as_f64()) else {
-        return false;
+fn cache_key(artist: &str, title: &str, album: &str, duration: f64) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        normalize_artist(artist),
+        normalize_title(title),
+        normalize_album(album),
+        duration.round() as i64
+    )
+}
+
+fn read_cached_result(state: &AppState, key: &str) -> Option<LyricsResult> {
+    let (bytes, _) = state.lyrics_cache.read(key).ok()??;
+    let mut cached = serde_json::from_slice::<LyricsResult>(&bytes).ok()?;
+    cached.cached = true;
+    Some(cached)
+}
+
+fn write_cached_result(state: &AppState, key: &str, value: &LyricsResult) {
+    let Ok(bytes) = serde_json::to_vec(value) else {
+        return;
     };
-    (candidate_duration - duration).abs() <= tolerance
+    let _ = state
+        .lyrics_cache
+        .write(key, "lyrics", "lyrics-cache", "application/json", &bytes);
 }
 
-fn title_similarity(a: &str, b: &str) -> bool {
-    a == b || a.contains(b) || b.contains(a)
+fn clean_plain_lyrics(value: &str) -> Option<String> {
+    let trimmed = value
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
-fn score_candidate(
-    candidate: &serde_json::Value,
+fn musixmatch_error_is_miss(error: &MusixmatchError) -> bool {
+    matches!(error, MusixmatchError::NotAvailable | MusixmatchError::NotFound)
+}
+
+async fn fetch_from_musixmatch(
     artist: &str,
     title: &str,
     album: &str,
     duration: f64,
-) -> i32 {
-    let candidate_artist = normalize_artist(
-        candidate.get("artistName").and_then(|v| v.as_str()).unwrap_or("")
-    );
-    let candidate_title = normalize_title(
-        candidate.get("trackName").and_then(|v| v.as_str()).unwrap_or("")
-    );
-    let candidate_album = normalize_album(
-        candidate.get("albumName").and_then(|v| v.as_str()).unwrap_or("")
-    );
+) -> Result<Option<LyricsResult>, String> {
+    let mxm = Musixmatch::builder()
+        .no_storage()
+        .build()
+        .map_err(|e| e.to_string())?;
 
-    let mut score = 0;
+    let matcher_track = mxm
+        .matcher_track(title, artist, album, false, false, false)
+        .await
+        .ok();
+    let search_tracks = mxm
+        .track_search()
+        .q_track(title)
+        .q_artist(artist)
+        .f_has_lyrics()
+        .s_track_rating(SortOrder::Desc)
+        .send(5, 1)
+        .await
+        .unwrap_or_default();
 
-    if candidate_artist == artist {
-        score += 45;
-    } else if !candidate_artist.is_empty() && (candidate_artist.contains(artist) || artist.contains(&candidate_artist)) {
-        score += 25;
-    } else {
-        score -= 40;
-    }
-
-    if candidate_title == title {
-        score += 55;
-    } else if !candidate_title.is_empty() && title_similarity(&candidate_title, title) {
-        score += 25;
-    } else {
-        score -= 60;
-    }
-
-    if !album.is_empty() && !candidate_album.is_empty() {
-        if candidate_album == album {
-            score += 20;
-        } else if title_similarity(&candidate_album, album) {
-            score += 8;
-        } else {
-            score -= 10;
-        }
-    }
-
-    if duration > 0.0 {
-        if duration_matches(candidate, duration, 2.0) {
-            score += 35;
-        } else if duration_matches(candidate, duration, 5.0) {
-            score += 15;
-        } else if duration_matches(candidate, duration, 10.0) {
-            score += 5;
-        } else {
-            score -= 25;
-        }
-    }
-
-    if candidate.get("syncedLyrics").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) {
-        score += 6;
-    }
-    if candidate.get("plainLyrics").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) {
-        score += 3;
-    }
-    if candidate.get("instrumental").and_then(|v| v.as_bool()).unwrap_or(false) {
-        score += 2;
-    }
-
-    score
-}
-
-fn best_search_result(
-    results: &[serde_json::Value],
-    artist: &str,
-    title: &str,
-    album: &str,
-    duration: f64,
-) -> Option<LyricsResult> {
-    let normalized_artist = normalize_artist(artist);
-    let normalized_title = normalize_title(title);
-    let normalized_album = normalize_album(album);
-
-    let best = results
-        .iter()
-        .filter_map(|candidate| {
-            let score = score_candidate(
-                candidate,
-                &normalized_artist,
-                &normalized_title,
-                &normalized_album,
-                duration,
-            );
-            (score >= 55).then_some((score, candidate))
+    let track = matcher_track.or_else(|| {
+        search_tracks.into_iter().find(|track| {
+            let artist_ok = normalize_artist(&track.artist_name) == normalize_artist(artist);
+            let title_ok = normalize_title(&track.track_name) == normalize_title(title);
+            let album_ok = album.is_empty()
+                || normalize_album(&track.album_name) == normalize_album(album);
+            let duration_ok = duration <= 0.0
+                || (track.track_length as f64 - duration).abs() <= 3.0
+                || (track.track_length as f64 - duration).abs() <= 8.0 && title_ok;
+            artist_ok && title_ok && album_ok && duration_ok
         })
-        .max_by_key(|(score, _)| *score)?;
+    });
 
-    Some(from_json(best.1))
+    let Some(track) = track else {
+        return Ok(None);
+    };
+
+    let plain_lyrics = match mxm.track_lyrics(TrackId::TrackId(track.track_id)).await {
+        Ok(lyrics) => clean_plain_lyrics(&lyrics.lyrics_body),
+        Err(error) if musixmatch_error_is_miss(&error) => None,
+        Err(error) => return Err(error.to_string()),
+    };
+
+    let synced_lyrics = match mxm
+        .track_subtitle(
+            TrackId::TrackId(track.track_id),
+            SubtitleFormat::Lrc,
+            if duration > 0.0 { Some(duration as f32) } else { None },
+            if duration > 0.0 { Some(2.0) } else { None },
+        )
+        .await
+    {
+        Ok(subtitle) => clean_plain_lyrics(&subtitle.subtitle_body),
+        Err(error) if musixmatch_error_is_miss(&error) => None,
+        Err(error) => return Err(error.to_string()),
+    };
+
+    if plain_lyrics.is_none() && synced_lyrics.is_none() && !track.instrumental {
+        return Ok(None);
+    }
+
+    Ok(Some(LyricsResult {
+        plain_lyrics,
+        synced_lyrics,
+        instrumental: track.instrumental,
+        provider: Some("Musixmatch".to_string()),
+        cached: false,
+    }))
+}
+
+fn slugify_genius_part(value: &str) -> String {
+    let normalized = normalize_title(value)
+        .replace('\'', "")
+        .replace('.', "")
+        .replace('/', " ")
+        .replace(':', " ")
+        .replace('&', " and ");
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in normalized.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+fn build_genius_url_candidates(artist: &str, title: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    let artist_slug = slugify_genius_part(artist);
+    let title_slug = slugify_genius_part(title);
+
+    for candidate_title in [
+        title_slug.clone(),
+        slugify_genius_part(&normalize_title(title).replace(" and ", " ")),
+    ] {
+        if artist_slug.is_empty() || candidate_title.is_empty() {
+            continue;
+        }
+        let url = format!("https://genius.com/{}-{}-lyrics", artist_slug, candidate_title);
+        if seen.insert(url.clone()) {
+            candidates.push(url);
+        }
+    }
+
+    candidates
+}
+
+async fn fetch_from_genius(artist: &str, title: &str) -> Option<LyricsResult> {
+    for url in build_genius_url_candidates(artist, title) {
+        let Ok(lyrics) = get_lyrics_from_url(&url).await else {
+            continue;
+        };
+        let Some(plain_lyrics) = clean_plain_lyrics(&lyrics) else {
+            continue;
+        };
+        return Some(LyricsResult {
+            plain_lyrics: Some(plain_lyrics),
+            synced_lyrics: None,
+            instrumental: false,
+            provider: Some("Genius".to_string()),
+            cached: false,
+        });
+    }
+
+    None
 }
 
 #[tauri::command]
@@ -200,39 +273,20 @@ pub async fn fetch_lyrics(
     album: String,
     duration: f64,
 ) -> Result<Option<LyricsResult>, String> {
-    let dur = (duration.round() as i64).to_string();
+    let key = cache_key(&artist, &title, &album, duration);
+    if let Some(cached) = read_cached_result(&state, &key) {
+        return Ok(Some(cached));
+    }
 
-    // Fire exact-match and search in parallel
-    let (exact, search) = tokio::join!(
-        async {
-            if album.is_empty() || duration <= 0.0 { return None; }
-            let r = state.http
-                .get("https://lrclib.net/api/get")
-                .query(&[
-                    ("artist_name", artist.as_str()),
-                    ("track_name",  title.as_str()),
-                    ("album_name",  album.as_str()),
-                    ("duration",    dur.as_str()),
-                ])
-                .header("Lrclib-Client", "Madrify")
-                .timeout(std::time::Duration::from_secs(10))
-                .send().await.ok()?;
-            if !r.status().is_success() { return None; }
-            r.json::<serde_json::Value>().await.ok().map(|j| from_json(&j))
-        },
-        async {
-            let r = state.http
-                .get("https://lrclib.net/api/search")
-                .query(&[("track_name", title.as_str()), ("artist_name", artist.as_str())])
-                .header("Lrclib-Client", "Madrify")
-                .timeout(std::time::Duration::from_secs(10))
-                .send().await.ok()?;
-            if !r.status().is_success() { return None; }
-            let results: Vec<serde_json::Value> = r.json().await.ok()?;
-            best_search_result(&results, &artist, &title, &album, duration)
-        }
-    );
+    let result = match fetch_from_musixmatch(&artist, &title, &album, duration).await {
+        Ok(Some(result)) => Some(result),
+        Ok(None) => fetch_from_genius(&artist, &title).await,
+        Err(_) => fetch_from_genius(&artist, &title).await,
+    };
 
-    // Prefer exact match (duration-aligned for synced lyrics), fall back to search
-    Ok(exact.or(search))
+    if let Some(result) = &result {
+        write_cached_result(&state, &key, result);
+    }
+
+    Ok(result)
 }

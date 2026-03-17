@@ -1,4 +1,8 @@
 use std::collections::HashMap;
+use std::time::Duration;
+use lastfm_client::LastFmClient;
+use lastfm_client::api::Period;
+use rustfm_scrobble::{Scrobble, Scrobbler};
 use serde::Serialize;
 use tauri::State;
 use crate::{AppState, commands::settings};
@@ -77,6 +81,38 @@ fn require_credentials(s: &HashMap<String, String>) -> Result<(String, String), 
     Ok((key, secret))
 }
 
+fn build_scrobbler(api_key: &str, secret: &str, session_key: Option<&str>) -> Scrobbler {
+    let mut scrobbler = Scrobbler::new(api_key, secret);
+    if let Some(session_key) = session_key.filter(|value| !value.is_empty()) {
+        scrobbler.authenticate_with_session_key(session_key);
+    }
+    scrobbler
+}
+
+fn build_scrobble(
+    artist: String,
+    track: String,
+    album: Option<String>,
+    _duration: Option<f64>,
+    timestamp: Option<i64>,
+) -> Scrobble {
+    let album = album.unwrap_or_default();
+    let mut scrobble = Scrobble::new(artist.trim(), track.trim(), album.trim());
+    if let Some(timestamp) = timestamp.filter(|value| *value > 0) {
+        scrobble.with_timestamp(timestamp as u64);
+    }
+    scrobble
+}
+
+fn build_lastfm_client(api_key: &str) -> Result<LastFmClient, String> {
+    LastFmClient::builder()
+        .api_key(api_key)
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map(LastFmClient::from_config)
+        .map_err(|e| e.to_string())
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -120,13 +156,17 @@ pub async fn lfm_complete_auth(
         let db = state.db.lock().map_err(|e| e.to_string())?;
         require_credentials(&settings::read_all(&db)?)?
     };
-    let mut params = HashMap::new();
-    params.insert("method".to_string(), "auth.getSession".to_string());
-    params.insert("token".to_string(), token.trim().to_string());
-    let json = sign_and_post(&state.http, params, &api_key, &secret).await?;
-    let session = json.get("session").ok_or_else(|| "No session returned".to_string())?;
-    let username = session.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-    let sk = session.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();
+    let token = token.trim().to_string();
+    let session = tokio::task::spawn_blocking(move || {
+        let mut scrobbler = Scrobbler::new(&api_key, &secret);
+        scrobbler
+            .authenticate_with_token(&token)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let username = session.name;
+    let sk = session.key;
     if sk.is_empty() {
         return Err("No session key returned from Last.fm".to_string());
     }
@@ -163,16 +203,12 @@ pub async fn lfm_now_playing(
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(());
     }
-    let mut params = HashMap::new();
-    params.insert("method".to_string(), "track.updateNowPlaying".to_string());
-    params.insert("sk".to_string(), sk);
-    params.insert("artist".to_string(), artist.trim().to_string());
-    params.insert("track".to_string(), track.trim().to_string());
-    if let Some(a) = album { params.insert("album".to_string(), a); }
-    if let Some(d) = duration {
-        params.insert("duration".to_string(), (d.round() as i64).to_string());
-    }
-    let _ = sign_and_post(&state.http, params, &api_key, &secret).await;
+    let scrobble = build_scrobble(artist, track, album, duration, None);
+    let _ = tokio::task::spawn_blocking(move || {
+        let scrobbler = build_scrobbler(&api_key, &secret, Some(&sk));
+        scrobbler.now_playing(&scrobble).map_err(|e| e.to_string())
+    })
+    .await;
     Ok(())
 }
 
@@ -196,17 +232,12 @@ pub async fn lfm_scrobble(
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(());
     }
-    let mut params = HashMap::new();
-    params.insert("method".to_string(), "track.scrobble".to_string());
-    params.insert("sk".to_string(), sk);
-    params.insert("artist".to_string(), artist.trim().to_string());
-    params.insert("track".to_string(), track.trim().to_string());
-    params.insert("timestamp".to_string(), timestamp.to_string());
-    if let Some(a) = album { params.insert("album".to_string(), a); }
-    if let Some(d) = duration {
-        params.insert("duration".to_string(), (d.round() as i64).to_string());
-    }
-    let _ = sign_and_post(&state.http, params, &api_key, &secret).await;
+    let scrobble = build_scrobble(artist, track, album, duration, Some(timestamp));
+    let _ = tokio::task::spawn_blocking(move || {
+        let scrobbler = build_scrobbler(&api_key, &secret, Some(&sk));
+        scrobbler.scrobble(&scrobble).map_err(|e| e.to_string())
+    })
+    .await;
     Ok(())
 }
 
@@ -232,23 +263,25 @@ pub async fn lfm_user_taste(state: State<'_, AppState>) -> Result<UserTaste, Str
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(UserTaste { connected: false, username, artists: vec![] });
     }
-    let mut params = HashMap::new();
-    params.insert("method".to_string(), "user.getTopArtists".to_string());
-    params.insert("sk".to_string(), sk);
-    params.insert("period".to_string(), "3month".to_string());
-    params.insert("limit".to_string(), "50".to_string());
-    match sign_and_get(&state.http, params, &api_key, &secret).await {
-        Ok(json) => {
-            let artists = json
-                .get("topartists")
-                .and_then(|t| t.get("artist"))
-                .and_then(|a| a.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|a| a.get("name").and_then(|n| n.as_str()).map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
+    let client = build_lastfm_client(&api_key)?;
+    match client
+        .top_tracks(username.clone())
+        .period(Period::ThreeMonth)
+        .limit(100)
+        .fetch()
+        .await
+    {
+        Ok(tracks) => {
+            let mut artists = Vec::new();
+            for track in tracks {
+                let artist = track.artist.name.trim();
+                if !artist.is_empty() && !artists.iter().any(|value: &String| value == artist) {
+                    artists.push(artist.to_string());
+                }
+                if artists.len() >= 50 {
+                    break;
+                }
+            }
             Ok(UserTaste { connected: true, username, artists })
         }
         Err(_) => Ok(UserTaste { connected: true, username, artists: vec![] }),

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tauri::State;
 use url::Url;
 use crate::{AppState, commands::profiles::{get_active_profile, ActiveProfile}};
-use super::media::{Song, Album, Playlist, PlaylistDetail, PlaylistMeta, AlbumDetail, AlbumFull, SearchBundle};
+use super::media::{Song, Album, Playlist, PlaylistDetail, AlbumDetail, SearchBundle};
 
 const API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "madrify";
@@ -360,22 +360,6 @@ async fn resolve_library_song_id(
     Ok(resolved.id)
 }
 
-fn map_album(v: &serde_json::Value, p: &ActiveProfile, art_size: u32) -> Album {
-    let id = s(v.get("id"));
-    let cover = { let c = s(v.get("coverArt")); if c.is_empty() { id.clone() } else { c } };
-    Album {
-        cover_art_url: cover_url(p, &cover, art_size),
-        id,
-        name: s(v.get("name")),
-        artist: s(v.get("artist")),
-        artist_id: s(v.get("artistId")),
-        cover_art: cover,
-        song_count: n(v.get("songCount")),
-        duration: n(v.get("duration")),
-        year: v.get("year").and_then(|y| y.as_f64()),
-    }
-}
-
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -394,11 +378,7 @@ pub async fn library_search(
         let songs = crate::commands::plex::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
-    let cnt = count.unwrap_or(20).to_string();
-    let body = request(&state.http, &p, "search3", &[
-        ("query", &query), ("songCount", &cnt), ("artistCount", "0"), ("albumCount", "0"),
-    ]).await?;
-    let songs = arr(body.get("searchResult3").and_then(|r| r.get("song"))).iter().map(|v| map_song(v, &p)).collect();
+    let songs = crate::commands::subsonic::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
     Ok(cache_song_covers(&state, songs).await)
 }
 
@@ -424,14 +404,7 @@ pub async fn library_search_bundle(
         let songs = crate::commands::plex::search(&state.http, &p, &query, song_limit).await?;
         cache_song_covers(&state, songs).await
     } else {
-        let cnt = song_limit.to_string();
-        let body = request(&state.http, &p, "search3", &[
-            ("query", &query), ("songCount", &cnt), ("artistCount", "0"), ("albumCount", "0"),
-        ]).await?;
-        let songs: Vec<Song> = arr(body.get("searchResult3").and_then(|r| r.get("song")))
-            .iter()
-            .map(|v| map_song(v, &p))
-            .collect();
+        let songs = crate::commands::subsonic::search(&state.http, &p, &query, song_limit).await?;
         cache_song_covers(&state, songs).await
     };
 
@@ -444,14 +417,7 @@ pub async fn library_search_bundle(
         let albums = crate::commands::plex::artist_albums(&state.http, &p, &query, album_limit).await?;
         cache_album_covers(&state, albums).await
     } else {
-        let cnt = album_limit.to_string();
-        let body = request(&state.http, &p, "search3", &[
-            ("query", &query), ("artistCount", "0"), ("albumCount", &cnt), ("songCount", "0"),
-        ]).await?;
-        let albums: Vec<Album> = arr(body.get("searchResult3").and_then(|r| r.get("album")))
-            .iter()
-            .map(|v| map_album(v, &p, 300))
-            .collect();
+        let albums = crate::commands::subsonic::artist_albums(&state.http, &p, &query, album_limit).await?;
         cache_album_covers(&state, albums).await
     };
 
@@ -463,12 +429,7 @@ pub async fn library_search_bundle(
         } else if is_plex(&p) {
             crate::commands::plex::similar(&state.http, &p, &seed.id, rec_limit).await?
         } else {
-            let cnt = rec_limit.to_string();
-            let body = request(&state.http, &p, "getSimilarSongs2", &[("id", &seed.id), ("count", &cnt)]).await?;
-            arr(body.get("similarSongs2").and_then(|r| r.get("song")))
-                .iter()
-                .map(|v| map_song(v, &p))
-                .collect()
+            crate::commands::subsonic::similar(&state.http, &p, &seed.id, rec_limit).await?
         };
 
         let mut deduped = Vec::new();
@@ -512,9 +473,7 @@ pub async fn library_similar(
         let songs = crate::commands::plex::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
-    let cnt = count.unwrap_or(20).to_string();
-    let body = request(&state.http, &p, "getSimilarSongs2", &[("id", &song_id), ("count", &cnt)]).await?;
-    let songs = arr(body.get("similarSongs2").and_then(|r| r.get("song"))).iter().map(|v| map_song(v, &p)).collect();
+    let songs = crate::commands::subsonic::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
     Ok(cache_song_covers(&state, songs).await)
 }
 
@@ -530,22 +489,7 @@ pub async fn library_playlists(state: State<'_, AppState>) -> Result<Vec<Playlis
         let playlists = crate::commands::plex::playlists(&state.http, &p).await?;
         return Ok(cache_playlist_covers(&state, playlists).await);
     }
-    let body = request(&state.http, &p, "getPlaylists", &[]).await?;
-    let playlists = arr(body.get("playlists").and_then(|r| r.get("playlist")))
-        .iter()
-        .map(|pl| {
-            let id = s(pl.get("id"));
-            let cover = { let c = s(pl.get("coverArt")); if c.is_empty() { id.clone() } else { c } };
-            Playlist {
-                cover_art_url: cover_url(&p, &cover, 240),
-                id,
-                name: s(pl.get("name")),
-                song_count: n(pl.get("songCount")),
-                duration: n(pl.get("duration")),
-                cover_art: cover,
-            }
-        })
-        .collect();
+    let playlists = crate::commands::subsonic::playlists(&state.http, &p).await?;
     Ok(cache_playlist_covers(&state, playlists).await)
 }
 
@@ -564,21 +508,7 @@ pub async fn library_playlist(
         let detail = crate::commands::plex::playlist(&state.http, &p, &id).await?;
         return Ok(cache_playlist_detail(&state, detail).await);
     }
-    let body = request(&state.http, &p, "getPlaylist", &[("id", &id)]).await?;
-    let pl = body.get("playlist").cloned().unwrap_or(serde_json::Value::Null);
-    let songs = arr(pl.get("entry")).iter().map(|v| map_song(v, &p)).collect();
-    let pl_id = { let i = s(pl.get("id")); if i.is_empty() { id } else { i } };
-    let cover = s(pl.get("coverArt"));
-    let detail = PlaylistDetail {
-        songs,
-        playlist: PlaylistMeta {
-            id: pl_id,
-            name: s(pl.get("name")),
-            song_count: n(pl.get("songCount")),
-            duration: n(pl.get("duration")),
-            cover_art_url: cover_url(&p, &cover, 240),
-        },
-    };
+    let detail = crate::commands::subsonic::playlist(&state.http, &p, &id).await?;
     Ok(cache_playlist_detail(&state, detail).await)
 }
 
@@ -598,11 +528,7 @@ pub async fn library_artist_albums(
         let albums = crate::commands::plex::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
         return Ok(cache_album_covers(&state, albums).await);
     }
-    let cnt = count.unwrap_or(20).to_string();
-    let body = request(&state.http, &p, "search3", &[
-        ("query", &query), ("artistCount", "0"), ("albumCount", &cnt), ("songCount", "0"),
-    ]).await?;
-    let albums = arr(body.get("searchResult3").and_then(|r| r.get("album"))).iter().map(|v| map_album(v, &p, 300)).collect();
+    let albums = crate::commands::subsonic::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
     Ok(cache_album_covers(&state, albums).await)
 }
 
@@ -621,15 +547,7 @@ pub async fn library_album_songs(
         let songs = crate::commands::plex::album_songs(&state.http, &p, &id).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
-    let body = request(&state.http, &p, "getAlbum", &[("id", &id)]).await?;
-    let songs = arr(body.get("album").and_then(|a| a.get("song")))
-        .iter()
-        .map(|v| {
-            let mut song = map_song(v, &p);
-            if song.album_id.is_empty() { song.album_id = id.clone(); }
-            song
-        })
-        .collect();
+    let songs = crate::commands::subsonic::album_songs(&state.http, &p, &id).await?;
     Ok(cache_song_covers(&state, songs).await)
 }
 
@@ -648,39 +566,7 @@ pub async fn library_album(
         let detail = crate::commands::plex::album(&state.http, &p, &id).await?;
         return Ok(cache_album_detail(&state, detail).await);
     }
-    let body = request(&state.http, &p, "getAlbum", &[("id", &id)]).await?;
-    let al = body.get("album").cloned().unwrap_or(serde_json::Value::Null);
-    let al_id = { let i = s(al.get("id")); if i.is_empty() { id } else { i } };
-    let al_name = s(al.get("name"));
-    let al_cover = s(al.get("coverArt"));
-    let songs: Vec<Song> = arr(al.get("song"))
-        .iter()
-        .map(|v| {
-            let mut song = map_song(v, &p);
-            if song.album.is_empty() { song.album = al_name.clone(); }
-            if song.album_id.is_empty() { song.album_id = al_id.clone(); }
-            if song.cover_art.is_empty() { song.cover_art = al_cover.clone(); }
-            let c = if song.cover_art.is_empty() { al_cover.clone() } else { song.cover_art.clone() };
-            song.cover_art_url = cover_url(&p, &c, 240);
-            song
-        })
-        .collect();
-    let cover = if al_cover.is_empty() { al_id.clone() } else { al_cover.clone() };
-    let detail = AlbumDetail {
-        songs,
-        album: AlbumFull {
-            id: al_id,
-            name: al_name,
-            artist: s(al.get("artist")),
-            artist_id: s(al.get("artistId")),
-            cover_art_url: cover_url(&p, &cover, 400),
-            cover_art: cover,
-            song_count: n(al.get("songCount")),
-            duration: n(al.get("duration")),
-            year: al.get("year").and_then(|y| y.as_f64()),
-            genre: al.get("genre").and_then(|g| g.as_str()).map(String::from),
-        },
-    };
+    let detail = crate::commands::subsonic::album(&state.http, &p, &id).await?;
     Ok(cache_album_detail(&state, detail).await)
 }
 
@@ -701,9 +587,7 @@ pub async fn library_album_list(
         return Ok(cache_album_covers(&state, albums).await);
     }
     let kind = kind.unwrap_or_else(|| "newest".to_string());
-    let cnt = count.unwrap_or(20).min(100).to_string();
-    let body = request(&state.http, &p, "getAlbumList2", &[("type", &kind), ("size", &cnt)]).await?;
-    let albums = arr(body.get("albumList2").and_then(|r| r.get("album"))).iter().map(|v| map_album(v, &p, 240)).collect();
+    let albums = crate::commands::subsonic::album_list(&state.http, &p, &kind, count.unwrap_or(20).min(100)).await?;
     Ok(cache_album_covers(&state, albums).await)
 }
 
@@ -719,8 +603,7 @@ pub async fn library_starred(state: State<'_, AppState>) -> Result<Vec<Song>, St
         let songs = crate::commands::plex::starred(&state.http, &p).await?;
         return Ok(cache_song_covers(&state, songs).await);
     }
-    let body = request(&state.http, &p, "getStarred2", &[]).await?;
-    let songs = arr(body.get("starred2").and_then(|r| r.get("song"))).iter().map(|v| map_song(v, &p)).collect();
+    let songs = crate::commands::subsonic::starred(&state.http, &p).await?;
     Ok(cache_song_covers(&state, songs).await)
 }
 
@@ -765,8 +648,7 @@ pub async fn library_star(
         return Ok(());
     }
     if resolved_id.is_empty() { return Err("Song id is required.".to_string()); }
-    let method = if unstar.unwrap_or(false) { "unstar" } else { "star" };
-    request(&state.http, &p, method, &[("id", &resolved_id)]).await?;
+    crate::commands::subsonic::star(&state.http, &p, &resolved_id, unstar.unwrap_or(false)).await?;
 
     // Mirror to Last.fm track.love / track.unlove
     if let (Some(a), Some(t)) = (artist.as_deref(), title.as_deref()) {
@@ -816,10 +698,7 @@ pub async fn library_add_to_playlist(
     if playlist_id.is_empty() || resolved_id.is_empty() {
         return Err("playlistId and songId are required.".to_string());
     }
-    request(&state.http, &p, "updatePlaylist", &[
-        ("playlistId", &playlist_id), ("songIdToAdd", &resolved_id),
-    ]).await?;
-    Ok(())
+    crate::commands::subsonic::add_to_playlist(&state.http, &p, &playlist_id, &resolved_id).await
 }
 
 #[tauri::command]
@@ -854,29 +733,7 @@ pub async fn library_create_playlist(
         return Err("Creating Plex playlists is not supported yet.".to_string());
     }
 
-    let mut params: Vec<(&str, &str)> = vec![("name", trimmed_name)];
-    for song_id in &song_ids {
-        params.push(("songId", song_id.as_str()));
-    }
-    let body = request(&state.http, &p, "createPlaylist", &params).await?;
-    let playlist = body.get("playlist").cloned().unwrap_or(serde_json::Value::Null);
-    let id = s(playlist.get("id"));
-    let cover = {
-        let c = s(playlist.get("coverArt"));
-        if c.is_empty() { id.clone() } else { c }
-    };
-
-    let playlist = Playlist {
-        cover_art_url: cover_url(&p, &cover, 240),
-        id,
-        name: {
-            let created_name = s(playlist.get("name"));
-            if created_name.is_empty() { trimmed_name.to_string() } else { created_name }
-        },
-        song_count: n(playlist.get("songCount")).max(song_ids.len() as f64),
-        duration: n(playlist.get("duration")),
-        cover_art: cover,
-    };
+    let playlist = crate::commands::subsonic::create_playlist(&state.http, &p, trimmed_name, &song_ids).await?;
     Ok(cache_playlist_covers(&state, vec![playlist]).await.into_iter().next().unwrap())
 }
 
@@ -914,11 +771,7 @@ pub async fn library_rename_playlist(
         return Err("Renaming Plex playlists is not supported yet.".to_string());
     }
 
-    request(&state.http, &p, "updatePlaylist", &[
-        ("playlistId", &playlist_id),
-        ("name", trimmed_name),
-    ]).await?;
-    Ok(())
+    crate::commands::subsonic::rename_playlist(&state.http, &p, &playlist_id, trimmed_name).await
 }
 
 #[tauri::command]
@@ -941,11 +794,5 @@ pub async fn library_materialize_song(
         return Err("Song id is required.".to_string());
     }
 
-    request_binary(
-        &state.http,
-        &p,
-        "stream",
-        &[("id", song_id.as_str()), ("maxBitRate", "320")],
-    )
-    .await
+    crate::commands::subsonic::materialize_song(&state.http, &p, song_id.as_str()).await
 }

@@ -213,7 +213,7 @@
           {/if}
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
-              <p class="truncate text-sm font-semibold">{song.title}</p>
+              <p class="whitespace-normal break-words text-sm font-semibold leading-tight">{song.title}</p>
               <SongTechBadge id={song.id} audioFormat={song.audioFormat} bitrateKbps={song.bitrateKbps} compact />
             </div>
             <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
@@ -270,7 +270,7 @@
             {/if}
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <p class="truncate text-sm font-semibold">{song.title}</p>
+                <p class="whitespace-normal break-words text-sm font-semibold leading-tight">{song.title}</p>
                 <SongTechBadge id={song.id} audioFormat={song.audioFormat} bitrateKbps={song.bitrateKbps} compact />
               </div>
               <p class="truncate text-xs text-muted-foreground">{song.artist}</p>

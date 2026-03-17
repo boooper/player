@@ -374,7 +374,7 @@
               {/if}
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <p class="truncate text-sm font-medium {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
+                  <p class="whitespace-normal break-words text-sm font-medium leading-tight {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
                   <SongTechBadge
                     id={song.id}
                     cached={desktopPlayback ? cachedSongIds.has(song.id) : null}

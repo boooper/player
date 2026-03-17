@@ -465,7 +465,7 @@
             {/if}
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <p class="truncate text-sm font-medium">{sub.title}</p>
+                <p class="whitespace-normal break-words text-sm font-medium leading-tight">{sub.title}</p>
                 <SongTechBadge
                   id={sub.id}
                   cached={desktopPlayback ? cachedSongIds.has(sub.id) : null}

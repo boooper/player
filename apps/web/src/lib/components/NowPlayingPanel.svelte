@@ -209,7 +209,7 @@
                   <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(song.title)}</span>
                 {/if}
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-sm font-medium">{song.title}</span>
+                  <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{song.title}</span>
                   <SongArtistLinks
                     artist={song.artist}
                     class="block truncate text-xs text-muted-foreground"
@@ -413,7 +413,7 @@
                   <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(item.song.title)}</span>
                 {/if}
                 <span class="min-w-0">
-                  <span class="block truncate text-sm font-medium">{item.song.title}</span>
+                  <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{item.song.title}</span>
                   <SongArtistLinks
                     artist={item.song.artist}
                     class="block truncate text-xs text-muted-foreground"

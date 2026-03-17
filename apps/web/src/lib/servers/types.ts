@@ -84,6 +84,8 @@ export type LyricsResult = {
   plainLyrics: string | null;
   syncedLyrics: string | null;
   instrumental: boolean;
+  provider?: string | null;
+  cached?: boolean;
 };
 
 export type DesktopPlaybackStatus = {
