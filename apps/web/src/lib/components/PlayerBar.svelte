@@ -1125,14 +1125,19 @@
 
   function changeVolume(values: number[]) {
     const value = Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100));
-    volVal = [value * 100];
+
+    // Avoid redundant writes that can cause effect update loops
+    const EPS = 0.0001;
     if (castActive) {
+      if (Math.abs((castVolume ?? 0) - value) < EPS) return;
       castVolume = value;
       castSetVolumeCmd(value).catch(() => {});
       return;
     }
 
+    if (Math.abs($volume - value) < EPS) return;
     volume.set(value);
+
     if (desktopPlayback) {
       desktopPlaybackSetVolume(value).catch(() => undefined);
     } else if (!crossfadeInProgress) {
@@ -1450,7 +1455,7 @@
             max={isFinite($duration) && $duration > 0 ? $duration : 1}
             step={1}
             onpointerdown={() => { seekDragging = true; }}
-            onValueChange={(v) => { seekVal = v; }}
+            onValueChange={(v) => { /* value is bound via bind:value; no-op to avoid feedback loop */ }}
             onValueCommit={(v) => { seek(v); }}
             aria-label="Playback position"
           />
@@ -1541,7 +1546,7 @@
           max={100}
           step={1}
           onpointerdown={() => { volDragging = true; }}
-          onValueChange={(v) => { volVal = v; changeVolume(v); }}
+          onValueChange={(v) => { changeVolume(v); }}
           onValueCommit={commitVolume}
           aria-label="Volume"
         />
