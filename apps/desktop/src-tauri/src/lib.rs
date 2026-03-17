@@ -40,18 +40,6 @@ pub fn run() {
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    // Configure cache plugin: custom subdirectory, compression and cleanup.
-    let cache_config = tauri_plugin_cache::CacheConfig {
-        cache_dir: Some("madrify_cache".into()),
-        cache_file_name: Some("cache_data.json".into()),
-        cleanup_interval: Some(120),
-        default_compression: Some(true),
-        compression_level: Some(7),
-        compression_threshold: Some(4096),
-        compression_method: Some(tauri_plugin_cache::CompressionMethod::Lzma2),
-        ..Default::default()
-    };
-
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Show a message then bring the existing window to front
@@ -64,10 +52,6 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        // Register HTTP plugin and cache plugin configured with our settings
-        // so guest bindings and plugin lifecycle are properly initialized.
-        .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_cache::init_with_config(cache_config))
         .setup(move |app| {
             // Initialise SQLite database in app data directory
             let data_dir = app.path().app_data_dir()?;
@@ -83,11 +67,11 @@ pub fn run() {
                 cast_session: Mutex::new(None),
                 playback: playback_engine::PlaybackHandle::new()
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
-                playback_cache: playback_engine::DiskCache::new_with_handle(cache_dir.join("audio"), app.handle().clone())
+                playback_cache: playback_engine::DiskCache::new(cache_dir.join("audio"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
-                artwork_cache: playback_engine::DiskCache::new_with_handle(cache_dir.join("artwork"), app.handle().clone())
+                artwork_cache: playback_engine::DiskCache::new(cache_dir.join("artwork"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
-                lyrics_cache: playback_engine::DiskCache::new_with_handle(cache_dir.join("lyrics"), app.handle().clone())
+                lyrics_cache: playback_engine::DiskCache::new(cache_dir.join("lyrics"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
             });
 
@@ -160,8 +144,6 @@ pub fn run() {
             commands::library::library_materialize_song,
             // lyrics
             commands::lyrics::fetch_lyrics,
-            // http + cache helper
-            commands::http_cache::fetch_and_cache,
             // chromecast
             commands::cast::cast_discover,
             commands::cast::cast_connect,
@@ -185,8 +167,6 @@ pub fn run() {
             commands::playback::playback_status,
             commands::playback::playback_is_cached,
             commands::playback::playback_cached_ids,
-            // prefetch media helper
-            commands::prefetch::prefetch_media,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
