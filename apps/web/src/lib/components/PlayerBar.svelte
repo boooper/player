@@ -1,29 +1,14 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import {
-    DropdownMenu,
-    DropdownMenuTrigger,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-  } from '$lib/components/ui/dropdown-menu';
-  import {
     Pause,
     Play,
     Repeat,
     Repeat1,
-    Shuffle,
     SkipBack,
     SkipForward,
-    Sparkles,
-    ChevronDown,
-    Volume2,
-    VolumeX,
     Mic2,
-    Heart,
-    Disc3,
-    User2,
-    Cast
+    Heart
   } from '@lucide/svelte';
   import {
     focusTrack,
@@ -35,11 +20,7 @@
     prevTrack,
     queue,
     repeatMode,
-    shuffleEnabled,
     shouldAutoplay,
-    enableShuffle,
-    enableSmartShuffle,
-    disableShuffle,
     cycleRepeatMode,
     volume,
     upNextEnabled,
@@ -50,36 +31,52 @@
     seekRequest,
     togglePlayRequest,
     starredSongIds,
-    playQueue,
     addRecentlyPlayedSong,
-    markSmartShuffleTracks,
     smartShuffleTrackIds,
     restorePlaybackRequest
   } from '$lib/stores/player';
   import { showQueue } from '$lib/stores/player';
-  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, fetchSimilarSongs, starSong, unstarSong, lfmNowPlaying, lfmScrobble, lfmUserTaste, fetchArtistAlbums, fetchAlbumSongs, castConnect as castConnectCmd, castDiscover, castPlay as castPlayCmd, castPause as castPauseCmd, castResume as castResumeCmd, castStop as castStopCmd, castSetVolume as castSetVolumeCmd, castSeek as castSeekCmd, castGetSession as castGetSessionCmd, castGetStatus as castGetStatusCmd, desktopPlaybackLoad, desktopPlaybackPause, desktopPlaybackPlay, desktopPlaybackPreload, desktopPlaybackSeek, desktopPlaybackSetEq, desktopPlaybackSetVolume, desktopPlaybackStatus, desktopPlaybackStop, desktopPlaybackIsCached, type CastDeviceInfo } from '$lib/servers';
+  import {
+    DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
+    starSong,
+    unstarSong,
+    lfmNowPlaying,
+    lfmScrobble,
+    desktopPlaybackLoad,
+    desktopPlaybackPause,
+    desktopPlaybackPlay,
+    desktopPlaybackPreload,
+    desktopPlaybackSeek,
+    desktopPlaybackSetEq,
+    desktopPlaybackSetVolume,
+    desktopPlaybackStatus,
+    desktopPlaybackStop,
+    desktopPlaybackIsCached,
+    type CastDeviceInfo
+  } from '$lib/servers';
   import { getUpNextSongs } from '$lib/discovery';
-  import { fetchLikedArtists, saveVolume } from '$lib/servers';
+  import { fetchLikedArtists } from '$lib/servers';
   import { EQ_FREQUENCIES, normalizeEqBands } from '$lib/audio/equalizer';
   import { formatClockDuration } from '$lib/utils';
   import { lbzNowPlaying, lbzScrobble } from '$lib/providers/recommendation/listenbrainz';
   import { toast } from 'svelte-sonner';
-  import { formatSongArtists, primarySongArtist } from '$lib/song-artists';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import { Button, Slider } from '$lib/components/ui';
+  import PlayerVolume from '$lib/components/player/PlayerVolume.svelte';
+  import PlayerCastMenu from '$lib/components/player/PlayerCastMenu.svelte';
+  import PlayerShuffleMenu from '$lib/components/player/PlayerShuffleMenu.svelte';
+  import { createPlayerCastController } from '$lib/components/player/player-cast-controller.svelte';
+  import { createPlayerShuffleController } from '$lib/components/player/player-shuffle-controller.svelte';
   import { backendSettings } from '$lib/stores/backend-settings';
-  import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { goto } from '$app/navigation';
   import { isTauri } from '$lib/tauri';
 
-  // ── Cast state ──────────────────────────────────────────────────────────────
-  let castDevices = $state<CastDeviceInfo[]>([]);
-  let discovering = $state(false);
   let castActive = $state(false);
   let castPlaying = $state(false);
   let castDevice = $state<CastDeviceInfo | null>(null);
   let castVolume = $state<number | null>(null);
+
   const desktopPlayback = isTauri();
   let desktopLoadedTrackId = $state<string | null>(null);
   let desktopEndedTrackId = $state<string | null>(null);
@@ -89,105 +86,104 @@
   let seekVal = $state<number[]>([0]);
   let seekDragging = $state(false);
   let isBuffering = $state(false);
-  let volVal = $state<number[]>([$volume * 100]);
-  let volDragging = $state(false);
 
-  async function discoverDevices() {
-    if (castActive || discovering) return;
-    discovering = true;
-    castDevices = [];
-    try {
-      castDevices = await castDiscover();
-      if (castDevices.length === 0) toast.info('No Cast devices found on your network');
-    } catch (e) {
-      toast.error(`Cast discovery failed: ${e}`);
-    } finally {
-      discovering = false;
-    }
+  const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
+  const lastFmConnected = $derived($backendSettings.lastFmConnected);
+  const lbzToken = $derived($backendSettings.listenBrainzToken);
+  const crossfadeMs = $derived(Math.max(0, Math.round(($backendSettings.crossfadeSeconds ?? 4) * 1000)));
+  const eqEnabled = $derived($backendSettings.eqEnabled ?? false);
+  const eqBands = $derived(normalizeEqBands($backendSettings.eqBands));
+  const zeroEqBands = normalizeEqBands([]);
+  const transportLocked = $derived(desktopPlayback && (desktopLoadPending || isBuffering));
+  const showPauseButton = $derived(castActive ? castPlaying : ($isPlaying && !isBuffering && !desktopLoadPending));
+
+  let scrobbledTrackId = '';
+  let scrobbleStartTime = 0;
+
+  let deckAEl = $state<HTMLAudioElement | null>(null);
+  let deckBEl = $state<HTMLAudioElement | null>(null);
+  let activeDeck = $state<'a' | 'b'>('a');
+  let crossfadeInProgress = false;
+  let crossfadeTimer = 0;
+  let preloadedIndex = -1;
+  let audioContext: AudioContext | null = null;
+  let deckASource: MediaElementAudioSourceNode | null = null;
+  let deckBSource: MediaElementAudioSourceNode | null = null;
+  let eqFilterChains: BiquadFilterNode[][] = [];
+  let audioGraphUnavailable = false;
+
+  const currentTrack = $derived($queue[$currentIndex] ?? null);
+  const isStarred = $derived(currentTrack ? $starredSongIds.has(currentTrack.id) : false);
+  const isSmartShuffleTrack = $derived(currentTrack ? $smartShuffleTrackIds.has(currentTrack.id) : false);
+
+  function getActiveAudio(): HTMLAudioElement | null {
+    return activeDeck === 'a' ? deckAEl : deckBEl;
   }
 
-  async function startCast(device: CastDeviceInfo) {
-    const toastId = toast.loading(`Connecting to ${device.name}...`);
-    try {
+  function getInactiveAudio(): HTMLAudioElement | null {
+    return activeDeck === 'a' ? deckBEl : deckAEl;
+  }
+
+  function syncLibraryFocus(track: typeof currentTrack): void {
+    if (!track) return;
+    focusTrack.set({
+      title: track.title,
+      artist: track.artist,
+      imageUrl: track.coverArtUrl,
+      source: 'library',
+      album: track.album
+    });
+  }
+
+  function stopCrossfadeTimer(): void {
+    if (!crossfadeTimer) return;
+    clearInterval(crossfadeTimer);
+    crossfadeTimer = 0;
+  }
+
+  function pauseLocalAudio(): void {
+    deckAEl?.pause();
+    deckBEl?.pause();
+  }
+
+  function shouldPreloadUpcomingTrack(positionSeconds: number, durationSeconds: number): boolean {
+    if (durationSeconds <= 0) return false;
+
+    const preloadLeadSeconds = Math.max(($backendSettings.crossfadeSeconds ?? 4) + 2, 4);
+    const percentThreshold = durationSeconds * 0.8;
+    const timeThreshold = Math.max(0, durationSeconds - preloadLeadSeconds);
+    const triggerAt = Math.min(percentThreshold, timeThreshold);
+
+    return positionSeconds >= triggerAt;
+  }
+
+  const castController = createPlayerCastController({
+    getCurrentTrack: () => currentTrack,
+    getSeekDragging: () => seekDragging,
+
+    setCurrentTime: (value) => currentTime.set(value),
+    setCastVolume: (value) => { castVolume = value; },
+    setCastPlaying: (value) => { castPlaying = value; },
+    setCastActive: (value) => { castActive = value; },
+    setCastDevice: (value) => { castDevice = value; },
+
+    onPauseLocalPlayback: async () => {
       if ($isPlaying) {
         pauseLocalAudio();
-        if (desktopPlayback) await desktopPlaybackPause().catch(() => undefined);
+        if (desktopPlayback) {
+          await desktopPlaybackPause().catch(() => undefined);
+        }
       }
-      castDevice = device;
-      castActive = true;
-      castPlaying = false;
-      if (currentTrack) {
-        await castPlayCmd({
-          deviceName: device.name,
-          deviceAddr: device.addr,
-          devicePort: device.port,
-          streamUrl: currentTrack.streamUrl,
-          title: currentTrack.title,
-          artist: currentTrack.artist,
-          coverUrl: currentTrack.coverArtUrl ?? '',
-        });
-        castPlaying = true;
-        toast.success(`Casting to ${device.name}`, { id: toastId });
-      } else {
-        await castConnectCmd({
-          deviceName: device.name,
-          deviceAddr: device.addr,
-          devicePort: device.port,
-        });
-        const status = await castGetStatusCmd();
-        castVolume = status.volumeLevel;
-        volVal = [status.volumeLevel * 100];
-        _lastPlayerState = status.playerState;
-        toast.success(`Connected to ${device.name}`, { id: toastId });
-      }
-    } catch (e) {
-      castActive = false;
-      castPlaying = false;
-      castVolume = null;
-      castDevice = null;
-      toast.error(`Cast failed: ${e}`, { id: toastId });
+    },
+
+    onAdvanceTrack: () => {
+      nextTrack();
     }
-  }
+  });
 
-  async function stopCast() {
-    const name = castDevice?.name ?? 'device';
-    castActive = false;
-    castPlaying = false;
-    castVolume = null;
-    castDevice = null;
-    try { await castStopCmd(); } catch {}
-    toast.success(`Stopped casting to ${name}`);
-  }
-  // Poll the Chromecast every second while casting to keep the seek bar in sync
-  let _lastPlayerState: string | null = null;
-  $effect(() => {
-    if (!castActive) return;
-    const id = setInterval(async () => {
-      if (!castActive || seekDragging) return;
-      try {
-        const status = await castGetStatusCmd();
-        castVolume = status.volumeLevel;
-        if (!volDragging) volVal = [status.volumeLevel * 100];
-        // Update UI time + playing flag when available
-        if (status.playerState === 'PLAYING' || status.playerState === 'PAUSED') {
-          currentTime.set(status.currentTime);
-          castPlaying = status.playerState === 'PLAYING';
-        } else if (status.playerState === 'IDLE') {
-          castPlaying = false;
-        }
-
-        // If device transitioned to IDLE, advance the queue
-        if (_lastPlayerState && _lastPlayerState !== 'IDLE' && status.playerState === 'IDLE') {
-          // Use store action to advance; this will set shouldAutoplay and
-          // Effect 3 will route playback through Cast when active.
-          nextTrack();
-        }
-        _lastPlayerState = status.playerState;
-      } catch {
-        // ignore transient errors — next tick will retry
-      }
-    }, 1000);
-    return () => clearInterval(id);
+  const shuffleController = createPlayerShuffleController({
+    getCurrentTrack: () => currentTrack,
+    getLastFmApiKey: () => lastFmApiKey
   });
 
   onMount(() => {
@@ -200,34 +196,11 @@
 
     window.addEventListener('player:toggle-play', handleTogglePlay);
     window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
+
     let desktopPoll = 0;
 
     if (desktopPlayback) {
-      castGetSessionCmd()
-        .then(async (session) => {
-          if (!session) return;
-          castDevice = {
-            name: session.deviceName,
-            addr: session.deviceAddr,
-            port: session.devicePort,
-          };
-          castActive = true;
-
-          try {
-            const status = await castGetStatusCmd();
-            currentTime.set(status.currentTime);
-            castPlaying = status.playerState === 'PLAYING';
-            castVolume = status.volumeLevel;
-            volVal = [status.volumeLevel * 100];
-            _lastPlayerState = status.playerState;
-          } catch {
-            castActive = false;
-            castPlaying = false;
-            castVolume = null;
-            castDevice = null;
-          }
-        })
-        .catch(() => undefined);
+      castController.restoreSession().catch(() => undefined);
     }
 
     if (desktopPlayback) {
@@ -289,27 +262,13 @@
           .catch(() => undefined);
       }, 250);
     }
+
     return () => {
       window.removeEventListener('player:toggle-play', handleTogglePlay);
       window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
       if (desktopPoll) clearInterval(desktopPoll);
     };
   });
-
-  const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
-  const lastFmConnected = $derived($backendSettings.lastFmConnected);
-  const lbzToken = $derived($backendSettings.listenBrainzToken);
-  const crossfadeMs = $derived(Math.max(0, Math.round(($backendSettings.crossfadeSeconds ?? 4) * 1000)));
-  const eqEnabled = $derived($backendSettings.eqEnabled ?? false);
-  const eqBands = $derived(normalizeEqBands($backendSettings.eqBands));
-  const zeroEqBands = normalizeEqBands([]);
-  const shuffleBtnClass = $derived($smartShuffleMode || $shuffleEnabled ? 'text-primary' : 'text-muted-foreground hover:text-foreground');
-  const transportLocked = $derived(desktopPlayback && (desktopLoadPending || isBuffering));
-  const showPauseButton = $derived(castActive ? castPlaying : ($isPlaying && !isBuffering && !desktopLoadPending));
-
-  function randomInt(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
 
   $effect(() => {
     const track = currentTrack;
@@ -332,26 +291,9 @@
     };
   });
 
-  function shuffleItems<T>(items: T[]): T[] {
-    const next = [...items];
-    for (let i = next.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [next[i], next[j]] = [next[j], next[i]];
-    }
-    return next;
-  }
-
-  // ── Scrobbling ─────────────────────────────────────────────────────────────
-  // Send "now playing" when the track changes, then scrobble once the user
-  // has listened for ≥50% of the track (or 240 seconds, per Last.fm spec).
-  // Both are fire-and-forget — errors are absorbed so playback is never affected.
-  let scrobbledTrackId = '';
-  let scrobbleStartTime = 0;
-
   $effect(() => {
     const track = currentTrack;
     if (!track) return;
-    // New track started
     scrobbledTrackId = '';
     scrobbleStartTime = Math.floor(Date.now() / 1000);
     addRecentlyPlayedSong(track);
@@ -364,7 +306,6 @@
     const dur = $duration;
     const track = currentTrack;
     if (!track || scrobbledTrackId === track.id) return;
-    // Scrobble threshold: 50% or 240 seconds, whichever is less
     const threshold = dur > 0 ? Math.min(dur * 0.5, 240) : 240;
     if (t >= threshold) {
       scrobbledTrackId = track.id;
@@ -393,65 +334,6 @@
         toast.error('Failed to add to favorites');
       }
     }
-  }
-
-  let deckAEl = $state<HTMLAudioElement | null>(null);
-  let deckBEl = $state<HTMLAudioElement | null>(null);
-  let activeDeck = $state<'a' | 'b'>('a');
-  let crossfadeInProgress = false;
-  let crossfadeTimer = 0;
-  let preloadedIndex = -1;
-  let audioContext: AudioContext | null = null;
-  let deckASource: MediaElementAudioSourceNode | null = null;
-  let deckBSource: MediaElementAudioSourceNode | null = null;
-  let eqFilterChains: BiquadFilterNode[][] = [];
-  let audioGraphUnavailable = false;
-
-  const currentTrack = $derived($queue[$currentIndex] ?? null);
-  const isStarred = $derived(currentTrack ? $starredSongIds.has(currentTrack.id) : false);
-  const isSmartShuffleTrack = $derived(currentTrack ? $smartShuffleTrackIds.has(currentTrack.id) : false);
-
-  function getActiveAudio(): HTMLAudioElement | null {
-    return activeDeck === 'a' ? deckAEl : deckBEl;
-  }
-
-  function getInactiveAudio(): HTMLAudioElement | null {
-    return activeDeck === 'a' ? deckBEl : deckAEl;
-  }
-
-  function syncLibraryFocus(track: typeof currentTrack): void {
-    if (!track) return;
-    focusTrack.set({
-      title: track.title,
-      artist: track.artist,
-      imageUrl: track.coverArtUrl,
-      source: 'library',
-      album: track.album
-    });
-  }
-
-  function stopCrossfadeTimer(): void {
-    if (!crossfadeTimer) return;
-    clearInterval(crossfadeTimer);
-    crossfadeTimer = 0;
-  }
-
-  function pauseLocalAudio(): void {
-    deckAEl?.pause();
-    deckBEl?.pause();
-  }
-
-  function shouldPreloadUpcomingTrack(positionSeconds: number, durationSeconds: number): boolean {
-    if (durationSeconds <= 0) return false;
-
-    // Preload no earlier than 80% played unless the configured crossfade window
-    // would otherwise leave too little time to fetch and prepare the next track.
-    const preloadLeadSeconds = Math.max(($backendSettings.crossfadeSeconds ?? 4) + 2, 4);
-    const percentThreshold = durationSeconds * 0.8;
-    const timeThreshold = Math.max(0, durationSeconds - preloadLeadSeconds);
-    const triggerAt = Math.min(percentThreshold, timeThreshold);
-
-    return positionSeconds >= triggerAt;
   }
 
   $effect(() => {
@@ -550,17 +432,10 @@
     ensureAudioGraph();
   }
 
-  // Local state for the seek slider — synced from $currentTime when not dragging
   $effect(() => {
     if (!seekDragging) seekVal = [$currentTime];
   });
 
-  // Local state for the volume slider
-  $effect(() => {
-    if (!volDragging) volVal = [$volume * 100];
-  });
-
-  // Effect 1: load the active track into the active deck
   $effect(() => {
     const track = currentTrack;
     if (desktopPlayback) {
@@ -612,7 +487,6 @@
     duration.set(track.duration > 0 ? track.duration : 0);
   });
 
-  // Effect 2: sync volume to the local decks when not crossfading
   $effect(() => {
     if (desktopPlayback) {
       if (!castActive) desktopPlaybackSetVolume($volume).catch(() => undefined);
@@ -663,7 +537,6 @@
     };
   });
 
-  // Effect 3: preload the upcoming song into the inactive deck
   $effect(() => {
     const next = $queue[$currentIndex + 1];
     const trackDuration = currentTrack?.duration && currentTrack.duration > 0 ? currentTrack.duration : $duration;
@@ -762,7 +635,6 @@
     }, 50);
   }
 
-  // Effect 4: start a real overlap fade near the end of the current track
   $effect(() => {
     if (desktopPlayback) return;
     const next = $queue[$currentIndex + 1];
@@ -774,7 +646,6 @@
     untrack(() => { startCrossfade($currentIndex + 1); });
   });
 
-  // Effect 5: trigger autoplay (routes through Cast when active)
   $effect(() => {
     if (!$shouldAutoplay) return;
 
@@ -782,19 +653,7 @@
       shouldAutoplay.set(false);
       const track = currentTrack;
       if (track) {
-        castPlaying = true;
-        castPlayCmd({
-          deviceName: castDevice.name,
-          deviceAddr: castDevice.addr,
-          devicePort: castDevice.port,
-          streamUrl: track.streamUrl,
-          title: track.title,
-          artist: track.artist,
-          coverUrl: track.coverArtUrl ?? '',
-        }).catch((e) => {
-          toast.error(`Cast update failed: ${e}`);
-          castPlaying = false;
-        });
+        castController.playTrackOnCast(track);
       }
       return;
     }
@@ -832,151 +691,9 @@
       .catch(() => isPlaying.set(false));
   });
 
-  // Effect 6: external toggle-play requests
   $effect(() => {
     if ($togglePlayRequest === 0) return;
     untrack(() => togglePlay());
-  });
-  function activateShuffle() {
-    smartShuffleMode.set(false);
-    enableShuffle();
-  }
-
-  function activateSmartShuffle() {
-    enableSmartShuffle();
-  }
-
-  function deactivateShuffle() {
-    disableShuffle();
-  }
-
-  async function shuffleArtist() {
-    if (!currentTrack) return;
-    const artist = primarySongArtist(currentTrack.artist);
-    const toastId = toast.loading(`Loading ${artist}…`);
-    try {
-      const albums = await fetchArtistAlbums(artist, 50);
-      const allSongs = (await Promise.all(albums.map(a => fetchAlbumSongs(a.id)))).flat();
-      if (!allSongs.length) throw new Error('No songs found');
-      // Fisher-Yates shuffle
-      for (let i = allSongs.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [allSongs[i], allSongs[j]] = [allSongs[j], allSongs[i]];
-      }
-      smartShuffleMode.set(false);
-      shuffleEnabled.set(true);
-      playQueue(allSongs, 0);
-      toast.success(`Shuffling ${artist}`, { id: toastId });
-    } catch {
-      toast.error('Failed to load artist songs', { id: toastId });
-    }
-  }
-
-  async function shuffleAlbum() {
-    if (!currentTrack?.albumId) return;
-    const albumName = currentTrack.album;
-    const toastId = toast.loading(`Loading ${albumName}…`);
-    try {
-      const songs = await fetchAlbumSongs(currentTrack.albumId);
-      if (!songs.length) throw new Error('No songs found');
-      for (let i = songs.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [songs[i], songs[j]] = [songs[j], songs[i]];
-      }
-      smartShuffleMode.set(false);
-      shuffleEnabled.set(true);
-      playQueue(songs, 0);
-      toast.success(`Shuffling ${albumName}`, { id: toastId });
-    } catch {
-      toast.error('Failed to load album songs', { id: toastId });
-    }
-  }
-
-  // Smart Shuffle: every SMART_SHUFFLE_INJECT_EVERY tracks, weave Last.fm-powered
-  // recommendations into the upcoming queue. Falls back to Subsonic similar if
-  // no Last.fm key is configured. Songs are inserted a few positions ahead so
-  // they feel naturally mixed in rather than dumped at the end.
-  const SMART_SHUFFLE_MIN_GAP = 2;
-  const SMART_SHUFFLE_MAX_GAP = 5;
-  const SMART_SHUFFLE_MIN_FETCH = 3;
-  const SMART_SHUFFLE_MAX_FETCH = 6;
-  const SMART_SHUFFLE_MAX_INSERT = 4;
-  const SMART_SHUFFLE_MIN_OFFSET = 1;
-  const SMART_SHUFFLE_MAX_OFFSET = 3;
-  const SMART_SHUFFLE_MIN_SPACING = 1;
-  const SMART_SHUFFLE_MAX_SPACING = 3;
-  let smartShufflePlayCount = 0;
-  let smartShuffleLastIdx = -1;
-  let smartShuffleInflight = false;
-  let smartShuffleFetching = $state(false);
-  let smartShuffleNextInjectAfter = randomInt(SMART_SHUFFLE_MIN_GAP, SMART_SHUFFLE_MAX_GAP);
-
-  $effect(() => {
-    const track = $queue[$currentIndex];
-    const idx = $currentIndex;
-
-    if (!$smartShuffleMode) {
-      // Reset counters when Smart Shuffle is toggled off
-      smartShufflePlayCount = 0;
-      smartShuffleLastIdx = -1;
-      smartShuffleNextInjectAfter = randomInt(SMART_SHUFFLE_MIN_GAP, SMART_SHUFFLE_MAX_GAP);
-      return;
-    }
-    if (!track) return;
-
-    // Only count actual track advances, not queue mutations
-    if (idx === smartShuffleLastIdx) return;
-    smartShuffleLastIdx = idx;
-    smartShufflePlayCount++;
-
-    // Prune played history so old songs don't pile up at the bottom
-    pruneQueueHistory(1);
-
-    if (smartShufflePlayCount < smartShuffleNextInjectAfter || smartShuffleInflight) return;
-
-    smartShufflePlayCount = 0;
-    smartShuffleNextInjectAfter = randomInt(SMART_SHUFFLE_MIN_GAP, SMART_SHUFFLE_MAX_GAP);
-    smartShuffleInflight = true;
-    smartShuffleFetching = true;
-
-    // Capture current state before the async gap
-    const existingIds = new Set($queue.map(s => s.id));
-    const capturedIdx = idx;
-    const { artist, title, id } = track;
-
-    const fetchLimit = randomInt(SMART_SHUFFLE_MIN_FETCH, SMART_SHUFFLE_MAX_FETCH);
-    const doFetch: Promise<import('$lib/servers').Song[]> = lastFmApiKey
-      ? Promise.all([
-          fetchLikedArtists().then(stored => stored.map(a => a.name)).catch((): string[] => []),
-          lfmUserTaste().catch((): string[] => [])
-        ]).then(([liked, taste]) => {
-          // Merge liked artists + Last.fm top artists, deduplicated
-          const merged = [...new Set([...liked, ...taste])];
-          return getUpNextSongs({ artist, title, likedArtists: merged, limit: fetchLimit });
-        })
-      : fetchSimilarSongs(id, fetchLimit);
-
-    doFetch
-      .then(songs => {
-        const freshPool = shuffleItems(songs.filter(s => !existingIds.has(s.id)));
-        const fresh = freshPool.slice(0, randomInt(1, Math.min(SMART_SHUFFLE_MAX_INSERT, freshPool.length)));
-        if (!fresh.length) return;
-        markSmartShuffleTracks(fresh);
-        queue.update(items => {
-          const next = [...items];
-          let insertAt = Math.min(capturedIdx + randomInt(SMART_SHUFFLE_MIN_OFFSET, SMART_SHUFFLE_MAX_OFFSET), next.length);
-          fresh.forEach((song) => {
-            next.splice(insertAt, 0, song);
-            insertAt = Math.min(insertAt + randomInt(SMART_SHUFFLE_MIN_SPACING, SMART_SHUFFLE_MAX_SPACING), next.length);
-          });
-          return next;
-        });
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        smartShuffleInflight = false;
-        smartShuffleFetching = false;
-      });
   });
 
   let upNextFetching = false;
@@ -987,7 +704,6 @@
     const index = $currentIndex;
     const repeat = $repeatMode;
 
-    // In radio mode (no smart shuffle), also prune played history
     if ($upNextEnabled && !$smartShuffleMode && index > 1) {
       pruneQueueHistory(1);
     }
@@ -1034,27 +750,7 @@
   function togglePlay() {
     if (transportLocked) return;
     if (castActive) {
-      if (castPlaying) {
-        castPlaying = false;
-        castPauseCmd().catch((e) => { castPlaying = true; toast.error(`Cast pause failed: ${e}`); });
-      } else if (currentTrack && (!_lastPlayerState || _lastPlayerState === 'IDLE')) {
-        castPlaying = true;
-        castPlayCmd({
-          deviceName: castDevice?.name ?? 'Chromecast',
-          deviceAddr: castDevice?.addr ?? '',
-          devicePort: castDevice?.port ?? 0,
-          streamUrl: currentTrack.streamUrl,
-          title: currentTrack.title,
-          artist: currentTrack.artist,
-          coverUrl: currentTrack.coverArtUrl ?? '',
-        }).catch((e) => {
-          castPlaying = false;
-          toast.error(`Cast play failed: ${e}`);
-        });
-      } else {
-        castPlaying = true;
-        castResumeCmd().catch((e) => { castPlaying = false; toast.error(`Cast resume failed: ${e}`); });
-      }
+      castController.togglePlayPause();
       return;
     }
     if (!currentTrack) return;
@@ -1079,42 +775,13 @@
     }
   }
 
-  let volSaveTimer = 0;
-  function debounceSaveVolume(value: number) {
-    clearTimeout(volSaveTimer);
-    volSaveTimer = window.setTimeout(() => saveVolume(value), 500);
-  }
-
-  function onVolumeWheel(e: WheelEvent) {
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.05 : -0.05;
-    const base = castActive ? (castVolume ?? $volume) : $volume;
-    const next = Math.max(0, Math.min(1, base + delta));
-    volVal = [next * 100];
-
-    if (castActive) {
-      castVolume = next;
-      castSetVolumeCmd(next).catch(() => {});
-      return;
-    }
-
-    volume.set(next);
-    if (desktopPlayback) {
-      desktopPlaybackSetVolume(next).catch(() => undefined);
-    } else if (!crossfadeInProgress) {
-      const activeAudio = getActiveAudio();
-      if (activeAudio) activeAudio.volume = next;
-    }
-    debounceSaveVolume(next);
-  }
-
   function seek(values: number[]) {
     const value = Math.max(0, Number(values[0] ?? 0));
     currentTime.set(value);
     seekVal = [value];
     seekDragging = false;
     if (castActive) {
-      castSeekCmd(value).catch((e) => toast.error(`Cast seek failed: ${e}`));
+      castController.seek(value);
     } else if (desktopPlayback) {
       desktopPlaybackSeek(value).catch(() => undefined);
     } else {
@@ -1123,79 +790,10 @@
     }
   }
 
-  function changeVolume(values: number[]) {
-    const value = Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100));
-
-    // Avoid redundant writes that can cause effect update loops
-    const EPS = 0.0001;
-    if (castActive) {
-      if (Math.abs((castVolume ?? 0) - value) < EPS) return;
-      castVolume = value;
-      castSetVolumeCmd(value).catch(() => {});
-      return;
-    }
-
-    if (Math.abs($volume - value) < EPS) return;
-    volume.set(value);
-
-    if (desktopPlayback) {
-      desktopPlaybackSetVolume(value).catch(() => undefined);
-    } else if (!crossfadeInProgress) {
-      const activeAudio = getActiveAudio();
-      if (activeAudio) activeAudio.volume = value;
-    }
-  }
-
-  function commitVolume(values: number[]) {
-    changeVolume(values);
-    volDragging = false;
-    if (castActive) return;
-    saveVolume(Math.max(0, Math.min(1, Number(values[0] ?? 0) / 100)));
-  }
-
-  let premuteVolume = $state(0.8);
-  function toggleMute() {
-    const activeVolume = castActive ? (castVolume ?? $volume) : $volume;
-    if (activeVolume <= 0.01) {
-      const restore = premuteVolume > 0.01 ? premuteVolume : 0.8;
-      volVal = [restore * 100];
-      if (castActive) {
-        castVolume = restore;
-        castSetVolumeCmd(restore).catch(() => {});
-        return;
-      }
-
-      volume.set(restore);
-      if (desktopPlayback) {
-        desktopPlaybackSetVolume(restore).catch(() => undefined);
-      } else if (!crossfadeInProgress) {
-        const activeAudio = getActiveAudio();
-        if (activeAudio) activeAudio.volume = restore;
-      }
-      saveVolume(restore);
-    } else {
-      premuteVolume = activeVolume;
-      volVal = [0];
-      if (castActive) {
-        castVolume = 0;
-        castSetVolumeCmd(0).catch(() => {});
-        return;
-      }
-
-      volume.set(0);
-      if (desktopPlayback) {
-        desktopPlaybackSetVolume(0).catch(() => undefined);
-      } else if (!crossfadeInProgress) {
-        const activeAudio = getActiveAudio();
-        if (activeAudio) activeAudio.volume = 0;
-      }
-    }
-  }
-
-  // Handle seek requests from the lyrics panel
   $effect(() => {
     const t = $seekRequest;
     if (t === null) return;
+
     if (desktopPlayback) {
       desktopPlaybackSeek(t).catch(() => undefined);
     } else {
@@ -1259,7 +857,6 @@
 
 <footer class="player-bar app-shell-footer shrink-0 border-t border-border/40 px-4 py-3 {isBuffering ? 'player-bar-loading' : ''}">
   <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
-    <!-- Track info -->
     <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
         <button
@@ -1306,91 +903,30 @@
               <Heart class="size-3.5 {isStarred ? 'fill-rose-500' : ''}" />
             </button>
           </div>
-            <SongArtistLinks
-              artist={currentTrack.artist}
-              class="block truncate text-xs text-muted-foreground max-w-full text-left"
-              linkClass="hover:underline cursor-pointer"
-            />
+          <SongArtistLinks
+            artist={currentTrack.artist}
+            class="block truncate text-xs text-muted-foreground max-w-full text-left"
+            linkClass="hover:underline cursor-pointer"
+          />
         </div>
       {:else}
         <p class="text-sm text-muted-foreground">No track selected</p>
       {/if}
     </div>
 
-    <!-- Playback controls -->
     <div class="player-center-column flex flex-col items-center gap-1.5">
       <div class="player-transport flex items-center gap-1">
-        <!-- Shuffle button -->
-        <DropdownMenu>
-          <DropdownMenuTrigger>
-            {#snippet child({ props })}
-              <Button
-                {...props}
-                variant="ghost"
-                size="icon-sm"
-                class={`player-transport-button ${shuffleBtnClass}`}
-                aria-label="Shuffle options"
-                title={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
-              >
-                {#if $smartShuffleMode}
-                  <Sparkles class="size-3.5 transition-opacity {smartShuffleFetching ? 'animate-pulse' : ''}" />
-                {:else}
-                  <Shuffle class="size-3.5" />
-                {/if}
-              </Button>
-            {/snippet}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" class="min-w-56">
-            <DropdownMenuItem onclick={activateShuffle} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
-              <Shuffle class="size-4 shrink-0" />
-              <div>
-                <p class="font-medium">Shuffle</p>
-                <p class="text-xs text-muted-foreground">Play queue in random order</p>
-              </div>
-              {#if $shuffleEnabled && !$smartShuffleMode}
-                <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-              {/if}
-            </DropdownMenuItem>
-            <DropdownMenuItem onclick={activateSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
-              <Sparkles class="size-4 shrink-0" />
-              <div>
-                <p class="font-medium">Smart Shuffle</p>
-                <p class="text-xs text-muted-foreground">Weaves in Last.fm recommendations</p>
-              </div>
-              {#if $smartShuffleMode}
-                <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-              {/if}
-            </DropdownMenuItem>
-            {#if currentTrack}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onclick={shuffleArtist} class="gap-3">
-                <Mic2 class="size-4 shrink-0" />
-                <div>
-                  <p class="font-medium">Shuffle Artist</p>
-                  <p class="truncate max-w-36 text-xs text-muted-foreground">{formatSongArtists(currentTrack.artist)}</p>
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuItem onclick={shuffleAlbum} disabled={!currentTrack.albumId} class="gap-3">
-                <Disc3 class="size-4 shrink-0" />
-                <div>
-                  <p class="font-medium">Shuffle Album</p>
-                  <p class="truncate max-w-36 text-xs text-muted-foreground">{currentTrack.album}</p>
-                </div>
-              </DropdownMenuItem>
-            {/if}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onclick={deactivateShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
-              <span class="size-4 shrink-0 flex items-center justify-center text-xs font-bold">—</span>
-              <div>
-                <p class="font-medium">Off</p>
-                <p class="text-xs text-muted-foreground">Play in order</p>
-              </div>
-              {#if !$shuffleEnabled && !$smartShuffleMode}
-                <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-              {/if}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <PlayerShuffleMenu
+          {currentTrack}
+          smartShuffleFetching={shuffleController.smartShuffleFetching}
+          shuffleButtonClass={shuffleController.shuffleButtonClass}
+          onActivateShuffle={shuffleController.activateShuffle}
+          onActivateSmartShuffle={shuffleController.activateSmartShuffle}
+          onDeactivateShuffle={shuffleController.deactivateShuffle}
+          onShuffleArtist={shuffleController.shuffleArtist}
+          onShuffleAlbum={shuffleController.shuffleAlbum}
+        />
+
         <Button
           variant="ghost"
           size="icon-sm"
@@ -1400,6 +936,7 @@
         >
           <SkipBack class="size-[18px]" />
         </Button>
+
         <Button
           class="player-play-button rounded-full shadow-sm {showPauseButton ? 'is-playing' : ''} {isBuffering ? 'is-buffering' : ''}"
           size="icon-lg"
@@ -1413,6 +950,7 @@
             <Play class="size-5" />
           {/if}
         </Button>
+
         <Button
           variant="ghost"
           size="icon-sm"
@@ -1422,6 +960,7 @@
         >
           <SkipForward class="size-[18px]" />
         </Button>
+
         <Button
           variant="ghost"
           size="icon-sm"
@@ -1436,6 +975,7 @@
           {/if}
         </Button>
       </div>
+
       <div class="player-progress-row flex w-full items-center gap-2">
         <span class="player-time-label w-10 text-right text-[11px] tabular-nums text-muted-foreground">{fmt($currentTime)}</span>
         <div class="player-progress-shell relative flex-1 {isBuffering ? 'opacity-75 is-buffering' : ''}">
@@ -1455,7 +995,7 @@
             max={isFinite($duration) && $duration > 0 ? $duration : 1}
             step={1}
             onpointerdown={() => { seekDragging = true; }}
-            onValueChange={(v) => { /* value is bound via bind:value; no-op to avoid feedback loop */ }}
+            onValueChange={() => {}}
             onValueCommit={(v) => { seek(v); }}
             aria-label="Playback position"
           />
@@ -1464,55 +1004,18 @@
       </div>
     </div>
 
-    <!-- Volume -->
     <div class="player-actions flex items-center justify-end gap-2">
-      <!-- Cast -->
-      <DropdownMenu onOpenChange={(open) => { if (open && !castActive && !discovering) discoverDevices(); }}>
-        <DropdownMenuTrigger>
-          {#snippet child({ props })}
-            <Button
-              {...props}
-              variant="ghost"
-              size="icon-sm"
-              class={`player-transport-button ${castActive ? 'text-primary is-active' : 'text-muted-foreground hover:text-foreground'}`}
-              aria-label="Cast"
-            >
-              <Cast class="size-[18px] {castActive ? 'player-cast-icon' : ''}" />
-            </Button>
-          {/snippet}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="end" class="min-w-48">
-          {#if castActive && castDevice}
-            <div class="px-2 py-1.5">
-              <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Casting to</p>
-              <p class="text-sm font-semibold">{castDevice.name}</p>
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onclick={stopCast} class="text-destructive focus:text-destructive">
-              Stop casting
-            </DropdownMenuItem>
-          {:else if discovering}
-            <div class="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
-              <span class="block size-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
-              Discovering devices…
-            </div>
-          {:else if castDevices.length === 0}
-            <div class="px-3 py-2 text-sm text-muted-foreground">No Cast devices found</div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onclick={discoverDevices}>Scan again</DropdownMenuItem>
-          {:else}
-            <div class="px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground">Cast to device</div>
-            {#each castDevices as device (device.addr)}
-              <DropdownMenuItem onclick={() => startCast(device)} disabled={!currentTrack} class="gap-2">
-                <Cast class="size-4 shrink-0" />
-                {device.name}
-              </DropdownMenuItem>
-            {/each}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onclick={discoverDevices}>Scan again</DropdownMenuItem>
-          {/if}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <PlayerCastMenu
+        castActive={castActive}
+        discovering={castController.discovering}
+        castDevice={castDevice}
+        castDevices={castController.castDevices}
+        disabled={!currentTrack}
+        onDiscover={castController.discoverDevices}
+        onStartCast={castController.startCast}
+        onStopCast={castController.stopCast}
+      />
+
       <Button
         variant="ghost"
         size="icon-sm"
@@ -1522,36 +1025,8 @@
       >
         <Mic2 class="size-[18px]" />
       </Button>
-      <div
-        class="player-volume-group flex w-full items-center gap-2 md:max-w-44"
-        onwheel={onVolumeWheel}
-        role="group"
-        aria-label="Volume"
-      >
-        {#if (castActive ? (castVolume ?? $volume) : $volume) <= 0.01}
-          <button onclick={toggleMute} aria-label="Unmute" class="player-volume-button shrink-0 text-muted-foreground hover:text-foreground">
-            <VolumeX class="size-[18px]" />
-          </button>
-        {:else}
-          <button onclick={toggleMute} aria-label="Mute" class="player-volume-button shrink-0 text-muted-foreground hover:text-foreground">
-            <Volume2 class="size-[18px]" />
-          </button>
-        {/if}
-        <div class="player-volume-shell">
-         <Slider
-          class="player-volume-slider"
-          type="multiple"
-          bind:value={volVal}
-          min={0}
-          max={100}
-          step={1}
-          onpointerdown={() => { volDragging = true; }}
-          onValueChange={(v) => { changeVolume(v); }}
-          onValueCommit={commitVolume}
-          aria-label="Volume"
-        />
-        </div>
-      </div>
+
+      <PlayerVolume {castActive} {castVolume} />
     </div>
   </div>
 
@@ -1571,6 +1046,7 @@
     ondurationchange={() => { handleAudioDuration('a'); }}
     onended={() => { handleAudioEnded('a'); }}
   ></audio>
+
   <audio
     bind:this={deckBEl}
     crossorigin="anonymous"
@@ -1668,16 +1144,14 @@
     text-underline-offset: 0.18em;
   }
 
-  .player-favorite-button,
-  .player-volume-button {
+  .player-favorite-button {
     transition:
       transform 180ms ease,
       color 180ms ease,
       opacity 180ms ease;
   }
 
-  .player-favorite-button:hover,
-  .player-volume-button:hover {
+  .player-favorite-button:hover {
     transform: translateY(-1px);
   }
 
@@ -1817,18 +1291,6 @@
     gap: 0.35rem;
   }
 
-  .player-volume-group {
-    padding-left: 0.25rem;
-  }
-
-  .player-volume-shell {
-    position: relative;
-    flex: 1 1 auto;
-    min-height: 1rem;
-    display: flex;
-    align-items: center;
-  }
-
   :global(.player-cast-icon) {
     animation: player-cast-pulse 2.1s ease-in-out infinite;
   }
@@ -1887,5 +1349,4 @@
       filter: drop-shadow(0 0 10px hsl(var(--primary) / 0.3));
     }
   }
-
 </style>
