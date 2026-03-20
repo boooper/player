@@ -56,13 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ steps.version.outputs.tag }}"
-          release_id=$(gh release create "$TAG" \
+          gh release create "$TAG" \
             --title "$TAG" \
             --notes "Madrify $TAG" \
             --draft \
-            --target "$GITHUB_SHA" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json id --jq '.id')
+            --target "$GITHUB_SHA"
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
           echo "release-id=${release_id}" >> "$GITHUB_OUTPUT"
 
   build-tauri:
