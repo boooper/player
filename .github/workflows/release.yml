@@ -18,23 +18,22 @@ jobs:
   prepare-release:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      release-id: ${{ steps.create-release.outputs.release-id }}
+      version: ${{ steps.tag.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+      release-id: ${{ steps.release.outputs.release-id }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: calculate next tag
-        id: version
+      - name: calculate and push tag
+        id: tag
         shell: bash
         run: |
           set -euo pipefail
 
           latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
-
           if [[ -n "$latest_tag" ]]; then
             base="${latest_tag#v}"
           else
@@ -45,22 +44,26 @@ jobs:
           version="${major}.${minor}.$((patch + 1))"
           tag="v${version}"
 
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$tag"
+          git push origin "$tag"
+
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}"         >> "$GITHUB_OUTPUT"
 
       - name: create draft release
-        id: create-release
+        id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ steps.version.outputs.tag }}"
+          TAG="${{ steps.tag.outputs.tag }}"
           gh release create "$TAG" \
             --title "$TAG" \
             --notes "Madrify $TAG" \
-            --draft \
-            --target "$GITHUB_SHA"
+            --draft
           release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
           echo "release-id=${release_id}" >> "$GITHUB_OUTPUT"
 
@@ -121,29 +124,26 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json
-          import os
-          import re
+          import json, os, re
           from pathlib import Path
 
           version = os.environ["RELEASE_VERSION"]
 
-          package_json = Path("apps/desktop/package.json")
-          package_data = json.loads(package_json.read_text())
-          package_data["version"] = version
-          package_json.write_text(json.dumps(package_data, indent=2) + "\n")
+          p = Path("apps/desktop/package.json")
+          d = json.loads(p.read_text())
+          d["version"] = version
+          p.write_text(json.dumps(d, indent=2) + "\n")
 
-          tauri_conf = Path("apps/desktop/src-tauri/tauri.conf.json")
-          tauri_data = json.loads(tauri_conf.read_text())
-          tauri_data["version"] = version
-          tauri_conf.write_text(json.dumps(tauri_data, indent=2) + "\n")
+          p = Path("apps/desktop/src-tauri/tauri.conf.json")
+          d = json.loads(p.read_text())
+          d["version"] = version
+          p.write_text(json.dumps(d, indent=2) + "\n")
 
-          cargo_toml = Path("apps/desktop/src-tauri/Cargo.toml")
-          text = cargo_toml.read_text()
-          text, count = re.subn(r'^version = ".*?"$', f'version = "{version}"', text, count=1, flags=re.MULTILINE)
-          if count != 1:
-              raise SystemExit("Failed to update Cargo.toml version")
-          cargo_toml.write_text(text)
+          p = Path("apps/desktop/src-tauri/Cargo.toml")
+          text, n = re.subn(r'^version = ".*?"$', f'version = "{version}"', p.read_text(), count=1, flags=re.MULTILINE)
+          if n != 1:
+              raise SystemExit("Failed to patch Cargo.toml version")
+          p.write_text(text)
           PY
 
       - name: generate release updater config
@@ -153,13 +153,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json
-          import os
+          import json, os
           from pathlib import Path
 
           src = Path("apps/desktop/src-tauri/tauri.release.conf.json")
           dst = Path("apps/desktop/src-tauri/tauri.release.generated.conf.json")
-
           data = json.loads(src.read_text())
           data.setdefault("plugins", {}).setdefault("updater", {})["pubkey"] = os.environ["TAURI_UPDATER_PUBKEY"]
           dst.write_text(json.dumps(data, indent=2) + "\n")
@@ -171,7 +169,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export KEY_PATH="$RUNNER_TEMP/tauri-signing.key"
+          KEY_PATH="$RUNNER_TEMP/tauri-signing.key"
           python3 - <<'PY'
           import os
           from pathlib import Path
@@ -179,7 +177,6 @@ jobs:
           raw = os.environ["TAURI_SIGNING_PRIVATE_KEY"]
           if "\\n" in raw and "\n" not in raw:
               raw = raw.replace("\\n", "\n")
-
           path = Path(os.environ["KEY_PATH"])
           path.write_text(raw)
           path.chmod(0o600)
@@ -190,7 +187,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
@@ -198,7 +194,7 @@ jobs:
           releaseId: ${{ needs.prepare-release.outputs.release-id }}
           args: --config src-tauri/tauri.build.conf.json --config src-tauri/tauri.release.generated.conf.json --target ${{ matrix.target }}
 
-  generate-latest-json:
+  publish-release:
     needs:
       - prepare-release
       - build-tauri
@@ -211,9 +207,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
-        shell: bash
         run: |
-          set -euo pipefail
           mkdir -p dist
           gh release download "$TAG_NAME" --dir dist
 
@@ -225,57 +219,52 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json
-          import os
+          import json, os
           from datetime import datetime, timezone
           from pathlib import Path
 
           version = os.environ["RELEASE_VERSION"]
-          tag = os.environ["RELEASE_TAG"]
+          tag     = os.environ["RELEASE_TAG"]
           base_url = f"https://github.com/boooper/player/releases/download/{tag}"
           dist = Path("dist")
 
-          def pick_file(suffix, needle=None):
-              candidates = sorted(dist.rglob(f"*{suffix}"))
+          def pick(suffix, needle=None):
+              hits = sorted(dist.rglob(f"*{suffix}"))
               if needle:
-                  filtered = [p for p in candidates if needle in str(p)]
-                  if filtered:
-                      return filtered[0]
-              if not candidates:
-                  raise SystemExit(f"Missing bundle for suffix {suffix}")
-              return candidates[0]
+                  hits = [p for p in hits if needle in p.name] or hits
+              if not hits:
+                  raise SystemExit(f"No file matching *{suffix}")
+              return hits[0]
 
           platforms = {
-            "linux-x86_64": pick_file(".AppImage"),
-            "darwin-aarch64": pick_file(".app.tar.gz", "aarch64"),
-            "darwin-x86_64": pick_file(".app.tar.gz", "x64"),
-            "windows-x86_64": pick_file(".nsis.zip"),
+              "linux-x86_64":   pick(".AppImage"),
+              "darwin-aarch64": pick(".app.tar.gz", "aarch64"),
+              "darwin-x86_64":  pick(".app.tar.gz", "x86_64"),
+              "windows-x86_64": pick(".nsis.zip"),
           }
 
-          manifest_platforms = {}
+          out = {}
           for target, bundle in platforms.items():
-              sig_path = Path(f"{bundle}.sig")
-              if not sig_path.is_file():
-                  raise SystemExit(f"Missing signature for {bundle}")
-              manifest_platforms[target] = {
-                  "signature": sig_path.read_text().strip(),
+              sig = Path(str(bundle) + ".sig")
+              if not sig.exists():
+                  raise SystemExit(f"Missing .sig for {bundle.name}")
+              out[target] = {
+                  "signature": sig.read_text().strip(),
                   "url": f"{base_url}/{bundle.name}",
               }
 
-          manifest = {
-            "version": version,
-            "notes": f"Madrify {version}",
-            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "platforms": manifest_platforms,
-          }
-
-          Path("latest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          Path("latest.json").write_text(json.dumps({
+              "version":  version,
+              "notes":    f"Madrify {version}",
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": out,
+          }, indent=2) + "\n")
           PY
 
-      - name: upload latest.json and publish release
+      - name: upload latest.json and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
         run: |
           gh release upload "$TAG_NAME" latest.json --clobber
-          gh release edit "$TAG_NAME" --draft=false
+          gh release edit   "$TAG_NAME" --draft=false
