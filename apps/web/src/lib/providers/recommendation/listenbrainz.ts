@@ -13,7 +13,7 @@
  *   POST https://api.listenbrainz.org/1/submit-listens
  */
 
-import type { DiscoveryRecommendation as TrackRecommendation } from '$lib/discovery';
+import type { UnifiedRecommendation as TrackRecommendation } from '$lib/data/types';
 
 const LBZ_API = 'https://api.listenbrainz.org/1';
 
@@ -86,7 +86,8 @@ export async function fetchListenBrainzRecommendations({
 			matchScore: Number(normalizedScore.toFixed(3)),
 			artistLiked: likedBoost > 0,
 			genreScore: 0,
-			url: `https://musicbrainz.org/recording/${recording_mbid}`
+			url: `https://musicbrainz.org/recording/${recording_mbid}`,
+			source: 'listenbrainz' as const,
 		});
 
 		if (results.length >= limit) break;

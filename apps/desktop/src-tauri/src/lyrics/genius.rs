@@ -1,5 +1,15 @@
+use std::sync::LazyLock;
+
 use crate::lyrics::{clean_plain_lyrics, LyricsResult};
 use genius_lyrics::get_lyrics_from_url;
+
+static SECTION_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)^(intro|verse|chorus|bridge|outro|pre-chorus|interlude|hook|refrain)\b")
+        .expect("SECTION_RE is valid")
+});
+static BRACKET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^\[.*\]$").expect("BRACKET_RE is valid")
+});
 
 fn slugify_genius_part(value: &str) -> String {
     let normalized = value
@@ -66,15 +76,12 @@ pub async fn fetch_from_genius(artist: &str, title: &str, _album: &str, duration
             let mut lines: Vec<String> = Vec::new();
             let mut word_counts: Vec<usize> = Vec::new();
 
-            let section_re = regex::Regex::new(r"(?i)^(intro|verse|chorus|bridge|outro|pre-chorus|interlude|hook|refrain)\b").unwrap();
-            let bracket_re = regex::Regex::new(r"^\[.*\]$").unwrap();
-
             for l in raw_lines.into_iter() {
                 let trimmed = l.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
-                if section_re.is_match(trimmed) || bracket_re.is_match(trimmed) {
+                if SECTION_RE.is_match(trimmed) || BRACKET_RE.is_match(trimmed) {
                     continue;
                 }
                 let wc = trimmed.split_whitespace().count();

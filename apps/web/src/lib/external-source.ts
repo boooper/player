@@ -1,17 +1,19 @@
-export type ExternalSource = 'deezer' | 'qobuz' | 'squidwtf';
-
-export function getExternalSource(id: string | null | undefined): ExternalSource | null {
+/** Extracts the source slug from an `ext-{source}-{id}` style ID. */
+export function getExternalSource(id: string | null | undefined): string | null {
   if (!id?.startsWith('ext-')) return null;
-  if (id.startsWith('ext-deezer-')) return 'deezer';
-  if (id.startsWith('ext-qobuz-')) return 'qobuz';
-  if (id.startsWith('ext-squidwtf-')) return 'squidwtf';
-  return null;
+  const slug = id.slice(4, id.indexOf('-', 4));
+  return slug || null;
 }
 
+/** Returns a display label for the source, capitalising the slug by default. */
 export function getExternalSourceLabel(id: string | null | undefined): string | null {
   const source = getExternalSource(id);
   if (!source) return null;
-  if (source === 'squidwtf') return 'SquidWTF';
-  if (source === 'qobuz') return 'Qobuz';
-  return 'Deezer';
+  // Known overrides for non-obvious capitalisation.
+  const overrides: Record<string, string> = {
+    squidwtf: 'SquidWTF',
+    qobuz: 'Qobuz',
+    deezer: 'Deezer',
+  };
+  return overrides[source] ?? source.charAt(0).toUpperCase() + source.slice(1);
 }

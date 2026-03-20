@@ -110,8 +110,8 @@
   }
 </script>
 
-<aside class="app-shell-rail flex h-full w-full shrink-0 flex-col overflow-hidden border-l border-border/40">
-  <div class="flex shrink-0 items-center justify-between border-b border-border/40 px-4 py-4">
+<aside class="liquid-glass flex h-full w-full shrink-0 flex-col overflow-hidden border-l border-white/[0.07]">
+  <div class="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-4 py-4">
     {#if $playingFrom.type}
       <div class="flex min-w-0 flex-1 flex-col">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -172,7 +172,7 @@
 
     <!-- Related Songs -->
     {#if relatedLoading || relatedSongs.length > 0}
-      <div class="mt-6 border-t border-border/70 pt-5">
+      <div class="mt-6 border-t border-white/[0.06] pt-5">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Related Songs</h3>
           {#if !relatedLoading && relatedSongs.length > 1}
@@ -238,7 +238,7 @@
 
     <!-- About Artist -->
     {#if displaySong}
-      <div class="mt-6 border-t border-border/70 pt-5">
+      <div class="mt-6 border-t border-white/[0.06] pt-5">
         <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">About the Artist</h3>
         {#if panelArtistLoading}
           <div class="space-y-2">
@@ -279,7 +279,7 @@
       <Dialog.Root bind:open={aboutDialogOpen}>
         <Dialog.Portal>
           <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
-          <Dialog.Content class="app-glass fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[28px] outline-none overflow-hidden">
+          <Dialog.Content class="liquid-glass fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[28px] outline-none overflow-hidden">
             {#if panelArtistInfo.imageUrl}
               <div class="relative h-56 w-full">
                 <img src={panelArtistInfo.imageUrl} alt={panelArtistInfo.name} class="h-full w-full object-cover object-top" />
@@ -327,7 +327,7 @@
                 <p class="text-sm leading-relaxed text-muted-foreground">{panelArtistInfo.bio.replace(/<[^>]*>/g, '').trim()}</p>
               {/if}
             </div>
-            <div class="border-t border-border/60 px-6 py-4">
+            <div class="border-t border-white/[0.08] px-6 py-4">
               <a
                 href={`/artist/${encodeURIComponent(primarySongArtist(displaySong.artist))}`}
                 onclick={() => { aboutDialogOpen = false; }}
@@ -341,7 +341,7 @@
 
     <!-- Credits -->
     {#if currentSong}
-      <div class="mt-6 border-t border-border/70 pt-5 pb-2">
+      <div class="mt-6 border-t border-white/[0.06] pt-5 pb-2">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Credits</h3>
           <button
@@ -391,7 +391,7 @@
 
     <!-- Up Next -->
     {#if currentSong}
-      <div class="mt-6 border-t border-border/70 pt-5 pb-2">
+      <div class="mt-6 border-t border-white/[0.06] pt-5 pb-2">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Up Next</h3>
           {#if upNext.length > 1}

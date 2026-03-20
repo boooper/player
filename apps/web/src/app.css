@@ -127,64 +127,66 @@ html, body {
   * {
     @apply border-border outline-ring/50;
   }
-  html {
-    background:
-      radial-gradient(circle at top, oklch(0.72 0.17 312 / 0.16), transparent 34%),
-      radial-gradient(circle at 80% 16%, oklch(0.72 0.17 312 / 0.08), transparent 24%),
-      radial-gradient(circle at 50% 42%, oklch(0.72 0.17 312 / 0.04), transparent 38%),
-      var(--background);
+  html, body {
+    @apply text-foreground;
     background-color: var(--background);
   }
-  body {
-    @apply bg-background text-foreground;
-    background:
-      radial-gradient(circle at 50% 0%, oklch(0.72 0.17 312 / 0.08), transparent 36%),
-      linear-gradient(180deg, rgb(255 255 255 / 0.018), transparent 18%),
-      linear-gradient(0deg, rgb(0 0 0 / 0.16), transparent 20%);
-  }
 }
 
-.app-shell-surface {
-  background:
-    radial-gradient(circle at 50% -40%, oklch(0.72 0.17 312 / 0.16), transparent 58%),
-    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.015)),
-    rgb(20 20 24 / 0.32);
-  backdrop-filter: blur(22px) saturate(135%);
-  -webkit-backdrop-filter: blur(22px) saturate(135%);
-  box-shadow:
-    0 12px 28px rgb(0 0 0 / 0.22),
-    inset 0 -1px 0 rgb(255 255 255 / 0.04);
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
-
-.app-shell-rail {
-  background:
-    radial-gradient(circle at 50% 0%, oklch(0.72 0.17 312 / 0.09), transparent 52%),
-    linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent 18%),
-    linear-gradient(90deg, rgb(255 255 255 / 0.015), transparent 24%),
-    rgb(20 20 24 / 0.34);
-  backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
-  box-shadow:
-    inset -1px 0 0 rgb(255 255 255 / 0.05),
-    inset 0 1px 0 rgb(255 255 255 / 0.025);
-}
-
-.app-shell-main {
+::-webkit-scrollbar-track {
   background: transparent;
 }
-
-.app-shell-footer {
-  background:
-    radial-gradient(circle at 50% 100%, oklch(0.72 0.17 312 / 0.14), transparent 58%),
-    linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.018)),
-    rgb(20 20 24 / 0.36);
-  backdrop-filter: blur(20px) saturate(130%);
-  -webkit-backdrop-filter: blur(20px) saturate(130%);
-  box-shadow:
-    0 -8px 24px rgb(0 0 0 / 0.22),
-    inset 0 1px 0 rgb(255 255 255 / 0.05);
+::-webkit-scrollbar-thumb {
+  background: oklch(0.72 0.17 312 / 0.22);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.72 0.17 312 / 0.42);
 }
 
+/* ── Text selection ──────────────────────────────────────────────────────── */
+::selection {
+  background: oklch(0.72 0.17 312 / 0.32);
+  color: oklch(0.985 0 0);
+}
+
+/* ── Custom titlebar drag region — prevent text selection while dragging ─── */
+header[onmousedown] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Single app background — rendered once as a fixed div in +layout.svelte ── */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse at 18% -10%, oklch(0.72 0.17 312 / 0.28), transparent 44%),
+    radial-gradient(ellipse at 82% 6%,   oklch(0.72 0.17 312 / 0.14), transparent 38%),
+    radial-gradient(ellipse at 50% 110%, oklch(0.27 0.016 292 / 0.55), transparent 52%),
+    oklch(0.14 0.006 285.2);
+}
+
+/* ── Single glass material — used on every surface, border added per-usage ── */
+.liquid-glass {
+  background:
+    linear-gradient(160deg, rgb(255 255 255 / 0.06) 0%, transparent 50%),
+    oklch(0.16 0.008 286 / 0.82);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  box-shadow:
+    0 8px 32px rgb(0 0 0 / 0.26),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(0 0 0 / 0.06);
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
 .app-card {
   background:
     radial-gradient(circle at top, oklch(0.72 0.17 312 / 0.09), transparent 72%),
@@ -204,17 +206,32 @@ html, body {
   border: 1px solid rgb(255 255 255 / 0.06);
 }
 
-.app-glass {
+/* Legacy aliases — same styles as liquid-glass */
+.app-glass,
+.app-shell-surface {
   background:
-    radial-gradient(circle at top, oklch(0.72 0.17 312 / 0.12), transparent 68%),
-    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.022)),
-    rgb(20 20 24 / 0.52);
-  border: 1px solid rgb(255 255 255 / 0.08);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
+    linear-gradient(160deg, rgb(255 255 255 / 0.06) 0%, transparent 50%),
+    oklch(0.16 0.008 286 / 0.82);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
   box-shadow:
-    0 14px 32px rgb(0 0 0 / 0.24),
-    inset 0 1px 0 rgb(255 255 255 / 0.07);
+    0 8px 32px rgb(0 0 0 / 0.26),
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(0 0 0 / 0.06);
+}
+.app-shell-rail   { background: transparent; }
+.app-shell-main   { background: transparent; }
+.app-shell-footer { background: transparent; }
+
+/* Highlighted row inside liquid-glass surfaces */
+.liquid-glass-item {
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.liquid-glass-item[data-highlighted] {
+  background: var(--accent);
+}
+.liquid-glass-item[data-highlighted] svg {
+  color: var(--primary);
 }
 
 .app-hover {
@@ -239,7 +256,8 @@ html, body {
 }
 
 .app-round-button:hover {
-  background: rgb(255 255 255 / 0.08);
+  background: var(--accent);
+  border-color: oklch(0.72 0.17 312 / 0.18);
 }
 
 .app-section-title {
@@ -330,4 +348,164 @@ html, body {
 @keyframes lyric-header-in {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GLOBAL ANIMATION SYSTEM
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── CSS View Transitions — smooth page navigation ──────────────────────── */
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root) {
+  animation: 180ms ease both vt-slide-out;
+}
+
+::view-transition-new(root) {
+  animation: 260ms cubic-bezier(0.2, 0.9, 0.25, 1) both vt-slide-in;
+}
+
+@keyframes vt-slide-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-6px) scale(0.99); }
+}
+
+@keyframes vt-slide-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Global interactive element transitions ──────────────────────────────── */
+a, button, [role="button"], [role="tab"], [role="option"] {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease,
+    box-shadow 150ms ease;
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: scale(0.97);
+  transition-duration: 80ms;
+}
+
+/* ── Glass surface mount animation ───────────────────────────────────────── */
+.liquid-glass {
+  animation: glass-in 320ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes glass-in {
+  from { opacity: 0; backdrop-filter: blur(0px) saturate(100%); }
+  to   { opacity: 1; backdrop-filter: blur(28px) saturate(160%); }
+}
+
+/* ── Utility entrance classes ─────────────────────────────────────────────── */
+.animate-fade-up {
+  animation: fade-up 300ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.animate-fade-down {
+  animation: fade-down 280ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 240ms ease both;
+}
+
+.animate-scale-in {
+  animation: scale-in 280ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Stagger delay helpers — apply via style="--i:N" ─────────────────────── */
+.stagger > * {
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+/* ── Skeleton shimmer ─────────────────────────────────────────────────────── */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.05);
+  border-radius: 0.5rem;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(255 255 255 / 0.06) 40%,
+    rgb(255 255 255 / 0.1) 50%,
+    rgb(255 255 255 / 0.06) 60%,
+    transparent 100%
+  );
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+/* ── Floating glow pulse — for active/playing indicators ─────────────────── */
+.glow-pulse {
+  animation: glow-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.72 0.17 312 / 0); }
+  50%       { box-shadow: 0 0 16px 4px oklch(0.72 0.17 312 / 0.22); }
+}
+
+/* ── Reduce motion ────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+
+  .liquid-glass {
+    animation: none;
+  }
+
+  .stagger-item,
+  .stagger-row,
+  .page-hero,
+  .page-section,
+  .animate-fade-up,
+  .animate-fade-down,
+  .animate-fade-in,
+  .animate-scale-in {
+    animation: none;
+  }
+
+  a, button, [role="button"] {
+    transition: none;
+  }
 }

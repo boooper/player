@@ -86,7 +86,7 @@
     <li>
       <a
         href={nav.href}
-        class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {compact ? 'justify-center px-2' : ''} {page.url.pathname === nav.href ? 'bg-white/[0.06] text-foreground' : 'text-muted-foreground hover:bg-white/[0.04] hover:text-foreground'}"
+        class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {compact ? 'justify-center px-2' : ''} {page.url.pathname === nav.href ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
       >
         <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.04]">
           <nav.Icon class="size-4 text-muted-foreground" />
@@ -103,7 +103,7 @@
 
   <li class="group-data-[compact=true]/library:hidden group-data-[collapsible=icon]:hidden">
     <button
-      class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.04] {compact ? 'justify-center px-2' : ''}"
+      class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent/60 {compact ? 'justify-center px-2' : ''}"
       onclick={() => { playlistName = ''; createDialogOpen = true; }}
       type="button"
     >
@@ -121,7 +121,7 @@
   <li>
     <a
       href="/favorites"
-      class="group/row flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {compact ? 'justify-center px-2' : ''} {favoritesIsActive ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}"
+      class="group/row flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {compact ? 'justify-center px-2' : ''} {favoritesIsActive ? 'bg-accent' : 'hover:bg-accent/60'}"
     >
       <div class="group/cover relative size-10 shrink-0 flex-none overflow-hidden rounded-md">
         {#if starredSongs.length >= 4}
@@ -158,7 +158,7 @@
       <PlaylistContextMenu {playlist} onplay={() => onPlayPlaylist(playlist.id)} triggerClass="block w-full">
         <a
           href={`/playlist/${encodeURIComponent(playlist.id)}`}
-          class="group/row flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {compact ? 'justify-center px-2' : ''} {isActive ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}"
+          class="group/row flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors {compact ? 'justify-center px-2' : ''} {isActive ? 'bg-accent' : 'hover:bg-accent/60'}"
         >
           <div class="group/cover relative size-10 shrink-0 flex-none overflow-hidden rounded-md">
             {#if playlist.coverArtUrl}
@@ -210,7 +210,7 @@
       <ArtistContextMenu name={artist} triggerClass="block w-full">
         <a
           href={`/artist/${encodeURIComponent(artist)}`}
-          class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04] {compact ? 'justify-center px-2' : ''}"
+          class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-accent/60 {compact ? 'justify-center px-2' : ''}"
         >
           <div class="size-10 shrink-0 flex-none overflow-hidden rounded-full">
             {#if artistPhotos[artist]}
@@ -233,7 +233,7 @@
 <Dialog.Root bind:open={createDialogOpen}>
   <Dialog.Portal>
     <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
-    <Dialog.Content class="app-glass fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[28px] p-6 outline-none">
+    <Dialog.Content class="liquid-glass border border-white/[0.09] fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[28px] p-6 outline-none">
       <Dialog.Header class="space-y-2">
         <Dialog.Title class="text-xl font-semibold text-foreground">Create playlist</Dialog.Title>
         <Dialog.Description class="text-sm text-muted-foreground">

@@ -350,7 +350,7 @@ impl CastActor {
 macro_rules! actor_send {
     ($state:expr, $variant:expr) => {{
         let tx = {
-            let guard = $state.cast_actor.lock().unwrap();
+            let guard = $state.cast_actor.lock().map_err(|e| e.to_string())?;
             guard
                 .as_ref()
                 .ok_or_else(|| "No active cast session".to_string())?
@@ -579,9 +579,9 @@ pub async fn cast_discover() -> Result<Vec<CastDeviceInfo>, String> {
                 let src_ip = match from.ip() { IpAddr::V4(src) => src, _ => continue };
                 for (name, addr, port) in parse_mdns_response(&buf[..len], src_ip) {
                     let key = format!("{}:{}", addr, port);
-                    devs.lock().unwrap()
-                        .entry(key)
-                        .or_insert(CastDeviceInfo { name, addr, port });
+                    if let Ok(mut map) = devs.lock() {
+                        map.entry(key).or_insert(CastDeviceInfo { name, addr, port });
+                    }
                 }
             }
         }));
@@ -590,7 +590,7 @@ pub async fn cast_discover() -> Result<Vec<CastDeviceInfo>, String> {
     tokio::time::sleep(Duration::from_secs(5)).await;
     for h in handles { h.abort(); }
 
-    let result = devices.lock().unwrap().values().cloned().collect();
+    let result = devices.lock().map_err(|e| e.to_string())?.values().cloned().collect();
     Ok(result)
 }
 
@@ -606,7 +606,7 @@ pub async fn cast_connect(
     device_port: u16,
 ) -> Result<(), String> {
     // Drop any previous actor (its thread will exit when the Sender is gone).
-    *state.cast_actor.lock().unwrap() = None;
+    *state.cast_actor.lock().map_err(|e| e.to_string())? = None;
 
     let (name, addr, port) = (device_name.clone(), device_addr.clone(), device_port);
     let handle = tokio::task::spawn_blocking(move || {
@@ -615,7 +615,7 @@ pub async fn cast_connect(
     .await
     .map_err(|e| e.to_string())??;
 
-    *state.cast_actor.lock().unwrap() = Some(handle);
+    *state.cast_actor.lock().map_err(|e| e.to_string())? = Some(handle);
     Ok(())
 }
 
@@ -655,7 +655,7 @@ pub async fn cast_play(
     };
 
     // Start a fresh actor (drops the previous one if any).
-    *state.cast_actor.lock().unwrap() = None;
+    *state.cast_actor.lock().map_err(|e| e.to_string())? = None;
 
     let (name, addr, port) = (device_name.clone(), device_addr.clone(), device_port);
     let handle = tokio::task::spawn_blocking(move || {
@@ -664,7 +664,7 @@ pub async fn cast_play(
     .await
     .map_err(|e| e.to_string())??;
 
-    *state.cast_actor.lock().unwrap() = Some(handle);
+    *state.cast_actor.lock().map_err(|e| e.to_string())? = Some(handle);
 
     // Now play on the already-connected actor.
     actor_send!(state, |resp| CastActorCmd::Play {
@@ -686,7 +686,7 @@ pub async fn cast_resume(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn cast_stop(state: State<'_, AppState>) -> Result<(), String> {
     let result = actor_send!(state, |resp| CastActorCmd::Stop { resp });
     // Actor has exited; clear the handle.
-    *state.cast_actor.lock().unwrap() = None;
+    *state.cast_actor.lock().map_err(|e| e.to_string())? = None;
     result
 }
 
@@ -710,7 +710,7 @@ pub async fn cast_get_status(state: State<'_, AppState>) -> Result<CastPlaybackS
 pub async fn cast_get_session(
     state: State<'_, AppState>,
 ) -> Result<Option<CastDeviceInfo>, String> {
-    let guard = state.cast_actor.lock().unwrap();
+    let guard = state.cast_actor.lock().map_err(|e| e.to_string())?;
     Ok(guard.as_ref().map(|h| CastDeviceInfo {
         name: h.device_name.clone(),
         addr: h.device_addr.clone(),

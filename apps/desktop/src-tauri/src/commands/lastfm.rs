@@ -81,6 +81,15 @@ fn require_credentials(s: &HashMap<String, String>) -> Result<(String, String), 
     Ok((key, secret))
 }
 
+/// Read (api_key, shared_secret, session_key) from the settings map.
+/// Returns `None` for any field that is absent or empty.
+fn read_session_credentials(s: &HashMap<String, String>) -> (String, String, String) {
+    let key = s.get("LASTFM_API_KEY").cloned().unwrap_or_default();
+    let secret = s.get("LASTFM_SHARED_SECRET").cloned().unwrap_or_default();
+    let sk = s.get("LASTFM_SESSION_KEY").cloned().unwrap_or_default();
+    (key, secret, sk)
+}
+
 fn build_scrobbler(api_key: &str, secret: &str, session_key: Option<&str>) -> Scrobbler {
     let mut scrobbler = Scrobbler::new(api_key, secret);
     if let Some(session_key) = session_key.filter(|value| !value.is_empty()) {
@@ -194,11 +203,7 @@ pub async fn lfm_now_playing(
 ) -> Result<(), String> {
     let (api_key, secret, sk) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        let s = settings::read_all(&db)?;
-        let k = s.get("LASTFM_API_KEY").cloned().unwrap_or_default();
-        let sec = s.get("LASTFM_SHARED_SECRET").cloned().unwrap_or_default();
-        let sk = s.get("LASTFM_SESSION_KEY").cloned().unwrap_or_default();
-        (k, sec, sk)
+        read_session_credentials(&settings::read_all(&db)?)
     };
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(());
@@ -223,11 +228,7 @@ pub async fn lfm_scrobble(
 ) -> Result<(), String> {
     let (api_key, secret, sk) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        let s = settings::read_all(&db)?;
-        let k = s.get("LASTFM_API_KEY").cloned().unwrap_or_default();
-        let sec = s.get("LASTFM_SHARED_SECRET").cloned().unwrap_or_default();
-        let sk = s.get("LASTFM_SESSION_KEY").cloned().unwrap_or_default();
-        (k, sec, sk)
+        read_session_credentials(&settings::read_all(&db)?)
     };
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(());
@@ -254,9 +255,7 @@ pub async fn lfm_user_taste(state: State<'_, AppState>) -> Result<UserTaste, Str
     let (api_key, secret, sk, username) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         let s = settings::read_all(&db)?;
-        let k = s.get("LASTFM_API_KEY").cloned().unwrap_or_default();
-        let sec = s.get("LASTFM_SHARED_SECRET").cloned().unwrap_or_default();
-        let sk = s.get("LASTFM_SESSION_KEY").cloned().unwrap_or_default();
+        let (k, sec, sk) = read_session_credentials(&s);
         let u = s.get("LASTFM_USERNAME").cloned().unwrap_or_default();
         (k, sec, sk, u)
     };

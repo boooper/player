@@ -76,6 +76,7 @@ pub fn run() {
             app.handle().plugin(tauri_plugin_dialog::init())?;
             app.handle().plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))?;
             app.handle().plugin(tauri_plugin_os::init())?;
+            app.handle().plugin(tauri_plugin_positioner::init())?;
             app.handle().plugin(tauri_plugin_store::Builder::default().build())?;
             app.handle().plugin(tauri_plugin_drpc::init())?;
             if let Some(pubkey) = updater_pubkey {

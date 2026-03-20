@@ -3,13 +3,13 @@
   import { onMount } from 'svelte';
   import { afterNavigate, goto } from '$app/navigation';
 
-  import { Home, Settings, ChevronLeft, ChevronRight, Library } from '@lucide/svelte';
+  import { Home, Settings, ChevronLeft, ChevronRight, Library, Minus, Square, X, Minimize2 } from '@lucide/svelte';
   import PlayerBar from '$lib/components/PlayerBar.svelte';
   import SearchBar from '$lib/components/SearchBar.svelte';
   import NowPlayingPanel from '$lib/components/NowPlayingPanel.svelte';
   import LibraryList from '$lib/components/LibraryList.svelte';
   import { getArtistArtworkMap } from '$lib/discovery';
-  import { openUrl } from '$lib/tauri';
+  import { openUrl, isTauri, initTauriWindow, startDragging, minimizeWindow, toggleMaximizeWindow, closeWindow, getOsPlatform, watchMaximized } from '$lib/tauri';
   import { initDrpc } from '$lib/drpc';
   import {
     fetchAppSettings,
@@ -59,6 +59,7 @@
     ResizablePanel,
     ResizablePanelGroup,
   } from '$lib/components/ui';
+  import { TooltipProvider } from '$lib/components/ui/tooltip';
 
   let { children } = $props();
 
@@ -273,7 +274,17 @@
 
   let searchBar: { reset: () => void; setQuery: (q: string) => void } | undefined;
 
+  const runningInTauri = isTauri();
+  const osPlatform = runningInTauri ? getOsPlatform() : 'web';
+  const isMac = osPlatform === 'macos';
+  let windowMaximized = $state(false);
+
+  let unlistenMaximized: (() => void) | undefined;
+
   onMount(() => {
+    void initTauriWindow().then(() => {
+      watchMaximized((v) => { windowMaximized = v; }).then((u) => { unlistenMaximized = u; });
+    });
     document.documentElement.classList.add('dark');
     drpcReady = true;
 
@@ -308,25 +319,50 @@
       document.removeEventListener('keydown', handleKeydown);
       cleanupDrpc();
       drpcReady = false;
+      unlistenMaximized?.();
     };
   });
 
   afterNavigate(() => {
     searchBar?.reset();
+    showLyrics.set(false);
   });
 </script>
 
-<!-- Full-width top bar -->
-<header class="app-shell-surface fixed left-0 right-0 top-0 z-20 flex h-14 shrink-0 items-center border-b border-border/40 px-4">
-  <div class="flex shrink-0 items-center gap-1 pr-3">
-    <Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.back()}><ChevronLeft class="size-4" /></Button>
-    <Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.forward()}><ChevronRight class="size-4" /></Button>
-    <div class="h-4 w-px bg-border/60 mx-1"></div>
-    <a href="/"><Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground hover:text-foreground"><Home class="size-4" /></Button></a>
-    <a href="/settings"><Button variant="ghost" size="icon" class="size-8 rounded-full text-muted-foreground hover:text-foreground" title="Settings"><Settings class="size-4" /></Button></a>
+<!-- Single app background — everything else is glass on top of this -->
+<div class="app-bg" aria-hidden="true"></div>
+
+<!-- Custom titlebar / app header — acts as window drag region in Tauri -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<header
+  class="liquid-glass fixed left-0 right-0 top-0 z-20 flex h-12 shrink-0 items-center border-b border-white/[0.08]"
+  onmousedown={(e) => {
+    if (!runningInTauri || e.button !== 0 || e.detail >= 2) return;
+    if ((e.target as HTMLElement).closest('button, a, input, textarea, [role="button"], [role="tab"]')) return;
+    startDragging();
+  }}
+  ondblclick={(e) => {
+    if (!runningInTauri) return;
+    if ((e.target as HTMLElement).closest('button, a, input, textarea, [role="button"], [role="tab"]')) return;
+    toggleMaximizeWindow();
+  }}
+>
+  <!-- macOS: leave room for traffic lights (≈68 px) -->
+  {#if runningInTauri && isMac}
+    <div class="w-[72px] shrink-0"></div>
+  {/if}
+
+  <!-- Nav controls (non-draggable) -->
+  <div class="flex shrink-0 items-center gap-0.5 px-2">
+    <Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.back()}><ChevronLeft class="size-3.5" /></Button>
+    <Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.forward()}><ChevronRight class="size-3.5" /></Button>
+    <div class="mx-1.5 h-3.5 w-px bg-white/[0.12]"></div>
+    <a href="/"><Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground"><Home class="size-3.5" /></Button></a>
+    <a href="/settings"><Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" title="Settings"><Settings class="size-3.5" /></Button></a>
   </div>
 
-  <div class="flex flex-1 justify-center">
+  <!-- Search bar (non-draggable, centered) -->
+  <div class="flex flex-1 justify-center px-6">
     <SearchBar
       bind:this={searchBar}
       onPlaySong={playSongFromDropdown}
@@ -334,7 +370,8 @@
     />
   </div>
 
-  <div class="hidden shrink-0 items-center gap-4 pl-3 md:flex">
+  <!-- Service status pills (non-draggable) -->
+  <div class="hidden shrink-0 items-center gap-3 px-3 md:flex">
     {#each [
       { label: 'Library', status: subsonicStatus },
       { label: 'Last.fm', status: lastfmStatus },
@@ -345,9 +382,31 @@
       </span>
     {/each}
   </div>
+
+  <!-- Windows: custom window controls -->
+  {#if runningInTauri && !isMac}
+    <div class="flex shrink-0 items-stretch self-stretch">
+      <button
+        class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-white/[0.06] hover:text-foreground"
+        onclick={minimizeWindow}
+        aria-label="Minimize"
+      ><Minus class="size-3.5" /></button>
+      <button
+        class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-white/[0.06] hover:text-foreground"
+        onclick={toggleMaximizeWindow}
+        aria-label={windowMaximized ? 'Restore' : 'Maximize'}
+      >{#if windowMaximized}<Minimize2 class="size-3" />{:else}<Square class="size-3" />{/if}</button>
+      <button
+        class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-rose-500 hover:text-white"
+        onclick={closeWindow}
+        aria-label="Close"
+      ><X class="size-3.5" /></button>
+    </div>
+  {/if}
 </header>
 
-<SidebarProvider style="margin-top: 3.5rem; height: calc(100svh - 3.5rem); min-height: calc(100svh - 3.5rem); overflow: hidden;">
+<TooltipProvider>
+<SidebarProvider style="margin-top: 3rem; height: calc(100svh - 3rem); min-height: calc(100svh - 3rem); overflow: hidden;">
   <div class="app-shell-main flex h-full min-w-0 flex-1 flex-col overflow-hidden">
     <ResizablePanelGroup direction="horizontal" autoSaveId="madrify-shell-layout" class="min-h-0 flex-1">
       <ResizablePanel
@@ -361,7 +420,7 @@
       >
         <Sidebar
           collapsible="none"
-          class="app-shell-rail h-full border-r border-border/40"
+          class="liquid-glass h-full border-r border-white/[0.07]"
           style="--sidebar-width: 100%;"
         >
           <SidebarHeader class={libraryCompact ? 'px-1 py-2' : 'px-2 pt-4 pb-2'}>
@@ -593,3 +652,4 @@
     <Toaster richColors />
   </div>
 </SidebarProvider>
+</TooltipProvider>

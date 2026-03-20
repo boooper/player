@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { Pause, Play, Repeat, Repeat1, SkipBack, SkipForward, Mic, Heart } from '@lucide/svelte';
+  import { Pause, Play, Repeat, Repeat1, SkipBack, SkipForward, MicVocal, Heart, Sparkles } from '@lucide/svelte';
   import {
     currentIndex, currentTime, duration, isPlaying,
     nextTrack, prevTrack, queue, repeatMode, shouldAutoplay,
@@ -24,6 +24,7 @@
   import { createPlayerDesktopController } from '$lib/components/player/player-desktop-controller.svelte';
   import { backendSettings } from '$lib/stores/backend-settings';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
+  import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
   import { goto } from '$app/navigation';
   import { getExternalSourceLabel } from '$lib/external-source';
 
@@ -182,7 +183,7 @@
   }
 </script>
 
-<footer class="player-bar app-shell-footer shrink-0 border-t border-border/40 px-4 py-3 {isBuffering || $queueLoading ? 'player-bar-loading' : ''}">
+<footer class="player-bar liquid-glass shrink-0 border-t border-white/[0.08] px-4 py-3 {isBuffering || $queueLoading ? 'player-bar-loading' : ''}">
   <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
     <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
@@ -201,34 +202,47 @@
           {/if}
         </button>
         <div class="player-track-meta min-w-0">
-          <div class="flex items-center gap-1.5">
-            <div class="min-w-0 flex items-center gap-1.5">
-              <button
-                class="player-track-title block max-w-full whitespace-normal break-words text-left text-sm font-semibold leading-tight"
-                onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
-                title={currentTrack.album}
-              >{currentTrack.title}</button>
-              <SongTechBadge
-                id={currentTrack.id}
-                cached={desktopController.currentTrackCached}
-                audioFormat={currentTrack.audioFormat}
-                bitrateKbps={currentTrack.bitrateKbps}
-                compact
-              />
-              {#if isSmartShuffleTrack}
-                <span class="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                  Smart Shuffle
-                </span>
-              {/if}
-            </div>
+          <div class="min-w-0 flex items-center gap-1.5">
             <button
-              onclick={toggleFavorite}
-              class="player-favorite-button shrink-0 text-muted-foreground {isStarred ? '!text-rose-500' : ''}"
-              aria-label={isStarred ? 'Remove from favorites' : 'Add to favorites'}
-              title={isStarred ? 'Remove from favorites' : 'Add to favorites'}
-            >
-              <Heart class="size-3.5 {isStarred ? 'fill-rose-500' : ''}" />
-            </button>
+              class="player-track-title block max-w-full whitespace-normal break-words text-left text-sm font-semibold leading-tight"
+              onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
+              title={currentTrack.album}
+            >{currentTrack.title}</button>
+            <SongTechBadge
+              cached={desktopController.currentTrackCached}
+              audioFormat={currentTrack.audioFormat}
+              bitrateKbps={currentTrack.bitrateKbps}
+              compact
+            />
+            {#if isSmartShuffleTrack}
+              <Tooltip>
+                <TooltipTrigger>
+                  {#snippet child({ props })}
+                    <span {...props} class="shrink-0 inline-flex cursor-default items-center justify-center rounded-full border border-primary/30 bg-primary/10 p-1 text-primary">
+                      <Sparkles class="size-3" />
+                    </span>
+                  {/snippet}
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>Smart Shuffle track</TooltipContent>
+              </Tooltip>
+            {/if}
+            <Tooltip>
+              <TooltipTrigger>
+                {#snippet child({ props })}
+                  <button
+                    {...props}
+                    onclick={toggleFavorite}
+                    class="player-favorite-button shrink-0 inline-flex items-center justify-center rounded-full border p-1 transition-colors {isStarred ? 'border-rose-500/30 bg-rose-500/10 text-rose-500' : 'border-border/50 bg-white/[0.03] text-muted-foreground/60 hover:text-rose-400'}"
+                    aria-label={isStarred ? 'Remove from favorites' : 'Add to favorites'}
+                  >
+                    <Heart class="size-3 {isStarred ? 'fill-rose-500' : ''}" />
+                  </button>
+                {/snippet}
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={6}>
+                {isStarred ? 'Remove from favorites' : 'Add to favorites'}
+              </TooltipContent>
+            </Tooltip>
           </div>
           {#if (isBuffering || $queueLoading) && getExternalSourceLabel(currentTrack.id)}
             <span class="block truncate text-xs text-sky-300/90 animate-pulse">
@@ -356,7 +370,7 @@
         onclick={() => showLyrics.update((v) => !v)}
         aria-label="Lyrics"
       >
-        <Mic class="size-[18px]" />
+        <MicVocal class="size-[18px]" />
       </Button>
 
       <PlayerVolume {castActive} {castVolume} />
@@ -369,30 +383,11 @@
   .player-bar {
     position: relative;
     overflow: hidden;
-    transition:
-      opacity 180ms ease,
-      background-color 220ms ease,
-      border-color 220ms ease;
-  }
-
-  .player-bar::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      linear-gradient(180deg, hsl(var(--foreground) / 0.035), transparent 42%),
-      radial-gradient(circle at 50% 0%, hsl(var(--primary) / 0.12), transparent 48%);
-    opacity: 0.7;
-    transition: opacity 220ms ease;
+    transition: opacity 180ms ease;
   }
 
   .player-bar-loading {
-    opacity: 0.9;
-  }
-
-  .player-bar-loading::before {
-    opacity: 1;
+    opacity: 0.88;
   }
 
   .player-track-info,
