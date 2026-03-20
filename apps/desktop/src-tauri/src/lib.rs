@@ -6,22 +6,12 @@ mod playback_engine;
 use std::sync::Mutex;
 use tauri::Manager;
 
-/// Serialisable state kept for an active Chromecast session.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct CastSessionInfo {
-    pub device_name: String,
-    pub device_addr: String,
-    pub device_port: u16,
-    pub transport_id: String,
-    pub session_id: String,
-    pub media_session_id: i32,
-}
+use commands::cast::CastActorHandle;
 
 pub struct AppState {
     pub db: Mutex<rusqlite::Connection>,
     pub http: reqwest::Client,
-    pub cast_session: Mutex<Option<CastSessionInfo>>,
+    pub cast_actor: Mutex<Option<CastActorHandle>>,
     pub playback: playback_engine::PlaybackHandle,
     pub playback_cache: playback_engine::DiskCache,
     pub artwork_cache: playback_engine::DiskCache,
@@ -64,7 +54,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
                 http: reqwest::Client::new(),
-                cast_session: Mutex::new(None),
+                cast_actor: Mutex::new(None),
                 playback: playback_engine::PlaybackHandle::new()
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
                 playback_cache: playback_engine::DiskCache::new(cache_dir.join("audio"))
@@ -115,6 +105,13 @@ pub fn run() {
             commands::liked_artists::get_liked_artists,
             commands::liked_artists::save_liked_artist,
             commands::liked_artists::remove_liked_artist,
+            // play history & recommendation signals
+            commands::play_history::record_play,
+            commands::play_history::cache_song_genre,
+            commands::play_history::get_artist_affinities,
+            commands::play_history::get_genre_affinities,
+            commands::play_history::get_song_affinities,
+            commands::play_history::get_listening_profile,
             // stats + health
             commands::stats::get_library_stats,
             commands::health::get_service_health,
@@ -141,6 +138,7 @@ pub fn run() {
             commands::library::library_add_to_playlist,
             commands::library::library_create_playlist,
             commands::library::library_rename_playlist,
+            commands::library::library_delete_playlist,
             commands::library::library_materialize_song,
             // lyrics
             commands::lyrics::fetch_lyrics,

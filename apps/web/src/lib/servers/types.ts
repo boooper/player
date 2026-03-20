@@ -123,15 +123,6 @@ export type CastDeviceInfo = {
   port: number;
 };
 
-export type CastSessionInfo = {
-  deviceName: string;
-  deviceAddr: string;
-  devicePort: number;
-  transportId: string;
-  sessionId: string;
-  mediaSessionId: number;
-};
-
 export type CastPlaybackStatus = {
   currentTime: number;
   playerState: 'PLAYING' | 'PAUSED' | 'IDLE' | 'BUFFERING';

@@ -19,6 +19,7 @@ type SongLike = {
   artist: string;
   streamUrl: string;
   coverArtUrl?: string | null;
+  duration?: number;
 };
 
 type PlayerCastControllerOptions = {
@@ -26,6 +27,7 @@ type PlayerCastControllerOptions = {
   getSeekDragging: () => boolean;
 
   setCurrentTime: (value: number) => void;
+  setDuration: (value: number) => void;
   setCastVolume: (value: number | null) => void;
   setCastPlaying: (value: boolean) => void;
   setCastActive: (value: boolean) => void;
@@ -43,8 +45,13 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
   let castDevice = $state<CastDeviceInfo | null>(null);
   let castVolume = $state<number | null>(null);
   let lastPlayerState = $state<string | null>(null);
+  // Counts consecutive IDLE polls. We require 2 in a row before advancing the
+  // track, so that transient IDLE responses from network hiccups or external
+  // cast events don't prematurely skip to the next song.
+  let consecutiveIdleCount = 0;
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollInFlight = false;
 
   function syncStateToOwner() {
     options.setCastActive(castActive);
@@ -58,16 +65,25 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     options.setCastVolume(status.volumeLevel);
 
     if (status.playerState === 'PLAYING' || status.playerState === 'PAUSED') {
-      options.setCurrentTime(status.currentTime);
+      consecutiveIdleCount = 0;
+      const t = status.currentTime;
+      if (Number.isFinite(t) && t >= 0) options.setCurrentTime(t);
       castPlaying = status.playerState === 'PLAYING';
       options.setCastPlaying(castPlaying);
+    } else if (status.playerState === 'BUFFERING') {
+      // Buffering is an active state — reset idle counter and keep castPlaying as-is
+      // so a brief BUFFERING → IDLE blip doesn't trigger a track advance.
+      consecutiveIdleCount = 0;
     } else if (status.playerState === 'IDLE') {
+      consecutiveIdleCount++;
       castPlaying = false;
       options.setCastPlaying(false);
-    }
 
-    if (lastPlayerState && lastPlayerState !== 'IDLE' && status.playerState === 'IDLE') {
-      options.onAdvanceTrack?.();
+      // Only advance after 2 consecutive IDLE polls so transient network blips
+      // or external cast messages don't cause a spurious track skip.
+      if (consecutiveIdleCount === 2 && lastPlayerState && lastPlayerState !== 'IDLE') {
+        options.onAdvanceTrack?.();
+      }
     }
 
     lastPlayerState = status.playerState;
@@ -96,24 +112,35 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     try {
       await options.onPauseLocalPlayback?.();
 
+      // Set device early so the UI shows "connecting", but do NOT set
+      // castActive yet — that triggers the polling loop, which would open
+      // concurrent TLS connections while the play/connect command is in
+      // flight and cause WSAECONNABORTED (OS error 10053).
       castDevice = device;
-      castActive = true;
       castPlaying = false;
+      consecutiveIdleCount = 0;
+      lastPlayerState = null;
       syncStateToOwner();
 
       const track = options.getCurrentTrack();
 
       if (track) {
+        options.setCurrentTime(0);
+        options.setDuration((track.duration ?? 0) > 0 ? track.duration! : 0);
+
         await castPlayCmd({
           deviceName: device.name,
           deviceAddr: device.addr,
           devicePort: device.port,
+          songId: track.id,
           streamUrl: track.streamUrl,
           title: track.title,
           artist: track.artist,
           coverUrl: track.coverArtUrl ?? ''
         });
 
+        // Only mark active (starts polling) after the command succeeds.
+        castActive = true;
         castPlaying = true;
         syncStateToOwner();
         toast.success(`Casting to ${device.name}`, { id: toastId });
@@ -124,8 +151,10 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
           devicePort: device.port
         });
 
+        castActive = true;
         const status = await castGetStatusCmd();
         applyStatus(status);
+        syncStateToOwner();
         toast.success(`Connected to ${device.name}`, { id: toastId });
       }
     } catch (error) {
@@ -146,6 +175,7 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     castVolume = null;
     castDevice = null;
     lastPlayerState = null;
+    consecutiveIdleCount = 0;
     syncStateToOwner();
 
     try {
@@ -180,6 +210,7 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
         deviceName: castDevice?.name ?? 'Chromecast',
         deviceAddr: castDevice?.addr ?? '',
         devicePort: castDevice?.port ?? 0,
+        songId: track.id,
         streamUrl: track.streamUrl,
         title: track.title,
         artist: track.artist,
@@ -207,12 +238,17 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     if (!castActive || !castDevice) return;
 
     castPlaying = true;
+    consecutiveIdleCount = 0;
+    lastPlayerState = null;
+    options.setCurrentTime(0);
+    options.setDuration((track.duration ?? 0) > 0 ? track.duration! : 0);
     syncStateToOwner();
 
     castPlayCmd({
       deviceName: castDevice.name,
       deviceAddr: castDevice.addr,
       devicePort: castDevice.port,
+      songId: track.id,
       streamUrl: track.streamUrl,
       title: track.title,
       artist: track.artist,
@@ -240,9 +276,9 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
       if (!session) return;
 
       castDevice = {
-        name: session.deviceName,
-        addr: session.deviceAddr,
-        port: session.devicePort
+        name: session.name,
+        addr: session.addr,
+        port: session.port
       };
       castActive = true;
       syncStateToOwner();
@@ -266,21 +302,24 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     stopPolling();
 
     pollTimer = setInterval(async () => {
-      if (!castActive || options.getSeekDragging()) return;
-
+      if (!castActive || options.getSeekDragging() || pollInFlight) return;
+      pollInFlight = true;
       try {
         const status = await castGetStatusCmd();
         applyStatus(status);
       } catch {
         // ignore transient polling failures
+      } finally {
+        pollInFlight = false;
       }
-    }, 1000);
+    }, 1500);
   }
 
   function stopPolling() {
     if (!pollTimer) return;
     clearInterval(pollTimer);
     pollTimer = null;
+    pollInFlight = false;
   }
 
   $effect(() => {

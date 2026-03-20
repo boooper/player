@@ -1,4 +1,4 @@
-import type { CastDeviceInfo, CastPlaybackStatus, CastSessionInfo } from './types';
+import type { CastDeviceInfo, CastPlaybackStatus } from './types';
 import { invoke } from './shared';
 
 export async function castDiscover(): Promise<CastDeviceInfo[]> {
@@ -21,6 +21,7 @@ export async function castPlay(params: {
   deviceName: string;
   deviceAddr: string;
   devicePort: number;
+  songId: string;
   streamUrl: string;
   title: string;
   artist: string;
@@ -30,6 +31,7 @@ export async function castPlay(params: {
     deviceName: params.deviceName,
     deviceAddr: params.deviceAddr,
     devicePort: params.devicePort,
+    songId: params.songId,
     streamUrl: params.streamUrl,
     title: params.title,
     artist: params.artist,
@@ -49,8 +51,8 @@ export async function castStop(): Promise<void> {
   return invoke<void>('cast_stop');
 }
 
-export async function castGetSession(): Promise<CastSessionInfo | null> {
-  return invoke<CastSessionInfo | null>('cast_get_session');
+export async function castGetSession(): Promise<CastDeviceInfo | null> {
+  return invoke<CastDeviceInfo | null>('cast_get_session');
 }
 
 export async function castSetVolume(level: number): Promise<void> {

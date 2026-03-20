@@ -107,6 +107,10 @@ export async function renamePlaylist(playlistId: string, name: string): Promise<
   await invoke('library_rename_playlist', { playlistId, name });
 }
 
+export async function deletePlaylist(playlistId: string): Promise<void> {
+  await invoke('library_delete_playlist', { playlistId });
+}
+
 export async function materializeSong(songId: string): Promise<void> {
   await invoke('library_materialize_song', { songId });
 }

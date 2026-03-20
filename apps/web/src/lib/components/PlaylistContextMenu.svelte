@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { Play, ListStart, ListEnd, ListMusic, Pencil, Pin } from '@lucide/svelte';
+  import { Play, ListStart, ListEnd, ListMusic, Pencil, Pin, Trash2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
@@ -8,7 +8,7 @@
   import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists, pinnedPlaylistIds, togglePlaylistPinned } from '$lib/stores/player';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import { get } from 'svelte/store';
-  import { fetchPlaylistSongs, fetchPlaylists, renamePlaylist, type Playlist } from '$lib/servers';
+  import { fetchPlaylistSongs, fetchPlaylists, renamePlaylist, deletePlaylist, type Playlist } from '$lib/servers';
 
   let { playlist, onplay, children, triggerClass }: {
     playlist: Playlist;
@@ -20,6 +20,8 @@
   let renameDialogOpen = $state(false);
   let renameValue = $state('');
   let renaming = $state(false);
+  let deleteDialogOpen = $state(false);
+  let deleting = $state(false);
   const isPinned = $derived($pinnedPlaylistIds.has(playlist.id));
 
   async function playSongs(mode: 'now' | 'next' | 'queue') {
@@ -103,6 +105,21 @@
       description: playlist.name,
     });
   }
+
+  async function submitDelete() {
+    deleting = true;
+    try {
+      await deletePlaylist(playlist.id);
+      subsonicPlaylists.update((lists) => lists.filter((p) => p.id !== playlist.id));
+      deleteDialogOpen = false;
+      toast.success('Playlist deleted', { description: playlist.name });
+      goto('/songs');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete playlist');
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <ContextMenu.Root>
@@ -121,8 +138,35 @@
     <ContextMenu.Item onclick={togglePinnedState}><Pin />{isPinned ? 'Unpin playlist' : 'Pin playlist'}</ContextMenu.Item>
     <ContextMenu.Item onclick={openRenameDialog}><Pencil />Rename playlist</ContextMenu.Item>
     <ContextMenu.Item onclick={() => goto(`/playlist/${encodeURIComponent(playlist.id)}`)}><ListMusic />Go to playlist</ContextMenu.Item>
+    <ContextMenu.Separator />
+    <ContextMenu.Item onclick={() => { deleteDialogOpen = true; }} class="text-destructive focus:text-destructive"><Trash2 />Delete playlist</ContextMenu.Item>
   </ContextMenu.Content>
 </ContextMenu.Root>
+
+<Dialog.Root bind:open={deleteDialogOpen}>
+  <Dialog.Portal>
+    <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
+    <Dialog.Content class="app-glass fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[28px] p-6 outline-none">
+      <Dialog.Header class="space-y-2">
+        <Dialog.Title class="text-xl font-semibold text-foreground">Delete playlist</Dialog.Title>
+        <Dialog.Description class="text-sm text-muted-foreground">
+          Are you sure you want to delete <span class="font-medium text-foreground">{playlist.name}</span>? This cannot be undone.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Footer class="mt-6 flex justify-end gap-2">
+        <Dialog.Close class="app-round-button h-10 px-4 text-sm">Cancel</Dialog.Close>
+        <button
+          class="app-round-button h-10 px-4 text-sm text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={deleting}
+          onclick={() => void submitDelete()}
+          type="button"
+        >
+          {deleting ? 'Deleting...' : 'Delete'}
+        </button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <Dialog.Root bind:open={renameDialogOpen}>
   <Dialog.Portal>

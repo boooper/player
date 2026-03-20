@@ -390,6 +390,17 @@ pub(crate) async fn rename_playlist(
         .map_err(|error| error.to_string())
 }
 
+pub(crate) async fn delete_playlist(
+    http: &reqwest::Client,
+    p: &ActiveProfile,
+    playlist_id: &str,
+) -> Result<(), String> {
+    client_from_profile(http, p)?
+        .delete_playlist(playlist_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 pub(crate) async fn materialize_song(
     http: &reqwest::Client,
     p: &ActiveProfile,

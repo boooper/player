@@ -8,6 +8,7 @@ pub mod liked_artists;
 pub mod lyrics;
 pub mod media;
 pub mod playback;
+pub mod play_history;
 pub mod plex;
 pub mod profiles;
 pub mod settings;

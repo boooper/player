@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { Heart, HeartOff, ListStart, ListEnd, ListMusic, Play, Radio, User, Disc3 } from '@lucide/svelte';
+  import { Heart, HeartOff, ListStart, ListEnd, ListMinus, ListMusic, Play, Radio, User, Disc3 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
@@ -21,9 +21,10 @@
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import { primarySongArtist } from '$lib/song-artists';
 
-  let { song, onplay, children, triggerClass }: {
+  let { song, onplay, onremove, children, triggerClass }: {
     song: Song;
     onplay?: () => void;
+    onremove?: () => void;
     children: Snippet;
     triggerClass?: string;
   } = $props();
@@ -100,6 +101,9 @@
     <ContextMenu.Item onclick={launchRadio}><Radio />Start radio</ContextMenu.Item>
     <ContextMenu.Item onclick={() => playNextInQueue(song)}><ListStart />Play next</ContextMenu.Item>
     <ContextMenu.Item onclick={() => appendToQueue([song])}><ListEnd />Add to queue</ContextMenu.Item>
+    {#if onremove}
+      <ContextMenu.Item onclick={onremove} class="text-destructive focus:text-destructive"><ListMinus />Remove from queue</ContextMenu.Item>
+    {/if}
     <ContextMenu.Separator />
     <ContextMenu.Item onclick={() => goto(`/artist/${encodeURIComponent(primarySongArtist(song.artist))}`)}><User />Go to artist</ContextMenu.Item>
     {#if song.albumId}

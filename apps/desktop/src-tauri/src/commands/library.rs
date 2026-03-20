@@ -775,6 +775,32 @@ pub async fn library_rename_playlist(
 }
 
 #[tauri::command]
+pub async fn library_delete_playlist(
+    state: State<'_, AppState>,
+    playlist_id: String,
+) -> Result<(), String> {
+    let p = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        get_active_profile(&db)?
+    };
+
+    if playlist_id.trim().is_empty() {
+        return Err("Playlist id is required.".to_string());
+    }
+    if is_local(&p) {
+        return Err("Playlists are not supported for local libraries yet.".to_string());
+    }
+    if is_jf(&p) {
+        return crate::commands::jellyfin::delete_playlist(&state.http, &p, &playlist_id).await;
+    }
+    if is_plex(&p) {
+        return Err("Deleting Plex playlists is not supported yet.".to_string());
+    }
+
+    crate::commands::subsonic::delete_playlist(&state.http, &p, &playlist_id).await
+}
+
+#[tauri::command]
 pub async fn library_materialize_song(
     state: State<'_, AppState>,
     song_id: String,

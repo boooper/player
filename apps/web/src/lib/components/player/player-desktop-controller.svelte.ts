@@ -1,0 +1,281 @@
+import { fromStore } from 'svelte/store';
+import {
+  currentTime,
+  duration,
+  isPlaying,
+  shouldAutoplay,
+  nextTrack,
+  volume,
+  queue,
+  currentIndex,
+  restorePlaybackRequest
+} from '$lib/stores/player';
+import {
+  DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
+  desktopPlaybackLoad,
+  desktopPlaybackPause,
+  desktopPlaybackPlay,
+  desktopPlaybackPreload,
+  desktopPlaybackSeek,
+  desktopPlaybackSetVolume,
+  desktopPlaybackStatus,
+  desktopPlaybackStop,
+  desktopPlaybackIsCached
+} from '$lib/servers';
+import { toast } from 'svelte-sonner';
+
+type SongLike = {
+  id: string;
+  streamUrl?: string | null;
+  duration?: number;
+  album?: string | null;
+};
+
+type PlayerDesktopControllerOptions = {
+  getCurrentTrack: () => SongLike | null;
+  getCastActive: () => boolean;
+  getSeekDragging: () => boolean;
+  getIsBuffering: () => boolean;
+  getCrossfadeSeconds: () => number;
+  setIsBuffering: (v: boolean) => void;
+  onRestoreCastSession: () => Promise<void>;
+};
+
+const shouldAutoplayRef = fromStore(shouldAutoplay);
+const isPlayingRef = fromStore(isPlaying);
+const volumeRef = fromStore(volume);
+const queueRef = fromStore(queue);
+const currentIndexRef = fromStore(currentIndex);
+const currentTimeRef = fromStore(currentTime);
+const durationRef = fromStore(duration);
+const restoreRef = fromStore(restorePlaybackRequest);
+
+export function createPlayerDesktopController(options: PlayerDesktopControllerOptions) {
+  let loadedTrackId = $state<string | null>(null);
+  let endedTrackId = $state<string | null>(null);
+  let preloadedTrackId = $state<string | null>(null);
+  let loadPending = $state(false);
+  let currentTrackCached = $state(false);
+
+  function shouldPreload(positionSeconds: number, durationSeconds: number): boolean {
+    if (durationSeconds <= 0) return false;
+    const leadSeconds = Math.max((options.getCrossfadeSeconds() ?? 4) + 2, 4);
+    const triggerAt = Math.min(durationSeconds * 0.8, Math.max(0, durationSeconds - leadSeconds));
+    return positionSeconds >= triggerAt;
+  }
+
+  // Status poll + cache-updated event
+  $effect(() => {
+    options.onRestoreCastSession().catch(() => undefined);
+
+    function handleCacheUpdated(event: Event) {
+      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
+      const track = options.getCurrentTrack();
+      if (!songId || !track || songId !== track.id) return;
+      currentTrackCached = true;
+    }
+    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleCacheUpdated);
+
+    const poll = window.setInterval(() => {
+      if (options.getCastActive()) return;
+      desktopPlaybackStatus()
+        .then((status) => {
+          const activeTrackId = options.getCurrentTrack()?.id ?? null;
+          if (!activeTrackId) {
+            if (status.loaded || status.playing) desktopPlaybackStop().catch(() => undefined);
+            loadedTrackId = null;
+            endedTrackId = null;
+            loadPending = false;
+            currentTime.set(0);
+            duration.set(0);
+            isPlaying.set(false);
+            options.setIsBuffering(false);
+            return;
+          }
+
+          if (status.trackId && status.trackId !== activeTrackId) {
+            desktopPlaybackStop().catch(() => undefined);
+            loadedTrackId = activeTrackId;
+            endedTrackId = null;
+            loadPending = false;
+            currentTime.set(0);
+            const track = options.getCurrentTrack();
+            duration.set(track && (track.duration ?? 0) > 0 ? track.duration! : 0);
+            isPlaying.set(false);
+            options.setIsBuffering(false);
+            return;
+          }
+
+          if (status.trackId) loadedTrackId = status.trackId;
+          if (!options.getSeekDragging()) currentTime.set(status.position ?? 0);
+          if (status.duration > 0) duration.set(status.duration);
+
+          if (loadPending) {
+            isPlaying.set(true);
+            if (status.playing) {
+              loadPending = false;
+              options.setIsBuffering(false);
+            } else {
+              options.setIsBuffering(true);
+            }
+          } else {
+            isPlaying.set(status.playing);
+            options.setIsBuffering(false);
+          }
+
+          if (status.ended && status.trackId && endedTrackId !== status.trackId) {
+            endedTrackId = status.trackId;
+            nextTrack();
+          } else if (!status.ended) {
+            endedTrackId = null;
+          }
+        })
+        .catch(() => undefined);
+    }, 250);
+
+    return () => {
+      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleCacheUpdated);
+      clearInterval(poll);
+    };
+  });
+
+  // Cache check
+  $effect(() => {
+    const track = options.getCurrentTrack();
+    if (!track) { currentTrackCached = false; return; }
+    let cancelled = false;
+    desktopPlaybackIsCached(track as Parameters<typeof desktopPlaybackIsCached>[0])
+      .then((cached) => { if (!cancelled) currentTrackCached = cached; })
+      .catch(() => { if (!cancelled) currentTrackCached = false; });
+    return () => { cancelled = true; };
+  });
+
+  // Load when current track changes
+  $effect(() => {
+    if (options.getCastActive()) return;
+    const track = options.getCurrentTrack();
+    if (!track?.streamUrl) {
+      desktopPlaybackStop().catch(() => undefined);
+      loadedTrackId = null;
+      endedTrackId = null;
+      preloadedTrackId = null;
+      loadPending = false;
+      options.setIsBuffering(false);
+      isPlaying.set(false);
+      currentTime.set(0);
+      duration.set(0);
+      return;
+    }
+    if (loadedTrackId === track.id) return;
+    loadedTrackId = track.id;
+    currentTime.set(0);
+    duration.set((track.duration ?? 0) > 0 ? track.duration! : 0);
+    const autoplay = shouldAutoplayRef.current;
+    options.setIsBuffering(true);
+    loadPending = autoplay;
+    isPlaying.set(autoplay);
+    if (autoplay) shouldAutoplay.set(false);
+    desktopPlaybackLoad(track as Parameters<typeof desktopPlaybackLoad>[0], autoplay)
+      .then(() => {
+        if (!autoplay) {
+          loadPending = false;
+          options.setIsBuffering(false);
+          isPlaying.set(false);
+        }
+      })
+      .catch(() => {
+        loadedTrackId = null;
+        loadPending = false;
+        options.setIsBuffering(false);
+        isPlaying.set(false);
+        toast.error('Desktop playback failed to load the track');
+      });
+  });
+
+  // Volume sync
+  $effect(() => {
+    if (options.getCastActive()) return;
+    desktopPlaybackSetVolume(volumeRef.current).catch(() => undefined);
+  });
+
+  // Preload next track
+  $effect(() => {
+    if (options.getCastActive()) return;
+    const items = queueRef.current;
+    const index = currentIndexRef.current;
+    const next = items[index + 1];
+    if (!next?.streamUrl) { preloadedTrackId = null; return; }
+    const track = options.getCurrentTrack();
+    const trackDuration = (track?.duration ?? 0) > 0 ? track!.duration! : durationRef.current;
+    if (!shouldPreload(currentTimeRef.current, trackDuration)) return;
+    if (preloadedTrackId === next.id) return;
+    preloadedTrackId = next.id;
+    desktopPlaybackPreload(next as Parameters<typeof desktopPlaybackPreload>[0]).catch(() => {
+      if (preloadedTrackId === next.id) preloadedTrackId = null;
+    });
+  });
+
+  function togglePlay() {
+    if (isPlayingRef.current) {
+      desktopPlaybackPause().then(() => isPlaying.set(false)).catch(() => undefined);
+    } else {
+      desktopPlaybackPlay().then(() => isPlaying.set(true)).catch(() => isPlaying.set(false));
+    }
+  }
+
+  function seek(value: number) {
+    desktopPlaybackSeek(value).catch(() => undefined);
+  }
+
+  // Restore playback position (desktop path)
+  $effect(() => {
+    if (options.getCastActive()) return;
+    const restore = restoreRef.current;
+    const track = options.getCurrentTrack();
+    if (!restore || !track || restore.songId !== track.id) return;
+    if (loadedTrackId !== track.id || loadPending) return;
+    const position = restore.position;
+    restorePlaybackRequest.set(null);
+    applyPosition(position);
+  });
+
+  function applyPosition(value: number) {
+    const clamped = Math.max(0, value);
+    desktopPlaybackSeek(clamped).catch(() => undefined);
+    currentTime.set(clamped);
+  }
+
+  function handleAutoplay() {
+    const track = options.getCurrentTrack();
+    if (!track) return;
+    if (loadPending || options.getIsBuffering()) return;
+    if (loadedTrackId !== track.id) return;
+    shouldAutoplay.set(false);
+    loadPending = true;
+    options.setIsBuffering(true);
+    desktopPlaybackSeek(0)
+      .then(() => desktopPlaybackPlay())
+      .then(() => {
+        isPlaying.set(true);
+        options.setIsBuffering(false);
+        loadPending = false;
+      })
+      .catch(() => {
+        isPlaying.set(false);
+        options.setIsBuffering(false);
+        loadPending = false;
+      });
+  }
+
+  return {
+    get loadedTrackId() { return loadedTrackId; },
+    get loadPending() { return loadPending; },
+    get currentTrackCached() { return currentTrackCached; },
+    togglePlay,
+    seek,
+    applyPosition,
+    handleAutoplay
+  };
+}
+
+export type PlayerDesktopController = ReturnType<typeof createPlayerDesktopController>;

@@ -1,51 +1,38 @@
-//! Chromecast / Google Cast V2 implementation.
+//! Chromecast / Google Cast V2 implementation backed by the `rust_cast` crate.
 //!
-//! Uses only pure-Rust or OS-native dependencies:
-//!   - `mdns` crate for mDNS device discovery
-//!   - `tokio-native-tls` (Windows Schannel) for TLS  (no OpenSSL, no Perl)
-//!   - `prost` derive macros for Cast V2 protobuf     (no protoc)
+//! Architecture
+//! ────────────
+//! A dedicated `std::thread` (the "cast actor") owns the `CastDevice` for the
+//! lifetime of a cast session.  Tauri commands communicate with it via an
+//! `mpsc::Sender<CastActorCmd>` stored in `AppState`.  Each command carries a
+//! `tokio::sync::oneshot::Sender` so the async tauri handler can `.await` the
+//! response without blocking the async runtime.
+//!
+//! Heartbeat
+//! ─────────
+//! rust_cast's synchronous channel methods internally consume messages that
+//! don't match the expected response (e.g. PING) and place them in an internal
+//! buffer.  Between commands the actor waits on `cmd_rx.recv_timeout(4 s)`.
+//! On timeout it sends a preemptive PONG to keep the Chromecast connection
+//! alive even when no commands are in flight.
 
-use std::net::IpAddr;
 use std::time::Duration;
 
-use futures_util::StreamExt;
-use prost::Message as ProstMsg;
-use serde_json::{json, Value};
+use rust_cast::{
+    CastDevice,
+    channels::{
+        media::{Media, Metadata, MusicTrackMediaMetadata, ResumeState, StreamType},
+        receiver::CastDeviceApp,
+    },
+};
+use serde::{Deserialize, Serialize};
 use tauri::State;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio_native_tls::native_tls;
 
-use crate::{AppState, CastSessionInfo};
+use crate::AppState;
 
-// ── Cast V2 minimal protobuf message ─────────────────────────────────────────
+// ── Device info (shared with frontend) ───────────────────────────────────────
 
-#[derive(Clone, PartialEq, prost::Message)]
-struct CastMsg {
-    #[prost(int32, required, tag = "1")]
-    protocol_version: i32,
-    #[prost(string, required, tag = "2")]
-    source_id: String,
-    #[prost(string, required, tag = "3")]
-    destination_id: String,
-    #[prost(string, required, tag = "4")]
-    namespace: String,
-    #[prost(int32, required, tag = "5")]
-    payload_type: i32,
-    #[prost(string, optional, tag = "6")]
-    payload_utf8: Option<String>,
-}
-
-type TlsStream = tokio_native_tls::TlsStream<TcpStream>;
-
-const NS_CONN: &str = "urn:x-cast:com.google.cast.tp.connection";
-const NS_RECV: &str = "urn:x-cast:com.google.cast.receiver";
-const NS_MEDIA: &str = "urn:x-cast:com.google.cast.media";
-const MEDIA_RECEIVER_APP: &str = "CC1AD845";
-
-// ── Device info ───────────────────────────────────────────────────────────────
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CastDeviceInfo {
     pub name: String,
@@ -53,179 +40,564 @@ pub struct CastDeviceInfo {
     pub port: u16,
 }
 
+// ── Playback status (returned by cast_get_status) ────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CastPlaybackStatus {
+    pub current_time: f64,
+    pub player_state: String,
+    pub volume_level: f64,
+}
+
+// ── Actor command/response types ─────────────────────────────────────────────
+
+type Resp<T> = tokio::sync::oneshot::Sender<Result<T, String>>;
+
+pub enum CastActorCmd {
+    Play {
+        stream_url: String,
+        title:      String,
+        artist:     String,
+        cover_url:  String,
+        resp:       Resp<()>,
+    },
+    Pause  { resp: Resp<()> },
+    Resume { resp: Resp<()> },
+    Seek   { position: f64,  resp: Resp<()> },
+    Volume { level: f64,     resp: Resp<()> },
+    Status { resp: Resp<CastPlaybackStatus> },
+    Stop   { resp: Resp<()> },
+}
+
+// ── Handle stored in AppState ─────────────────────────────────────────────────
+
+pub struct CastActorHandle {
+    pub tx:          std::sync::mpsc::Sender<CastActorCmd>,
+    pub device_name: String,
+    pub device_addr: String,
+    pub device_port: u16,
+}
+
+// ── Actor internal state ──────────────────────────────────────────────────────
+
+struct CastActor {
+    device:           CastDevice<'static>,
+    transport_id:     String,
+    session_id:       String,
+    media_session_id: i32,   // 0 = no active media
+}
+
+impl CastActor {
+    // ── Start: connect, launch Default Media Receiver, spawn actor thread ───
+
+    /// Connect to the Chromecast, ensure the Default Media Receiver app is
+    /// running, then spin up the actor thread.  Returns a handle that callers
+    /// use to send commands.
+    pub fn start(
+        addr: String,
+        port: u16,
+        name: String,
+    ) -> Result<CastActorHandle, String> {
+        // rustls 0.23 requires an explicit process-level crypto provider when
+        // multiple backends (ring, aws-lc-rs) are present.  Ignore the error
+        // if one is already installed (e.g. from a previous session).
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let device =
+            CastDevice::connect_without_host_verification(addr.clone(), port)
+                .map_err(|e| format!("Cast connect: {e}"))?;
+
+        // Open the virtual connection to the receiver platform.
+        device
+            .connection
+            .connect("receiver-0".to_string())
+            .map_err(|e| format!("Cast CONNECT: {e}"))?;
+
+        // Launch the Default Media Receiver app (or reuse it if already running).
+        let app = device
+            .receiver
+            .launch_app(&CastDeviceApp::DefaultMediaReceiver)
+            .map_err(|e| format!("Cast LAUNCH: {e}"))?;
+
+        let transport_id = app.transport_id.clone();
+        let session_id   = app.session_id.clone();
+
+        // Open the virtual connection to the media transport.
+        device
+            .connection
+            .connect(transport_id.clone())
+            .map_err(|e| format!("Cast CONNECT transport: {e}"))?;
+
+        let (tx, rx) = std::sync::mpsc::channel::<CastActorCmd>();
+
+        let actor = CastActor {
+            device,
+            transport_id,
+            session_id,
+            media_session_id: 0,
+        };
+
+        std::thread::spawn(move || actor.run(rx));
+
+        Ok(CastActorHandle { tx, device_name: name, device_addr: addr, device_port: port })
+    }
+
+    // ── Actor run loop ───────────────────────────────────────────────────────
+
+    fn run(mut self, rx: std::sync::mpsc::Receiver<CastActorCmd>) {
+        use std::sync::mpsc::RecvTimeoutError;
+
+        loop {
+            match rx.recv_timeout(Duration::from_secs(4)) {
+                Ok(cmd) => {
+                    if !self.handle(cmd) {
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    // Send a preemptive PONG while idle so the Chromecast
+                    // doesn't close the connection due to missed heartbeats.
+                    self.device.heartbeat.pong().ok();
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    }
+
+    /// Dispatch one command.  Returns `false` when the actor should exit.
+    fn handle(&mut self, cmd: CastActorCmd) -> bool {
+        match cmd {
+            CastActorCmd::Play { stream_url, title, artist, cover_url, resp } => {
+                resp.send(self.cmd_play(stream_url, title, artist, cover_url)).ok();
+            }
+            CastActorCmd::Pause  { resp } => { resp.send(self.cmd_pause()).ok();  }
+            CastActorCmd::Resume { resp } => { resp.send(self.cmd_resume()).ok(); }
+            CastActorCmd::Seek   { position, resp } => { resp.send(self.cmd_seek(position)).ok(); }
+            CastActorCmd::Volume { level,    resp } => { resp.send(self.cmd_volume(level)).ok();  }
+            CastActorCmd::Status { resp } => { resp.send(self.cmd_status()).ok(); }
+            CastActorCmd::Stop   { resp } => {
+                resp.send(self.cmd_stop()).ok();
+                return false;
+            }
+        }
+        true
+    }
+
+    // ── Command implementations ──────────────────────────────────────────────
+
+    fn cmd_play(
+        &mut self,
+        stream_url: String,
+        title:      String,
+        artist:     String,
+        cover_url:  String,
+    ) -> Result<(), String> {
+        // Reset media session – we're starting a new track.
+        self.media_session_id = 0;
+
+        let images = if cover_url.is_empty() {
+            vec![]
+        } else {
+            vec![rust_cast::channels::media::Image { url: cover_url, dimensions: None }]
+        };
+        let metadata = Metadata::MusicTrack(MusicTrackMediaMetadata {
+            title:        Some(title),
+            artist:       Some(artist),
+            album_name:   None,
+            album_artist: None,
+            composer:     None,
+            track_number: None,
+            disc_number:  None,
+            images,
+            release_date: None,
+        });
+
+        let media = Media {
+            content_id:   stream_url,
+            stream_type:  StreamType::Buffered,
+            content_type: "audio/mpeg".to_string(),
+            metadata:     Some(metadata),
+            duration:     None,
+        };
+
+        let status = self
+            .device
+            .media
+            .load(
+                self.transport_id.clone(),
+                self.session_id.clone(),
+                &media,
+            )
+            .map_err(|e| format!("Cast LOAD: {e}"))?;
+
+        // Store the media_session_id for subsequent pause/seek/status calls.
+        if let Some(entry) = status.entries.first() {
+            self.media_session_id = entry.media_session_id;
+        }
+
+        Ok(())
+    }
+
+    fn cmd_pause(&mut self) -> Result<(), String> {
+        if self.media_session_id == 0 {
+            return Err("No active media session".into());
+        }
+        self.device
+            .media
+            .pause(self.transport_id.clone(), self.media_session_id)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn cmd_resume(&mut self) -> Result<(), String> {
+        if self.media_session_id == 0 {
+            return Err("No active media session".into());
+        }
+        self.device
+            .media
+            .play(self.transport_id.clone(), self.media_session_id)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn cmd_seek(&mut self, position: f64) -> Result<(), String> {
+        if self.media_session_id == 0 {
+            return Err("No active media session".into());
+        }
+        self.device
+            .media
+            .seek(
+                self.transport_id.clone(),
+                self.media_session_id,
+                Some(position as f32),
+                Some(ResumeState::PlaybackStart),
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn cmd_volume(&mut self, level: f64) -> Result<(), String> {
+        self.device
+            .receiver
+            .set_volume(level as f32)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn cmd_status(&mut self) -> Result<CastPlaybackStatus, String> {
+        // Receiver status (volume).
+        let recv = self
+            .device
+            .receiver
+            .get_status()
+            .map_err(|e| e.to_string())?;
+        let volume_level = recv.volume.level.unwrap_or(0.0) as f64;
+
+        if self.media_session_id == 0 {
+            return Ok(CastPlaybackStatus {
+                current_time: 0.0,
+                player_state: "IDLE".into(),
+                volume_level,
+            });
+        }
+
+        // Media status (player state + current time).
+        let media = self
+            .device
+            .media
+            .get_status(self.transport_id.clone(), Some(self.media_session_id))
+            .map_err(|e| e.to_string())?;
+
+        if let Some(entry) = media.entries.first() {
+            use rust_cast::channels::media::PlayerState;
+            let state = match entry.player_state {
+                PlayerState::Playing   => "PLAYING",
+                PlayerState::Paused    => "PAUSED",
+                PlayerState::Buffering => "BUFFERING",
+                PlayerState::Idle      => "IDLE",
+            };
+
+            // Update stored media_session_id in case it changed (new load).
+            self.media_session_id = entry.media_session_id;
+
+            Ok(CastPlaybackStatus {
+                current_time: entry.current_time.unwrap_or(0.0) as f64,
+                player_state: state.into(),
+                volume_level,
+            })
+        } else {
+            Ok(CastPlaybackStatus {
+                current_time: 0.0,
+                player_state: "IDLE".into(),
+                volume_level,
+            })
+        }
+    }
+
+    fn cmd_stop(&mut self) -> Result<(), String> {
+        self.device
+            .receiver
+            .stop_app(self.session_id.clone())
+            .map_err(|e| e.to_string())
+    }
+}
+
+// ── Helpers shared by tauri commands ─────────────────────────────────────────
+
+/// Send a command to the actor and await its response.
+/// Clears the actor handle from state if the channel is dead.
+macro_rules! actor_send {
+    ($state:expr, $variant:expr) => {{
+        let tx = {
+            let guard = $state.cast_actor.lock().unwrap();
+            guard
+                .as_ref()
+                .ok_or_else(|| "No active cast session".to_string())?
+                .tx
+                .clone()
+        };
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+        tx.send($variant(resp_tx))
+            .map_err(|_| "Cast actor stopped".to_string())?;
+        resp_rx.await.map_err(|_| "Cast actor dropped".to_string())?
+    }};
+}
+
 // ── mDNS discovery ────────────────────────────────────────────────────────────
+//
+// Raw UDP implementation — no external mDNS crate needed.
+//
+// Chromecast devices respond to a PTR query for _googlecast._tcp.local. with
+// a single UDP packet that already contains SRV + TXT + A records in the
+// additional section.  We parse that packet directly so we get every device in
+// one round-trip without a second A-record lookup.
+//
+// We set the unicast-response (QU) bit in the query so the Chromecast replies
+// unicast to our ephemeral port instead of multicast to 224.0.0.251:5353.
+// This lets us bind to any port and avoids conflicts with the Windows DNS
+// Client service that already occupies port 5353.
+
+fn mdns_query(service: &str) -> Vec<u8> {
+    let mut pkt: Vec<u8> = vec![
+        0x00, 0x00, // Transaction ID
+        0x00, 0x00, // Flags: standard query
+        0x00, 0x01, // QDCOUNT = 1
+        0x00, 0x00, // ANCOUNT = 0
+        0x00, 0x00, // NSCOUNT = 0
+        0x00, 0x00, // ARCOUNT = 0
+    ];
+    for label in service.trim_end_matches('.').split('.') {
+        pkt.push(label.len() as u8);
+        pkt.extend_from_slice(label.as_bytes());
+    }
+    pkt.push(0x00);
+    pkt.extend_from_slice(&[0x00, 0x0C]); // QTYPE = PTR
+    pkt.extend_from_slice(&[0x80, 0x01]); // QCLASS = IN | QU bit
+    pkt
+}
+
+fn dns_read_u16(buf: &[u8], pos: usize) -> Option<u16> {
+    buf.get(pos..pos + 2).map(|b| u16::from_be_bytes([b[0], b[1]]))
+}
+
+fn dns_name(buf: &[u8], pos: usize) -> Option<(String, usize)> {
+    let mut labels = Vec::<String>::new();
+    let mut i      = pos;
+    let mut jumped = false;
+    let mut end    = pos;
+    loop {
+        if i >= buf.len() { return None; }
+        let b = buf[i] as usize;
+        if b == 0 {
+            if !jumped { end = i + 1; }
+            break;
+        }
+        if (b & 0xC0) == 0xC0 {
+            if i + 1 >= buf.len() { return None; }
+            let ptr = ((b & 0x3F) << 8) | buf[i + 1] as usize;
+            if !jumped { end = i + 2; }
+            jumped = true;
+            i = ptr;
+            continue;
+        }
+        i += 1;
+        if i + b > buf.len() { return None; }
+        labels.push(std::str::from_utf8(&buf[i..i + b]).ok()?.to_string());
+        i += b;
+    }
+    Some((labels.join("."), end))
+}
+
+fn dns_skip_name(buf: &[u8], pos: usize) -> Option<usize> {
+    dns_name(buf, pos).map(|(_, e)| e)
+}
+
+fn parse_mdns_response(buf: &[u8], sender: std::net::Ipv4Addr) -> Vec<(String, String, u16)> {
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+
+    if buf.len() < 12 { return vec![]; }
+    let qdcount = dns_read_u16(buf, 4).unwrap_or(0) as usize;
+    let ancount = dns_read_u16(buf, 6).unwrap_or(0) as usize;
+    let arcount = dns_read_u16(buf, 10).unwrap_or(0) as usize;
+
+    let mut pos = 12;
+    for _ in 0..qdcount {
+        pos = match dns_skip_name(buf, pos) { Some(p) => p + 4, None => return vec![] };
+    }
+
+    let mut txt: HashMap<String, String>         = HashMap::new();
+    let mut srv: HashMap<String, (u16, String)>  = HashMap::new();
+    let mut a:   HashMap<String, Ipv4Addr>       = HashMap::new();
+
+    for _ in 0..ancount + arcount {
+        if pos >= buf.len() { break; }
+        let (rname, next) = match dns_name(buf, pos) { Some(v) => v, None => break };
+        pos = next;
+        if pos + 10 > buf.len() { break; }
+        let rtype = dns_read_u16(buf, pos).unwrap_or(0);
+        let rdlen = dns_read_u16(buf, pos + 8).unwrap_or(0) as usize;
+        let rdata = pos + 10;
+        pos = rdata + rdlen;
+        if rdata + rdlen > buf.len() { break; }
+
+        match rtype {
+            1 /* A */ => {
+                if rdlen == 4 {
+                    a.insert(rname, Ipv4Addr::new(buf[rdata], buf[rdata+1], buf[rdata+2], buf[rdata+3]));
+                }
+            }
+            16 /* TXT */ => {
+                let mut i = rdata;
+                while i < rdata + rdlen {
+                    let slen = buf[i] as usize;
+                    i += 1;
+                    if i + slen > rdata + rdlen { break; }
+                    if let Ok(s) = std::str::from_utf8(&buf[i..i + slen]) {
+                        if let Some(v) = s.strip_prefix("fn=") {
+                            txt.insert(rname.clone(), v.to_string());
+                        }
+                    }
+                    i += slen;
+                }
+            }
+            33 /* SRV */ => {
+                if rdlen >= 6 {
+                    let port = dns_read_u16(buf, rdata + 4).unwrap_or(8009);
+                    if let Some((target, _)) = dns_name(buf, rdata + 6) {
+                        srv.insert(rname, (port, target));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut results = Vec::new();
+    for (instance, (port, target)) in &srv {
+        let ip   = a.get(target).copied().unwrap_or(sender);
+        let name = txt.get(instance).cloned()
+            .unwrap_or_else(|| instance.split('.').next().unwrap_or("Chromecast").to_string());
+        results.push((name, ip.to_string(), *port));
+    }
+    results
+}
 
 #[tauri::command]
 pub async fn cast_discover() -> Result<Vec<CastDeviceInfo>, String> {
     use std::collections::HashMap;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tokio::net::UdpSocket;
 
-    let stream = mdns::discover::all("_googlecast._tcp.local", Duration::from_secs(3))
-        .map_err(|e| e.to_string())?
-        .listen();
-    tokio::pin!(stream);
+    const MDNS_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
+    const MDNS_PORT:  u16      = 5353;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut devices: HashMap<String, CastDeviceInfo> = HashMap::new();
+    let query  = Arc::new(mdns_query("_googlecast._tcp.local."));
+    let target: SocketAddr = SocketAddr::new(IpAddr::V4(MDNS_GROUP), MDNS_PORT);
 
-    loop {
-        let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if rem.is_zero() { break; }
-        match tokio::time::timeout(rem, stream.next()).await {
-            Ok(Some(Ok(response))) => {
-                let ip = match response.ip_addr() {
-                    Some(IpAddr::V4(ip)) => ip,
-                    _ => continue,
-                };
-                let port = match response.port() {
-                    Some(p) => p,
-                    None => continue,
-                };
-                let name = response
-                    .txt_records()
-                    .find_map(|s| s.strip_prefix("fn="))
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| ip.to_string());
-                let key = format!("{}:{}", ip, port);
-                devices.entry(key).or_insert(CastDeviceInfo { name, addr: ip.to_string(), port });
+    // Enumerate non-loopback IPv4 interfaces.  Sending multicast on every
+    // interface ensures the query reaches the Chromecast even when VPN
+    // software (e.g. Tailscale) changes the default multicast route.
+    let iface_ips: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|iface| {
+            if iface.is_loopback() { return None; }
+            match iface.addr.ip() {
+                IpAddr::V4(ip) => Some(ip),
+                _ => None,
             }
-            _ => break,
-        }
-    }
+        })
+        .collect();
 
-    Ok(devices.into_values().collect())
-}
-
-// ── TLS connection ────────────────────────────────────────────────────────────
-
-async fn cast_connect_tls(addr: &str, port: u16) -> Result<TlsStream, String> {
-    let cx = native_tls::TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .danger_accept_invalid_hostnames(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let cx = tokio_native_tls::TlsConnector::from(cx);
-    let tcp = TcpStream::connect((addr, port)).await.map_err(|e| e.to_string())?;
-    cx.connect("na", tcp).await.map_err(|e| e.to_string())
-}
-
-// ── Message I/O ───────────────────────────────────────────────────────────────
-
-async fn send_msg(stream: &mut TlsStream, src: &str, dst: &str, ns: &str, payload: Value) -> Result<(), String> {
-    let msg = CastMsg {
-        source_id: src.to_string(),
-        destination_id: dst.to_string(),
-        namespace: ns.to_string(),
-        payload_type: 0,
-        payload_utf8: Some(payload.to_string()),
-        ..Default::default()
-    };
-    let mut buf = Vec::new();
-    msg.encode(&mut buf).map_err(|e| e.to_string())?;
-    let len = (buf.len() as u32).to_be_bytes();
-    stream.write_all(&len).await.map_err(|e| e.to_string())?;
-    stream.write_all(&buf).await.map_err(|e| e.to_string())?;
-    stream.flush().await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-async fn recv_msg(stream: &mut TlsStream) -> Result<(String, Value), String> {
-    let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).await.map_err(|e| e.to_string())?;
-    let len = u32::from_be_bytes(len_buf) as usize;
-    if len > 65_536 { return Err("Cast message too large".into()); }
-    let mut buf = vec![0u8; len];
-    stream.read_exact(&mut buf).await.map_err(|e| e.to_string())?;
-    let msg = CastMsg::decode(buf.as_slice()).map_err(|e| e.to_string())?;
-    let payload = msg.payload_utf8.as_deref().unwrap_or("{}");
-    let val: Value = serde_json::from_str(payload).unwrap_or_default();
-    Ok((msg.namespace, val))
-}
-
-async fn recv_until(
-    stream: &mut TlsStream,
-    ns_filter: &str,
-    predicate: impl Fn(&Value) -> bool,
-    timeout_secs: u64,
-) -> Result<Value, String> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
-    loop {
-        let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if rem.is_zero() { return Err("Timeout waiting for Cast response".into()); }
-        let (ns, val) = tokio::time::timeout(rem, recv_msg(stream))
-            .await
-            .map_err(|_| "Timeout".to_string())??;
-        if ns == "urn:x-cast:com.google.cast.tp.heartbeat" {
-            let _ = send_msg(stream, "sender-0", "receiver-0", &ns, json!({"type":"PONG"})).await;
-            continue;
-        }
-        if ns == ns_filter && predicate(&val) {
-            return Ok(val);
-        }
-    }
-}
-
-fn find_media_receiver(status: &Value) -> Option<&Value> {
-    status["status"]["applications"]
-        .as_array()
-        .and_then(|apps| apps.iter().find(|a| a["appId"].as_str() == Some(MEDIA_RECEIVER_APP)))
-}
-
-async fn ensure_cast_session(
-    device_name: String,
-    device_addr: String,
-    device_port: u16,
-) -> Result<CastSessionInfo, String> {
-    let mut tls = cast_connect_tls(&device_addr, device_port).await?;
-
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
-        json!({"type":"GET_STATUS","requestId":1})).await?;
-
-    let mut recv_status = recv_until(&mut tls, NS_RECV, |v| {
-        v["type"].as_str() == Some("RECEIVER_STATUS")
-    }, 8).await?;
-
-    if find_media_receiver(&recv_status).is_none() {
-        send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
-            json!({"type":"LAUNCH","requestId":2,"appId":MEDIA_RECEIVER_APP})).await?;
-
-        recv_status = recv_until(&mut tls, NS_RECV, |v| {
-            v["type"].as_str() == Some("RECEIVER_STATUS") && find_media_receiver(v).is_some()
-        }, 20).await?;
-    }
-
-    let app = find_media_receiver(&recv_status)
-        .ok_or("App not found in RECEIVER_STATUS")?;
-
-    let transport_id = app["transportId"].as_str().ok_or("Missing transportId")?.to_string();
-    let session_id = app["sessionId"].as_str().unwrap_or("").to_string();
-
-    Ok(CastSessionInfo {
-        device_name,
-        device_addr,
-        device_port,
-        transport_id,
-        session_id,
-        media_session_id: 0,
-    })
-}
-
-async fn receiver_status(session: &CastSessionInfo) -> Result<Value, String> {
-    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
-        json!({"type":"GET_STATUS","requestId":8})).await?;
-    recv_until(&mut tls, NS_RECV, |v| v["type"].as_str() == Some("RECEIVER_STATUS"), 8).await
-}
-
-fn media_session_id(session: &CastSessionInfo) -> Result<i32, String> {
-    if session.media_session_id > 0 {
-        Ok(session.media_session_id)
+    let bind_ips: Vec<Ipv4Addr> = if iface_ips.is_empty() {
+        vec![Ipv4Addr::UNSPECIFIED]
     } else {
-        Err("No active cast media session".into())
+        iface_ips
+    };
+
+    let devices: Arc<StdMutex<HashMap<String, CastDeviceInfo>>> =
+        Arc::new(StdMutex::new(HashMap::new()));
+    let mut handles = Vec::new();
+
+    for ip in bind_ips {
+        let std_sock = match std::net::UdpSocket::bind(SocketAddr::new(IpAddr::V4(ip), 0)) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        std_sock.join_multicast_v4(&MDNS_GROUP, &ip).ok();
+        std_sock.set_nonblocking(true).ok();
+        let socket = match UdpSocket::from_std(std_sock) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let _ = socket.send_to(&query, target).await;
+
+        let q    = query.clone();
+        let devs = devices.clone();
+        handles.push(tokio::spawn(async move {
+            let mut buf      = vec![0u8; 4096];
+            let deadline     = tokio::time::Instant::now() + Duration::from_secs(5);
+            let mut last_send = tokio::time::Instant::now();
+
+            loop {
+                let rem = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if rem.is_zero() { break; }
+
+                if last_send.elapsed() >= Duration::from_millis(1500) {
+                    let _ = socket.send_to(&q, target).await;
+                    last_send = tokio::time::Instant::now();
+                }
+
+                let recv_timeout = rem.min(Duration::from_millis(250));
+                let Ok(Ok((len, from))) =
+                    tokio::time::timeout(recv_timeout, socket.recv_from(&mut buf)).await
+                else { continue; };
+
+                let src_ip = match from.ip() { IpAddr::V4(src) => src, _ => continue };
+                for (name, addr, port) in parse_mdns_response(&buf[..len], src_ip) {
+                    let key = format!("{}:{}", addr, port);
+                    devs.lock().unwrap()
+                        .entry(key)
+                        .or_insert(CastDeviceInfo { name, addr, port });
+                }
+            }
+        }));
     }
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    for h in handles { h.abort(); }
+
+    let result = devices.lock().unwrap().values().cloned().collect();
+    Ok(result)
 }
 
+// ── Tauri commands ────────────────────────────────────────────────────────────
+
+/// Connect to a Chromecast without playing anything.  Launches the Default
+/// Media Receiver app so subsequent `cast_play` calls start instantly.
 #[tauri::command]
 pub async fn cast_connect(
     state: State<'_, AppState>,
@@ -233,168 +605,115 @@ pub async fn cast_connect(
     device_addr: String,
     device_port: u16,
 ) -> Result<(), String> {
-    let session = ensure_cast_session(device_name, device_addr, device_port).await?;
-    *state.cast_session.lock().map_err(|e| e.to_string())? = Some(session);
+    // Drop any previous actor (its thread will exit when the Sender is gone).
+    *state.cast_actor.lock().unwrap() = None;
+
+    let (name, addr, port) = (device_name.clone(), device_addr.clone(), device_port);
+    let handle = tokio::task::spawn_blocking(move || {
+        CastActor::start(addr, port, name)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    *state.cast_actor.lock().unwrap() = Some(handle);
     Ok(())
 }
 
-// ── cast_play ─────────────────────────────────────────────────────────────────
-
+/// Connect to a Chromecast and immediately start playing the given track.
 #[tauri::command]
 pub async fn cast_play(
     state: State<'_, AppState>,
     device_name: String,
     device_addr: String,
     device_port: u16,
-    stream_url: String,
-    title: String,
-    artist: String,
-    cover_url: String,
+    song_id:     String,
+    stream_url:  String,
+    title:       String,
+    artist:      String,
+    cover_url:   String,
 ) -> Result<(), String> {
-    let mut session = ensure_cast_session(device_name, device_addr, device_port).await?;
-    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
+    // If this is an external song (id starts with "ext-"), materialize it first
+    // so the Chromecast receives an internal stream URL it can actually reach.
+    let (stream_url, title, artist, cover_url) = if song_id.starts_with("ext-") {
+        let stub = crate::commands::media::Song {
+            id: song_id.clone(),
+            title: title.clone(),
+            artist: artist.clone(),
+            album: String::new(),
+            album_id: String::new(),
+            cover_art: String::new(),
+            cover_art_url: cover_url.clone(),
+            stream_url: stream_url.clone(),
+            duration: 0.0,
+            audio_format: None,
+            bitrate_kbps: None,
+        };
+        let resolved = crate::commands::library::resolve_playback_song(&state, &stub).await?;
+        (resolved.stream_url, resolved.title, resolved.artist, resolved.cover_art_url)
+    } else {
+        (stream_url, title, artist, cover_url)
+    };
 
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
+    // Start a fresh actor (drops the previous one if any).
+    *state.cast_actor.lock().unwrap() = None;
 
-    let images = if cover_url.is_empty() { json!([]) } else { json!([{"url": cover_url}]) };
-    send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA, json!({
-        "type": "LOAD",
-        "requestId": 2,
-        "media": {
-            "contentId": stream_url,
-            "contentType": "audio/mpeg",
-            "streamType": "BUFFERED",
-            "metadata": { "metadataType": 3, "title": title, "artist": artist, "images": images }
-        },
-        "autoplay": true,
-        "currentTime": 0
-    })).await?;
+    let (name, addr, port) = (device_name.clone(), device_addr.clone(), device_port);
+    let handle = tokio::task::spawn_blocking(move || {
+        CastActor::start(addr, port, name)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
-    let media_status = recv_until(&mut tls, NS_MEDIA,
-        |v| v["type"].as_str() == Some("MEDIA_STATUS"), 15).await?;
+    *state.cast_actor.lock().unwrap() = Some(handle);
 
-    let media_session_id = media_status["status"]
-        .as_array().and_then(|a| a.first())
-        .and_then(|s| s["mediaSessionId"].as_i64())
-        .unwrap_or(1) as i32;
-
-    session.media_session_id = media_session_id;
-    *state.cast_session.lock().map_err(|e| e.to_string())? = Some(session);
-    Ok(())
+    // Now play on the already-connected actor.
+    actor_send!(state, |resp| CastActorCmd::Play {
+        stream_url, title, artist, cover_url, resp
+    })
 }
-
-// ── Helper: reconnect + send a media command ──────────────────────────────────
-
-async fn media_command(session: &CastSessionInfo, payload: Value) -> Result<(), String> {
-    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA, payload).await?;
-    Ok(())
-}
-
-// ── cast_pause ────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn cast_pause(state: State<'_, AppState>) -> Result<(), String> {
-    let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
-        .ok_or("No active cast session")?;
-    media_command(&session, json!({"type":"PAUSE","requestId":3,"mediaSessionId":media_session_id(&session)?})).await
+    actor_send!(state, |resp| CastActorCmd::Pause { resp })
 }
-
-// ── cast_resume ───────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn cast_resume(state: State<'_, AppState>) -> Result<(), String> {
-    let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
-        .ok_or("No active cast session")?;
-    media_command(&session, json!({"type":"PLAY","requestId":4,"mediaSessionId":media_session_id(&session)?})).await
+    actor_send!(state, |resp| CastActorCmd::Resume { resp })
 }
-
-// ── cast_stop ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn cast_stop(state: State<'_, AppState>) -> Result<(), String> {
-    let session = { let mut l = state.cast_session.lock().map_err(|e| e.to_string())?; l.take() };
-    if let Some(session) = session {
-        let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
-        send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-        send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
-            json!({"type":"STOP","requestId":5,"sessionId":session.session_id})).await?;
-    }
-    Ok(())
+    let result = actor_send!(state, |resp| CastActorCmd::Stop { resp });
+    // Actor has exited; clear the handle.
+    *state.cast_actor.lock().unwrap() = None;
+    result
 }
-
-// ── cast_get_session ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn cast_get_session(state: State<'_, AppState>) -> Result<Option<CastSessionInfo>, String> {
-    Ok(state.cast_session.lock().map_err(|e| e.to_string())?.clone())
+pub async fn cast_set_volume(state: State<'_, AppState>, level: f64) -> Result<(), String> {
+    actor_send!(state, |resp| CastActorCmd::Volume { level, resp })
 }
 
-// ── cast_get_status ───────────────────────────────────────────────────────────
-// Returns (currentTime, playerState) — used by the UI to advance the seek bar.
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct CastPlaybackStatus {
-    pub current_time: f64,
-    pub player_state: String, // "PLAYING" | "PAUSED" | "IDLE" | "BUFFERING"
-    pub volume_level: f64,
+#[tauri::command]
+pub async fn cast_seek(state: State<'_, AppState>, position: f64) -> Result<(), String> {
+    actor_send!(state, |resp| CastActorCmd::Seek { position, resp })
 }
 
 #[tauri::command]
 pub async fn cast_get_status(state: State<'_, AppState>) -> Result<CastPlaybackStatus, String> {
-    let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
-        .ok_or("No active cast session")?;
-    let receiver_status = receiver_status(&session).await?;
-    let volume_level = receiver_status["status"]["volume"]["level"].as_f64().unwrap_or(0.0);
-
-    let status = if session.media_session_id > 0 {
-        let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
-        send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-        send_msg(&mut tls, "sender-0", &session.transport_id, NS_CONN, json!({"type":"CONNECT"})).await?;
-        send_msg(&mut tls, "sender-0", &session.transport_id, NS_MEDIA,
-            json!({"type":"GET_STATUS","requestId":9,"mediaSessionId":session.media_session_id})).await?;
-
-        let resp = recv_until(&mut tls, NS_MEDIA,
-            |v| v["type"].as_str() == Some("MEDIA_STATUS"), 8).await?;
-
-        resp["status"].as_array().and_then(|a| a.first()).cloned()
-            .unwrap_or_default()
-    } else {
-        Value::Null
-    };
-
-    Ok(CastPlaybackStatus {
-        current_time: status["currentTime"].as_f64().unwrap_or(0.0),
-        player_state: status["playerState"].as_str().unwrap_or("IDLE").to_string(),
-        volume_level,
-    })
+    actor_send!(state, |resp| CastActorCmd::Status { resp })
 }
 
-// ── cast_set_volume ───────────────────────────────────────────────────────────
-// level: 0.0 – 1.0
-
+/// Returns the active session info for UI restoration on startup.
 #[tauri::command]
-pub async fn cast_set_volume(state: State<'_, AppState>, level: f64) -> Result<(), String> {
-    let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
-        .ok_or("No active cast session")?;
-    let mut tls = cast_connect_tls(&session.device_addr, session.device_port).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_CONN, json!({"type":"CONNECT"})).await?;
-    send_msg(&mut tls, "sender-0", "receiver-0", NS_RECV,
-        json!({"type":"SET_VOLUME","requestId":6,"volume":{"level": level}})).await?;
-    Ok(())
-}
-
-// ── cast_seek ─────────────────────────────────────────────────────────────────
-// position: seconds (f64)
-
-#[tauri::command]
-pub async fn cast_seek(state: State<'_, AppState>, position: f64) -> Result<(), String> {
-    let session = state.cast_session.lock().map_err(|e| e.to_string())?.clone()
-        .ok_or("No active cast session")?;
-    media_command(&session,
-        json!({"type":"SEEK","requestId":7,"mediaSessionId":media_session_id(&session)?,"currentTime":position})).await
+pub async fn cast_get_session(
+    state: State<'_, AppState>,
+) -> Result<Option<CastDeviceInfo>, String> {
+    let guard = state.cast_actor.lock().unwrap();
+    Ok(guard.as_ref().map(|h| CastDeviceInfo {
+        name: h.device_name.clone(),
+        addr: h.device_addr.clone(),
+        port: h.device_port,
+    }))
 }

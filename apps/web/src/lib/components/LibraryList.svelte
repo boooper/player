@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Heart, ListMusic, Play, Pause, Music2, Disc3, Mic2, Plus, Pin } from '@lucide/svelte';
+  import { Heart, ListMusic, Play, Pause, Music2, Disc3, Mic2, BarChart2, Plus, Pin } from '@lucide/svelte';
   import { page } from '$app/state';
   import * as Dialog from '$lib/components/ui/dialog';
   import { goto } from '$app/navigation';
@@ -81,6 +81,7 @@
     { href: '/songs',   label: 'Songs',   Icon: Music2 },
     { href: '/albums',  label: 'Albums',  Icon: Disc3 },
     { href: '/artists', label: 'Artists', Icon: Mic2 },
+    { href: '/settings/stats', label: 'Stats', Icon: BarChart2 },
   ] as nav (nav.href)}
     <li>
       <a

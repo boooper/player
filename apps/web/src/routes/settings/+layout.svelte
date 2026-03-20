@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Loader2, Save, Settings, Server, AudioLines, PlugZap, ShieldAlert } from '@lucide/svelte';
+  import { Loader2, Save, Settings, Server, AudioLines, PlugZap, ShieldAlert, BarChart2 } from '@lucide/svelte';
   import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
   import { setSettingsContext } from './context.svelte.js';
 
@@ -15,6 +15,7 @@
     { value: 'integrations', label: 'Integrations', href: '/settings/integrations', icon: PlugZap },
     { value: 'sound', label: 'Sound', href: '/settings/sound', icon: AudioLines },
     { value: 'advanced', label: 'Advanced', href: '/settings/advanced', icon: ShieldAlert },
+    { value: 'stats', label: 'Stats', href: '/settings/stats', icon: BarChart2 },
   ] as const;
 
   const currentSection = $derived.by(() => {

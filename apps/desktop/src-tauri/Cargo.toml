@@ -41,8 +41,7 @@ md5 = "0.7"
 rand = "0.8"
 prost = "0.13"
 tokio-native-tls = "0.3"
-mdns = "3"
-futures-util = "0.3"
+
 biquad = "0.5"
 cpal = "0.15"
 symphonia = { version = "0.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
@@ -57,3 +56,6 @@ rustfm-scrobble = "1.1.1"
 musixmatch-inofficial = "0.4.0"
 genius_lyrics = "1.0.4"
 regex = "1"
+if-addrs = "0.13"
+rust_cast = { version = "0.21.0", features = ["thread_safe"] }
+rustls = { version = "0.23", features = ["ring"] }

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find d:GitHubplayerappswebsrc -type f \\\\\\(-iname *queue* -o -iname *upnext* -o -iname *nowplaying* \\\\\\))",
+      "Bash(grep -r \"SongRow\\\\|songRow\\\\|SongListItem\\\\|songItem\" d:GitHubplayerappswebsrc --include=*.svelte --include=*.ts -l)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(find ~/.cargo/registry/src -name *.rs -path *opensubsonic*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo add:*)",
+      "Bash(cargo doc:*)",
+      "Read(//c/Users/domin/.cargo/registry/src/**)",
+      "Read(//c/Users/domin/.cargo/registry/**)",
+      "Bash(find C:/Users/domin/.cargo/registry/src -name *.rs -path *rust_cast*)",
+      "Bash(find C:/Users/domin/.cargo/registry/src -path *rust_cast-0.21* -name *.rs)",
+      "Bash(find C:Usersdomin.cargoregistrysrc -name rust_cast* -type d)",
+      "Bash(cargo tree:*)"
+    ]
+  }
+}

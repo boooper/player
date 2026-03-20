@@ -496,6 +496,14 @@ pub(crate) async fn create_playlist(
     })
 }
 
+pub(crate) async fn delete_playlist(
+    http: &reqwest::Client,
+    p: &ActiveProfile,
+    playlist_id: &str,
+) -> Result<(), String> {
+    delete(http, p, &format!("/Items/{}", playlist_id)).await
+}
+
 pub(crate) async fn rename_playlist(
     http: &reqwest::Client,
     p: &ActiveProfile,

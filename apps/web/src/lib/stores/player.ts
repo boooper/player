@@ -375,6 +375,17 @@ export function appendToQueue(items: Song[]): void {
   });
 }
 
+export function removeFromQueue(index: number): void {
+  const idx = get(currentIndex);
+  if (index <= idx) return; // never remove already-played or current song
+  queue.update((current) => {
+    const next = [...current];
+    next.splice(index, 1);
+    syncSmartShuffleTrackIds(next);
+    return next;
+  });
+}
+
 /**
  * Prune songs that have already been played from the front of the queue,
  * keeping `keepPrev` songs before the current index so "previous" still works.

@@ -12,6 +12,7 @@ import {
 } from '$lib/providers/metadata/lastfm';
 import { fetchListenBrainzRecommendations } from '$lib/providers/recommendation/listenbrainz';
 import { fetchArtistAlbums, searchSongs as searchLibrarySongs, type Album as LibraryAlbum, type Song as LibrarySong } from '$lib/servers';
+import { getArtistAffinities, getGenreAffinities, getSongAffinities } from '$lib/servers/play-history';
 import {
   getLastFmApiKey,
   getListenBrainzUsername,
@@ -485,21 +486,62 @@ export async function getUpNextSongs(params: {
         limit: limit * 4
       }).catch(() => [] as DiscoveryRecommendation[]);
 
-      const results: LibrarySong[] = [];
+      if (!recommendations.length) return [];
+
+      // Step 1 — Re-rank by artist + genre affinity before searching local library
+      const uniqueArtists = [...new Set(recommendations.map((r) => r.artist.toLowerCase()))];
+      const uniqueGenres  = [...new Set(
+        recommendations.flatMap((r) => r.genreScore > 0 ? [normalize(r.artist)] : [])
+      )];
+      const [artistAffinities, genreAffinities] = await Promise.all([
+        getArtistAffinities(uniqueArtists),
+        uniqueGenres.length ? getGenreAffinities(uniqueGenres) : Promise.resolve({} as Record<string, number>)
+      ]);
+
+      const reranked = recommendations
+        .map((rec) => {
+          const artistBoost = (artistAffinities[rec.artist.toLowerCase()] ?? 0) * 0.35;
+          const genreBoost  = (genreAffinities[normalize(rec.artist)] ?? 0) * 0.10;
+          return { ...rec, score: Math.min(rec.score * 0.55 + artistBoost + genreBoost, 1) };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      // Step 2 — Find local library matches (collect more than needed so we can filter)
+      const candidates: { song: LibrarySong; recScore: number }[] = [];
       const seen = new Set<string>();
 
-      for (const recommendation of recommendations) {
-        if (results.length >= limit) break;
-
-        const candidates = await searchLocalSongs(`${recommendation.artist} ${recommendation.title}`, 10);
-        const match = matchRecommendedSong(candidates, recommendation.artist, recommendation.title);
+      for (const rec of reranked) {
+        if (candidates.length >= limit * 3) break;
+        const hits = await searchLocalSongs(`${rec.artist} ${rec.title}`, 10);
+        const match = matchRecommendedSong(hits, rec.artist, rec.title);
         if (!match || seen.has(match.id)) continue;
-
         seen.add(match.id);
-        results.push(match);
+        candidates.push({ song: match, recScore: rec.score });
       }
 
-      return results;
+      if (!candidates.length) return [];
+
+      // Step 3 — Song-level affinity: filter out songs the user consistently skips,
+      //           and boost songs they've already enjoyed.
+      const songAffinities = await getSongAffinities(candidates.map((c) => c.song.id));
+      const affinityById = new Map(songAffinities.map((a) => [a.songId, a]));
+
+      const scored = candidates
+        .filter(({ song }) => {
+          const aff = affinityById.get(song.id);
+          // Exclude only if we have enough data AND the user skips it most of the time
+          if (!aff || aff.playCount < 3) return true;
+          return aff.skipRate < 0.6;
+        })
+        .map(({ song, recScore }) => {
+          const aff = affinityById.get(song.id);
+          // Boost songs the user has played fully before; no change for unknowns
+          const songBoost = aff && aff.playCount >= 2 ? aff.score * 0.15 : 0;
+          return { song, finalScore: Math.min(recScore + songBoost, 1) };
+        })
+        .sort((a, b) => b.finalScore - a.finalScore);
+
+      return scored.slice(0, limit).map((s) => s.song);
     },
     SHORT_CACHE_TTL_MS
   );

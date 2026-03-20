@@ -5,3 +5,4 @@ export * from './profiles';
 export * from './library';
 export * from './integrations';
 export * from './cast';
+export * from './play-history';

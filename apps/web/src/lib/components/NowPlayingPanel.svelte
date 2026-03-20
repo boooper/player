@@ -13,8 +13,10 @@
     shouldAutoplay,
     showQueue,
     playQueue,
+    removeFromQueue,
     smartShuffleTrackIds,
   } from '$lib/stores/player';
+  import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import {
     fetchSimilarSongs,
     fetchAlbumDetail,
@@ -194,29 +196,40 @@
         {:else}
           <div class="space-y-1">
             {#each (relatedExpanded ? relatedSongs : relatedSongs.slice(0, 1)) as song (song.id)}
-              <button
-                class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-accent"
-                onclick={() => {
+              <SongContextMenu
+                {song}
+                onplay={() => {
                   playQueue([song], 0);
                   focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
                   playingFrom.set({ type: 'artist', name: primarySongArtist(song.artist), href: `/artist/${encodeURIComponent(primarySongArtist(song.artist))}` });
                   shouldAutoplay.set(true);
                 }}
+                triggerClass="block w-full"
               >
-                {#if song.coverArtUrl}
-                  <img class="size-9 rounded object-cover shrink-0" src={song.coverArtUrl} alt={song.title} loading="lazy" />
-                {:else}
-                  <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(song.title)}</span>
-                {/if}
-                <span class="min-w-0 flex-1">
-                  <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{song.title}</span>
-                  <SongArtistLinks
-                    artist={song.artist}
-                    class="block truncate text-xs text-muted-foreground"
-                    linkClass="hover:text-foreground hover:underline transition-colors"
-                  />
-                </span>
-              </button>
+                <button
+                  class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-accent"
+                  onclick={() => {
+                    playQueue([song], 0);
+                    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
+                    playingFrom.set({ type: 'artist', name: primarySongArtist(song.artist), href: `/artist/${encodeURIComponent(primarySongArtist(song.artist))}` });
+                    shouldAutoplay.set(true);
+                  }}
+                >
+                  {#if song.coverArtUrl}
+                    <img class="size-9 rounded object-cover shrink-0" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+                  {:else}
+                    <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(song.title)}</span>
+                  {/if}
+                  <span class="min-w-0 flex-1">
+                    <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{song.title}</span>
+                    <SongArtistLinks
+                      artist={song.artist}
+                      class="block truncate text-xs text-muted-foreground"
+                      linkClass="hover:text-foreground hover:underline transition-colors"
+                    />
+                  </span>
+                </button>
+              </SongContextMenu>
             {/each}
           </div>
         {/if}
@@ -400,32 +413,42 @@
         {:else}
           <div class="space-y-1">
             {#each (upNextExpanded ? upNext : upNext.slice(0, 1)) as item (item.song.id + '-' + item.index)}
-              <button
+              <div
                 animate:flip={{ duration: 220, easing: cubicOut }}
-                class="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition hover:bg-accent"
                 in:fly={{ y: 12, opacity: 0.15, duration: 220, easing: cubicOut }}
                 out:fade={{ duration: 150 }}
-                onclick={() => playFromUpNext(item.index)}
               >
-                {#if item.song.coverArtUrl}
-                  <img class="size-9 rounded object-cover shrink-0" src={item.song.coverArtUrl} alt={item.song.title} loading="lazy" />
-                {:else}
-                  <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(item.song.title)}</span>
-                {/if}
-                <span class="min-w-0">
-                  <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{item.song.title}</span>
-                  <SongArtistLinks
-                    artist={item.song.artist}
-                    class="block truncate text-xs text-muted-foreground"
-                    linkClass="hover:text-foreground hover:underline transition-colors"
-                  />
-                  {#if $smartShuffleTrackIds.has(item.song.id)}
-                    <span class="mt-1 inline-flex rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                      From Smart Shuffle
+                <SongContextMenu
+                  song={item.song}
+                  onplay={() => playFromUpNext(item.index)}
+                  onremove={() => removeFromQueue(item.index)}
+                  triggerClass="block w-full"
+                >
+                  <button
+                    class="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition hover:bg-accent"
+                    onclick={() => playFromUpNext(item.index)}
+                  >
+                    {#if item.song.coverArtUrl}
+                      <img class="size-9 rounded object-cover shrink-0" src={item.song.coverArtUrl} alt={item.song.title} loading="lazy" />
+                    {:else}
+                      <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(item.song.title)}</span>
+                    {/if}
+                    <span class="min-w-0">
+                      <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{item.song.title}</span>
+                      <SongArtistLinks
+                        artist={item.song.artist}
+                        class="block truncate text-xs text-muted-foreground"
+                        linkClass="hover:text-foreground hover:underline transition-colors"
+                      />
+                      {#if $smartShuffleTrackIds.has(item.song.id)}
+                        <span class="mt-1 inline-flex rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                          From Smart Shuffle
+                        </span>
+                      {/if}
                     </span>
-                  {/if}
-                </span>
-              </button>
+                  </button>
+                </SongContextMenu>
+              </div>
             {/each}
           </div>
         {/if}
