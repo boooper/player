@@ -140,12 +140,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           KEY="$RUNNER_TEMP/tauri.key"
-          python3 -c "
-          import os; from pathlib import Path
-          raw = os.environ['TAURI_SIGNING_PRIVATE_KEY']
-          if '\\\\n' in raw and '\\n' not in raw: raw = raw.replace('\\\\n', '\\n')
-          p = Path(os.environ['KEY']); p.write_text(raw); p.chmod(0o600)
-          "
+          raw="$TAURI_SIGNING_PRIVATE_KEY"
+          printf '%s' "$raw" > "$KEY"
+          chmod 600 "$KEY"
           echo "TAURI_SIGNING_PRIVATE_KEY=$KEY" >> "$GITHUB_ENV"
 
       - name: build and upload
