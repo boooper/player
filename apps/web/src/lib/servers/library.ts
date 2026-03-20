@@ -2,6 +2,28 @@ import type { Song, Album, Playlist, AlbumDetail, PlaylistDetail, SearchBundlePa
 import { normalizeAlbum, normalizeAlbumDetail, normalizePlaylist, normalizePlaylistDetail, normalizeSong } from './media';
 import { invoke } from './shared';
 
+const libraryCache = new Map<string, { expiresAt: number; promise: Promise<unknown> }>();
+const LIBRARY_CACHE_TTL_MS = 2 * 60_000;
+
+export function clearLibraryCache(): void {
+  libraryCache.clear();
+}
+
+function getCachedLibraryCall<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const cached = libraryCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise as Promise<T>;
+  }
+  const promise = loader().catch((err) => {
+    const current = libraryCache.get(key);
+    if (current?.promise === promise) libraryCache.delete(key);
+    throw err;
+  });
+  libraryCache.set(key, { expiresAt: now + LIBRARY_CACHE_TTL_MS, promise });
+  return promise;
+}
+
 export async function fetchLikedArtists(): Promise<StoredLikedArtist[]> {
   return invoke<StoredLikedArtist[]>('get_liked_artists');
 }
@@ -59,7 +81,10 @@ export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
 }
 
 export async function fetchArtistAlbums(query: string, count = 20): Promise<Album[]> {
-  return (await invoke<Album[]>('library_artist_albums', { query, count })).map(normalizeAlbum);
+  return getCachedLibraryCall(
+    `artist-albums:${query.trim().toLowerCase()}:${count}`,
+    async () => (await invoke<Album[]>('library_artist_albums', { query, count })).map(normalizeAlbum)
+  );
 }
 
 export async function fetchAlbumSongs(albumId: string): Promise<Song[]> {
@@ -67,14 +92,23 @@ export async function fetchAlbumSongs(albumId: string): Promise<Song[]> {
 }
 
 export async function fetchAlbumDetail(albumId: string): Promise<AlbumDetail> {
-  return normalizeAlbumDetail(await invoke<AlbumDetail>('library_album', { id: albumId }));
+  return getCachedLibraryCall(
+    `album-detail:${albumId}`,
+    async () => normalizeAlbumDetail(await invoke<AlbumDetail>('library_album', { id: albumId }))
+  );
 }
 
 export async function fetchAlbumList(
   type: 'newest' | 'random' | 'frequent' | 'recent' | 'highest' = 'newest',
   count = 20
 ): Promise<Album[]> {
-  return (await invoke<Album[]>('library_album_list', { kind: type, count })).map(normalizeAlbum);
+  if (type === 'random') {
+    return (await invoke<Album[]>('library_album_list', { kind: type, count })).map(normalizeAlbum);
+  }
+  return getCachedLibraryCall(
+    `album-list:${type}:${count}`,
+    async () => (await invoke<Album[]>('library_album_list', { kind: type, count })).map(normalizeAlbum)
+  );
 }
 
 export async function fetchStarredSongs(): Promise<Song[]> {

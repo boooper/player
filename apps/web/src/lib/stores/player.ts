@@ -137,6 +137,7 @@ export function cycleRepeatMode(): void {
   });
 }
 
+export const queueLoading = writable(false);
 export const upNextEnabled = writable(true);
 export const smartShuffleMode = writable(false);
 export const showLyrics = writable(false);

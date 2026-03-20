@@ -2,6 +2,7 @@ import { derived } from 'svelte/store';
 import { queue, currentIndex, isPlaying } from './stores/player';
 import { isTauri } from './tauri';
 import type { Song } from './servers';
+import { getArtistArtwork } from './discovery';
 
 const APPLICATION_ID = '1189808615012450304'; // replace with your Discord app ID
 
@@ -15,7 +16,16 @@ async function drpcStart() {
   if (!startPromise) {
     startPromise = (async () => {
       const { start } = await import('tauri-plugin-drpc');
-      await start(APPLICATION_ID);
+      try {
+        await start(APPLICATION_ID);
+      } catch (err) {
+        // "already spawned" means the thread is running — treat as success.
+        if (String(err).toLowerCase().includes('already spawned')) {
+          started = true;
+          return;
+        }
+        throw err;
+      }
       started = true;
     })().finally(() => {
       startPromise = null;
@@ -25,8 +35,15 @@ async function drpcStart() {
   await startPromise;
 }
 
-async function syncActivity(song: Song | null, playing: boolean, startedAt: number | null) {
+async function syncActivity(
+  song: Song | null,
+  playing: boolean,
+  startedAt: number | null,
+  isAborted: () => boolean
+) {
   if (!song) {
+    // Skip clearActivity if we never successfully started (Discord not open).
+    if (!started) return;
     const { clearActivity } = await import('tauri-plugin-drpc');
     await clearActivity();
     return;
@@ -35,8 +52,25 @@ async function syncActivity(song: Song | null, playing: boolean, startedAt: numb
   const { setActivity } = await import('tauri-plugin-drpc');
   const { Activity, Assets, Timestamps } = await import('tauri-plugin-drpc/activity');
 
+  // Discord requires a publicly accessible URL; local/Tauri asset URLs will fail silently.
+  const isPublicUrl = (url: string | undefined | null): boolean =>
+    !!url &&
+    url.startsWith('https://') &&
+    !url.includes('localhost') &&
+    !url.includes('127.0.0.1');
+
+  // Prefer artist artwork (likely Last.fm public URL) over cover art (often local).
+  const artistImageUrl = await getArtistArtwork(song.artist).catch(() => '');
+  // Bail if cleanup ran while we were fetching artwork.
+  if (isAborted()) return;
+
+  const largeImage =
+    isPublicUrl(artistImageUrl) ? artistImageUrl :
+    isPublicUrl(song.coverArtUrl) ? song.coverArtUrl :
+    'appicon';
+
   const assets = new Assets()
-    .setLargeImage(song.coverArtUrl)
+    .setLargeImage(largeImage)
     .setLargeText(song.album || song.title);
 
   if (typeof assets.setSmallImage === 'function' && typeof assets.setSmallText === 'function') {
@@ -64,6 +98,7 @@ async function syncActivity(song: Song | null, playing: boolean, startedAt: numb
 export function initDrpc(): () => void {
   if (!isTauri()) return () => {};
 
+  let aborted = false;
   let latestSong: Song | null = null;
   let latestPlaying = false;
   let latestStartedAt: number | null = null;
@@ -75,11 +110,12 @@ export function initDrpc(): () => void {
     if (syncing) return;
 
     syncing = true;
-    while (pending) {
+    while (pending && !aborted) {
       pending = false;
       try {
         await drpcStart();
-        await syncActivity(latestSong, latestPlaying, latestStartedAt);
+        if (aborted) break;
+        await syncActivity(latestSong, latestPlaying, latestStartedAt, () => aborted);
       } catch (error) {
         console.error(error);
       }
@@ -110,15 +146,16 @@ export function initDrpc(): () => void {
   });
 
   return () => {
+    aborted = true;
     unsubPlaying();
     unsubSong();
     if (started || startPromise) {
       import('tauri-plugin-drpc')
         .then(async ({ clearActivity, stop }) => {
-          await clearActivity().catch(() => {});
-          await stop();
+          await clearActivity().catch((e) => console.warn('[drpc] clearActivity failed:', e));
+          await stop().catch((e) => console.warn('[drpc] stop failed:', e));
         })
-        .catch(() => {});
+        .catch((e) => console.warn('[drpc] cleanup import failed:', e));
     }
     started = false;
     startPromise = null;

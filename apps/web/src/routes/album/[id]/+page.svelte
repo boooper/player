@@ -45,6 +45,7 @@
   let { data } = $props<{ data: { id: string } }>();
 
   let loading = $state(true);
+  let merging = $state(false);
   let error = $state('');
   let album = $state<(Album & { genre?: string }) | null>(null);
   let songs = $state<Song[]>([])
@@ -77,38 +78,52 @@
     loading = true;
     error = '';
     try {
-      const detail = await withTimeout(fetchAlbumDetail(data.id), ALBUM_LOAD_TIMEOUT_MS, 'Album load');
-      const artistAlbums = await withTimeout(
-        fetchArtistAlbums(detail.album.artist, 100),
-        ALBUM_LOAD_TIMEOUT_MS,
-        'Related albums load'
-      ).catch(() => [detail.album]);
-      const groupedAlbumIds = Array.from(new Set([
-        detail.album.id,
-        ...findAlbumGroupIds(artistAlbums, detail.album)
-      ]));
-      const albumSongResults = await Promise.allSettled(
-        groupedAlbumIds.map((albumId) =>
-          withTimeout(fetchAlbumSongs(albumId), ALBUM_LOAD_TIMEOUT_MS, 'Album tracks load').catch(() => [])
-        )
-      );
-      const albumSongLists = albumSongResults.flatMap((result) =>
-        result.status === 'fulfilled' ? [result.value] : []
-      );
-      const mergedSongs = mergeAlbumSongs(albumSongLists.flat());
-      const resolvedSongs = mergedSongs.length ? mergedSongs : detail.songs;
+      const detail = await fetchAlbumDetail(data.id);
       if (loadVersion !== albumLoadVersion) return;
 
+      // Show initial content immediately — don't wait for related album merging.
       album = {
         ...detail.album,
-        songCount: resolvedSongs.length,
-        duration: resolvedSongs.reduce((total, song) => total + (song.duration || 0), 0)
+        songCount: detail.songs.length,
+        duration: detail.songs.reduce((total, song) => total + (song.duration || 0), 0)
       };
-      songs = resolvedSongs;
+      songs = detail.songs;
+      loading = false;
+      merging = true;
+
+      // Background: find related album editions across providers and merge.
+      const artistAlbums = await withTimeout(
+        fetchArtistAlbums(detail.album.artist, 50),
+        ALBUM_LOAD_TIMEOUT_MS,
+        'Related albums load'
+      ).catch(() => [] as Album[]);
+      const relatedIds = findAlbumGroupIds(artistAlbums, detail.album)
+        .filter((id) => id !== detail.album.id);
+
+      if (relatedIds.length > 0) {
+        const songResults = await Promise.allSettled(
+          relatedIds.map((albumId) =>
+            withTimeout(fetchAlbumSongs(albumId), ALBUM_LOAD_TIMEOUT_MS, 'Album tracks load').catch(() => [] as Song[])
+          )
+        );
+        const extra = songResults.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+        const merged = mergeAlbumSongs([...detail.songs, ...extra]);
+        if (loadVersion !== albumLoadVersion) return;
+        const resolved = merged.length ? merged : detail.songs;
+        album = {
+          ...detail.album,
+          songCount: resolved.length,
+          duration: resolved.reduce((total, song) => total + (song.duration || 0), 0)
+        };
+        songs = resolved;
+      }
+
+      if (loadVersion !== albumLoadVersion) return;
+      merging = false;
       if (!desktopPlayback) {
         cachedSongIds = new Set();
       } else {
-        desktopPlaybackCachedIds(resolvedSongs)
+        desktopPlaybackCachedIds(songs)
           .then((ids) => {
             if (loadVersion !== albumLoadVersion) return;
             cachedSongIds = new Set(ids);
@@ -121,9 +136,8 @@
     } catch (err) {
       if (loadVersion !== albumLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load album.';
-    } finally {
-      if (loadVersion !== albumLoadVersion) return;
       loading = false;
+      merging = false;
     }
   }
 
@@ -250,7 +264,7 @@
       {#if !loading}
         <div class="mt-5 flex items-center gap-3">
           <button
-            class="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
+            class="relative grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
             onclick={() => albumIsActive ? togglePlayRequest.update((n) => n + 1) : playAll()}
             disabled={songs.length === 0}
             aria-label={albumIsActive && $isPlaying ? 'Pause album' : 'Play album'}
@@ -259,6 +273,9 @@
               <Pause class="size-6" fill="currentColor" />
             {:else}
               <Play class="size-6 translate-x-0.5" fill="currentColor" />
+            {/if}
+            {#if merging}
+              <span class="absolute inset-0 rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground animate-spin pointer-events-none"></span>
             {/if}
           </button>
           <DropdownMenu>

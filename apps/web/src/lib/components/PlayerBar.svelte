@@ -5,7 +5,7 @@
     currentIndex, currentTime, duration, isPlaying,
     nextTrack, prevTrack, queue, repeatMode, shouldAutoplay,
     cycleRepeatMode, showLyrics, seekRequest, togglePlayRequest,
-    starredSongIds, smartShuffleTrackIds, showQueue
+    starredSongIds, smartShuffleTrackIds, showQueue, queueLoading
   } from '$lib/stores/player';
   import { starSong, unstarSong, desktopPlaybackPause, type CastDeviceInfo } from '$lib/servers';
   import { normalizeEqBands } from '$lib/audio/equalizer';
@@ -25,6 +25,7 @@
   import { backendSettings } from '$lib/stores/backend-settings';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { goto } from '$app/navigation';
+  import { getExternalSourceLabel } from '$lib/external-source';
 
   // ── UI state ──────────────────────────────────────────────────────────────
   let castActive = $state(false);
@@ -93,8 +94,8 @@
   createPlayerUpNextController({ getLastFmApiKey: () => lastFmApiKey });
 
   // ── Transport UI derivations ──────────────────────────────────────────────
-  const transportLocked = $derived(desktopController.loadPending || isBuffering);
-  const showPauseButton = $derived(castActive ? castPlaying : ($isPlaying && !isBuffering && !desktopController.loadPending));
+  const transportLocked = $derived(desktopController.loadPending || isBuffering || $queueLoading);
+  const showPauseButton = $derived(castActive ? castPlaying : ($isPlaying && !isBuffering && !desktopController.loadPending && !$queueLoading));
 
   // ── Global event listener ─────────────────────────────────────────────────
   $effect(() => {
@@ -181,7 +182,7 @@
   }
 </script>
 
-<footer class="player-bar app-shell-footer shrink-0 border-t border-border/40 px-4 py-3 {isBuffering ? 'player-bar-loading' : ''}">
+<footer class="player-bar app-shell-footer shrink-0 border-t border-border/40 px-4 py-3 {isBuffering || $queueLoading ? 'player-bar-loading' : ''}">
   <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
     <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
@@ -229,11 +230,17 @@
               <Heart class="size-3.5 {isStarred ? 'fill-rose-500' : ''}" />
             </button>
           </div>
-          <SongArtistLinks
-            artist={currentTrack.artist}
-            class="block truncate text-xs text-muted-foreground max-w-full text-left"
-            linkClass="hover:underline cursor-pointer"
-          />
+          {#if (isBuffering || $queueLoading) && getExternalSourceLabel(currentTrack.id)}
+            <span class="block truncate text-xs text-sky-300/90 animate-pulse">
+              Fetching from {getExternalSourceLabel(currentTrack.id)}…
+            </span>
+          {:else}
+            <SongArtistLinks
+              artist={currentTrack.artist}
+              class="block truncate text-xs text-muted-foreground max-w-full text-left"
+              linkClass="hover:underline cursor-pointer"
+            />
+          {/if}
         </div>
       {:else}
         <p class="text-sm text-muted-foreground">No track selected</p>
@@ -264,7 +271,7 @@
         </Button>
 
         <Button
-          class="player-play-button rounded-full shadow-sm {showPauseButton ? 'is-playing' : ''} {isBuffering ? 'is-buffering' : ''}"
+          class="player-play-button rounded-full shadow-sm {showPauseButton ? 'is-playing' : ''} {isBuffering || $queueLoading ? 'is-buffering' : ''}"
           size="icon-lg"
           onclick={togglePlay}
           disabled={!currentTrack || transportLocked}
@@ -304,8 +311,8 @@
 
       <div class="player-progress-row flex w-full items-center gap-2">
         <span class="player-time-label w-10 text-right text-[11px] tabular-nums text-muted-foreground">{formatClockDuration($currentTime)}</span>
-        <div class="player-progress-shell relative flex-1 {isBuffering ? 'opacity-75 is-buffering' : ''}">
-          {#if isBuffering}
+        <div class="player-progress-shell relative flex-1 {isBuffering || $queueLoading ? 'opacity-75 is-buffering' : ''}">
+          {#if isBuffering || $queueLoading}
             <div class="pointer-events-none absolute inset-y-0 left-0 right-0 flex items-center">
               <div class="player-buffer-track h-1.5 w-full overflow-hidden rounded-full bg-muted/80">
                 <div class="player-buffer-bar h-full w-1/3 rounded-full bg-primary/55"></div>

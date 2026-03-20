@@ -11,7 +11,7 @@
   import { getTopArtists, type DiscoveryArtist as Artist } from '$lib/discovery';
   import {
     recentlyPlayed, focusTrack, playQueue, playingFrom,
-    addRecentlyPlayed, isPlaying, togglePlayRequest, type RecentItem
+    addRecentlyPlayed, isPlaying, togglePlayRequest, queueLoading, type RecentItem
   } from '$lib/stores/player';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
@@ -100,6 +100,7 @@
   async function playRecentItem(item: RecentItem) {
     if (recentLoadingId) return;
     recentLoadingId = item.id;
+    queueLoading.set(true);
     try {
       if (item.type === 'album') {
         const songs = await fetchAlbumSongs(item.id);
@@ -116,11 +117,13 @@
       }
     } finally {
       recentLoadingId = null;
+      queueLoading.set(false);
     }
   }
 
   async function playAlbum(album: Album) {
     albumLoadingId = album.id;
+    queueLoading.set(true);
     try {
       const songs = await fetchAlbumSongs(album.id);
       if (!songs.length) return;
@@ -130,6 +133,7 @@
       addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
     } finally {
       albumLoadingId = null;
+      queueLoading.set(false);
     }
   }
 

@@ -272,9 +272,11 @@ export async function getArtistArtwork(artist: string, currentImageUrl = ''): Pr
     artistArtworkCache.set(
       normalized,
       (async () => {
+        // If we already have an image (e.g. from Last.fm for similar artists),
+        // skip the 2 Tauri round-trips and use it directly.
+        if (currentImageUrl) return currentImageUrl;
         const localImage = await resolveLocalArtistArtwork(artist);
         if (localImage) return localImage;
-        if (currentImageUrl) return currentImageUrl;
         return resolveMetadataArtistArtwork(artist);
       })()
     );
@@ -413,7 +415,7 @@ export async function getArtistInfo(artist: string): Promise<DiscoveryArtistInfo
         formedYear: adb?.formedYear || ''
       };
     },
-    SHORT_CACHE_TTL_MS
+    DEFAULT_CACHE_TTL_MS
   );
 }
 
@@ -429,7 +431,7 @@ export async function getArtistTopTracks(artist: string, limit = 10): Promise<Di
       if (provider !== 'both') return remote;
       return uniqueBy([...local, ...remote], (song) => `${normalize(song.artist)}::${normalize(song.title)}`).slice(0, limit);
     },
-    SHORT_CACHE_TTL_MS
+    DEFAULT_CACHE_TTL_MS
   );
 }
 

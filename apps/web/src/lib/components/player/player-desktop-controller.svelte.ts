@@ -94,15 +94,18 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
           }
 
           if (status.trackId && status.trackId !== activeTrackId) {
+            // The engine still has the previous track while the new one loads
+            // (normal for ext- sources that require a server-side download).
+            // Stop the old track but preserve loadPending/isBuffering so the
+            // PlayerBar keeps showing the loading state.
             desktopPlaybackStop().catch(() => undefined);
             loadedTrackId = activeTrackId;
             endedTrackId = null;
-            loadPending = false;
             currentTime.set(0);
             const track = options.getCurrentTrack();
             duration.set(track && (track.duration ?? 0) > 0 ? track.duration! : 0);
             isPlaying.set(false);
-            options.setIsBuffering(false);
+            if (!loadPending) options.setIsBuffering(false);
             return;
           }
 

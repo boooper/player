@@ -4,7 +4,7 @@
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
-  import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists } from '$lib/stores/player';
+  import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists, queueLoading } from '$lib/stores/player';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import { get } from 'svelte/store';
   import { createPlaylist, fetchAlbumSongs, fetchPlaylists, materializeSong, searchSongs, type Album } from '$lib/servers';
@@ -17,13 +17,16 @@
   } = $props();
 
   async function playSongs(mode: 'now' | 'next' | 'queue') {
+    if (mode === 'now') queueLoading.set(true);
     let songs: Awaited<ReturnType<typeof fetchAlbumSongs>>;
     try {
       songs = await fetchAlbumSongs(album.id);
     } catch {
       toast.error('Failed to load album tracks');
+      queueLoading.set(false);
       return;
     }
+    queueLoading.set(false);
     if (!songs.length) { toast.warning('Album has no tracks'); return; }
 
     if (mode === 'now') {

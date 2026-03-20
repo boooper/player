@@ -2,7 +2,7 @@
   import { Play, Disc3, RefreshCw } from '@lucide/svelte';
 
   import { fetchAlbumList, fetchAlbumSongs, type Album } from '$lib/servers';
-  import { focusTrack, playQueue, playingFrom, addRecentlyPlayed } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, addRecentlyPlayed, queueLoading } from '$lib/stores/player';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import { libraryRefresh } from '$lib/stores/ui-state';
 
@@ -41,6 +41,7 @@
 
   async function playAlbum(album: Album) {
     albumLoadingId = album.id;
+    queueLoading.set(true);
     try {
       const songs = await fetchAlbumSongs(album.id);
       if (!songs.length) return;
@@ -51,6 +52,7 @@
     } catch {
     } finally {
       albumLoadingId = null;
+      queueLoading.set(false);
     }
   }
 

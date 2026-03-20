@@ -20,6 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      release-id: ${{ steps.create-release.outputs.release-id }}
 
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +47,22 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: create draft release
+        id: create-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes "Madrify $TAG" \
+            --draft \
+            --repo "$GITHUB_REPOSITORY"
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.id')
+          echo "release-id=${release_id}" >> "$GITHUB_OUTPUT"
 
   build-tauri:
     needs: prepare-release
@@ -178,10 +195,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: bunx tauri
-          tagName: ${{ needs.prepare-release.outputs.tag }}
-          releaseName: ${{ needs.prepare-release.outputs.tag }}
-          releaseDraft: false
-          prerelease: false
+          releaseId: ${{ needs.prepare-release.outputs.release-id }}
           args: --config src-tauri/tauri.build.conf.json --config src-tauri/tauri.release.generated.conf.json --target ${{ matrix.target }}
 
   generate-latest-json:
@@ -191,6 +205,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -218,13 +234,6 @@ jobs:
           tag = os.environ["RELEASE_TAG"]
           base_url = f"https://github.com/boooper/player/releases/download/{tag}"
           dist = Path("dist")
-
-          bundles = {
-            "linux-x86_64": ".AppImage",
-            "darwin-aarch64": ".app.tar.gz",
-            "darwin-x86_64": ".app.tar.gz",
-            "windows-x86_64": ".nsis.zip",
-          }
 
           def pick_file(suffix, needle=None):
               candidates = sorted(dist.rglob(f"*{suffix}"))
@@ -263,8 +272,10 @@ jobs:
           Path("latest.json").write_text(json.dumps(manifest, indent=2) + "\n")
           PY
 
-      - name: upload latest.json to release
+      - name: upload latest.json and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.prepare-release.outputs.tag }}
-        run: gh release upload "$TAG_NAME" latest.json --clobber
+        run: |
+          gh release upload "$TAG_NAME" latest.json --clobber
+          gh release edit "$TAG_NAME" --draft=false

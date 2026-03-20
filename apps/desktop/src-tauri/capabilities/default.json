@@ -12,6 +12,8 @@
       "allow": [{ "url": "https://**" }, { "url": "http://**" }]
     },
     "drpc:default",
+    "drpc:allow-clear-activity",
+    "drpc:allow-destroy-thread",
     "store:default",
     "updater:default",
     "autostart:default",

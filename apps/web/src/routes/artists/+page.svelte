@@ -34,7 +34,7 @@
     error = '';
     try {
       // Fetch a large album list and extract unique artist names.
-      const albums = await fetchAlbumList('newest', 500);
+      const albums = await fetchAlbumList('newest', 200);
       const seen = new SvelteSet<string>();
       const entries: ArtistEntry[] = [];
       for (const album of albums) {

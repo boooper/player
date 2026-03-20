@@ -17,7 +17,7 @@
     type DiscoveryArtistInfo as ArtistInfo,
     type DiscoverySong as LastFmSong
   } from '$lib/discovery';
-  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest, queueLoading } from '$lib/stores/player';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -210,7 +210,8 @@
   }
 
   async function loadAndPlayAlbum(album: MergedAlbum, startIndex = 0) {
-    const songs = await ensureMergedAlbumSongs(album);
+    queueLoading.set(true);
+    const songs = await ensureMergedAlbumSongs(album).finally(() => queueLoading.set(false));
     if (!songs?.length) return;
     const song = songs[startIndex];
     focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
@@ -248,7 +249,8 @@
 
   async function playOrShuffleAll() {
     if (shuffleAllArtist) {
-        const toastId = toast.loading(`Loading all ${data.name} songs…`);
+      const toastId = toast.loading(`Loading all ${data.name} songs…`);
+      queueLoading.set(true);
       try {
         const allSongResults = await Promise.allSettled(
           mergedAlbums.flatMap((album) =>
@@ -270,6 +272,8 @@
         toast.success(`Shuffling all ${data.name} songs`, { id: toastId });
       } catch {
         toast.error('Failed to load artist songs', { id: toastId });
+      } finally {
+        queueLoading.set(false);
       }
     } else {
       playAllTopTracks();
@@ -413,7 +417,7 @@
 
     <div class="app-card hidden h-[250px] overflow-hidden rounded-[1.75rem] lg:flex">
       {#if artistInfo?.imageUrl}
-        <img class="h-full w-full object-cover" src={artistInfo.imageUrl} alt={data.name} loading="lazy" />
+        <img class="h-full w-full object-cover" src={artistInfo.imageUrl} alt={data.name} />
       {:else}
         <div class="grid h-full w-full place-items-center bg-gradient-to-br from-secondary to-accent text-5xl font-black">
           {initials(data.name)}

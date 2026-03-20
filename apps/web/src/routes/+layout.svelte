@@ -133,7 +133,8 @@
 
   let playbackPrefsReady = $state(false);
   let cleanupDrpc: () => void = () => {};
-  let drpcReady = false;
+  let drpcReady = $state(false);
+  const discordRpcEnabled = $derived($backendSettings.discordRpcEnabled);
 
   async function bootstrapAppSettings() {
     try {
@@ -177,9 +178,8 @@
 
   $effect(() => {
     if (!drpcReady) return;
-    const enabled = $backendSettings.discordRpcEnabled;
     cleanupDrpc();
-    cleanupDrpc = enabled ? initDrpc() : () => {};
+    cleanupDrpc = discordRpcEnabled ? initDrpc() : () => {};
   });
 
   $effect(() => {
