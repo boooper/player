@@ -126,7 +126,8 @@
       <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer" class="text-primary underline-offset-2 hover:underline">last.fm/api</a>.
     </p>
   </div>
-  <div class="space-y-5 px-5 py-5">
+  <!-- svelte-ignore a11y_no_redundant_roles -->
+  <form class="space-y-5 px-5 py-5" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
 
     <!-- API Key -->
     <div class="space-y-1.5">
@@ -256,7 +257,7 @@
         {/if}
       {/if}
     </div>
-  </div>
+  </form>
 </section>
 
 <!-- ── Providers ──────────────────────────────────────────────────────── -->
@@ -308,7 +309,7 @@
   </div>
 
   {#if recommendationProvider === 'listenbrainz'}
-  <div class="border-t border-border/60 px-5 py-5">
+  <form class="border-t border-border/60 px-5 py-5" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
     <div class="space-y-4">
       <div class="space-y-1.5">
         <label class="text-sm font-medium" for="lbz-username">ListenBrainz Username</label>
@@ -338,6 +339,6 @@
         />
       </div>
     </div>
-  </div>
+  </form>
   {/if}
 </section>
