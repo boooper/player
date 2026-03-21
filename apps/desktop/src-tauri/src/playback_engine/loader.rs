@@ -137,7 +137,11 @@ pub async fn load_track_payload(
 
             let (output_channels, output_sample_rate) = playback_handle(state)?.output_config()?;
             let (samples, _channels, _sample_rate) =
-                decode_audio(bytes, &content_type, output_channels, output_sample_rate)?;
+                tokio::task::spawn_blocking(move || {
+                    decode_audio(bytes, &content_type, output_channels, output_sample_rate)
+                })
+                .await
+                .map_err(|e| e.to_string())??;
 
             let payload = TrackPayload {
                 song: requested_song.clone(),

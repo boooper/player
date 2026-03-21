@@ -137,7 +137,7 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
           }
         })
         .catch(() => undefined);
-    }, 250);
+    }, 100);
 
     return () => {
       window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleCacheUpdated);
@@ -188,9 +188,11 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
     desktopPlaybackLoad(track as Parameters<typeof desktopPlaybackLoad>[0], autoplay, crossfadeMs)
       .then(() => {
         crossfadeInFlight = false;
+        // Rust returns only after the track is fully loaded and playing is set —
+        // clear the buffering spinner immediately instead of waiting for the poll.
+        loadPending = false;
+        options.setIsBuffering(false);
         if (!autoplay) {
-          loadPending = false;
-          options.setIsBuffering(false);
           isPlaying.set(false);
         }
       })
