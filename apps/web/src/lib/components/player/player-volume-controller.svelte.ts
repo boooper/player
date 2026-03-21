@@ -1,20 +1,16 @@
 import { volume } from '$lib/stores/player';
 import { desktopPlaybackSetVolume, castSetVolume as castSetVolumeCmd } from '$lib/servers';
-import { isTauri } from '$lib/tauri';
 
 type PlayerVolumeControllerOptions = {
   getCastActive: () => boolean;
   getCastVolume: () => number | null;
   getLocalVolume: () => number;
-  getAudioEl?: () => HTMLAudioElement | null;
 };
 
 const EPS = 0.0001;
 const DEFAULT_RESTORE_VOLUME = 0.8;
 
 export function createPlayerVolumeController(options: PlayerVolumeControllerOptions) {
-  const desktopPlayback = isTauri();
-
   let volVal = $state<number[]>([options.getLocalVolume() * 100]);
   let volDragging = $state(false);
   let premuteVolume = $state(DEFAULT_RESTORE_VOLUME);
@@ -35,16 +31,7 @@ export function createPlayerVolumeController(options: PlayerVolumeControllerOpti
 
   function setLocalVolume(value: number) {
     volume.set(value);
-
-    if (desktopPlayback) {
-      desktopPlaybackSetVolume(value).catch(() => undefined);
-      return;
-    }
-
-    const audio = options.getAudioEl?.() ?? document.querySelector('audio');
-    if (audio instanceof HTMLMediaElement) {
-      audio.volume = value;
-    }
+    desktopPlaybackSetVolume(value).catch(() => undefined);
   }
 
   function beginDrag() {

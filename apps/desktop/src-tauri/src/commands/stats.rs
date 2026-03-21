@@ -16,7 +16,7 @@ pub struct LibraryStats {
 #[tauri::command]
 pub async fn get_library_stats(state: State<'_, AppState>) -> Result<LibraryStats, String> {
     // Grab DB values while holding the lock briefly
-    let (liked_artists, last_fm_configured, profile) = {
+    let (liked_artists, last_fm_configured) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
 
         let liked: i64 = db
@@ -32,9 +32,9 @@ pub async fn get_library_stats(state: State<'_, AppState>) -> Result<LibraryStat
             .unwrap_or(0)
             > 0;
 
-        let profile = get_active_profile(&db).ok();
-        (liked, lfm, profile)
+        (liked, lfm)
     };
+    let profile = get_active_profile(&state).ok();
 
     // Fetch live counts if a profile is configured
     let (playlist_count, total_playlist_songs, starred_songs) = if let Some(ref p) = profile {

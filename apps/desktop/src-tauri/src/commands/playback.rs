@@ -30,6 +30,7 @@ pub async fn playback_load(
     state: State<'_, AppState>,
     song: Song,
     autoplay: Option<bool>,
+    crossfade_ms: Option<u32>,
 ) -> Result<(), String> {
     let preloaded = playback_handle(&state).take_preloaded(&song.id)?;
     let payload = if let Some(preloaded) = preloaded {
@@ -38,7 +39,11 @@ pub async fn playback_load(
         load_track_payload(&state, song).await?
     };
 
-    playback_handle(&state).load(payload, autoplay.unwrap_or(false))
+    let autoplay = autoplay.unwrap_or(false);
+    match crossfade_ms.filter(|&ms| ms > 0) {
+        Some(ms) => playback_handle(&state).load_with_crossfade(payload, autoplay, ms),
+        None => playback_handle(&state).load(payload, autoplay),
+    }
 }
 
 #[tauri::command]

@@ -137,7 +137,7 @@
           type={showApiKey ? 'text' : 'password'}
           bind:value={lastFmApiKey}
           placeholder="Paste your Last.fm API key"
-          autocomplete="off"
+          autocomplete="new-password"
           class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 pr-10 font-mono text-sm placeholder:font-sans placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
@@ -163,7 +163,7 @@
           type={showSharedSecret ? 'text' : 'password'}
           bind:value={lastFmSharedSecret}
           placeholder={lastFmSharedSecretConfigured ? 'Already configured — enter to replace' : 'Paste your Last.fm shared secret'}
-          autocomplete="off"
+          autocomplete="new-password"
           class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 pr-10 font-mono text-sm placeholder:font-sans placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <button
@@ -318,7 +318,7 @@
           type="text"
           bind:value={listenBrainzUsername}
           placeholder="e.g. your_listenbrainz_username"
-          autocomplete="off"
+          autocomplete="new-password"
           class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
@@ -333,7 +333,7 @@
           type="password"
           bind:value={listenBrainzToken}
           placeholder={listenBrainzTokenConfigured ? 'Already configured — enter to replace' : 'Paste your ListenBrainz user token'}
-          autocomplete="off"
+          autocomplete="new-password"
           class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 font-mono text-sm placeholder:font-sans placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>

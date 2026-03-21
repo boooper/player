@@ -4,7 +4,6 @@ import { searchSongs as searchLibrarySongs, type Song as LibrarySong } from '$li
 import { getArtistAffinities, getGenreAffinities, getSongAffinities } from '$lib/servers/play-history';
 import {
   getLastFmApiKey,
-  getListenBrainzUsername,
   getRecommendationProviderSetting,
 } from '$lib/stores/backend-settings';
 import type { RecommendationSource, UnifiedRecommendation } from './types';
@@ -75,13 +74,12 @@ export async function getRecommendations(params: {
   const provider = getProvider();
   if (provider === 'listenbrainz') {
     return fetchListenBrainzRecommendations({
-      username: getListenBrainzUsername(),
       likedArtists: params.likedArtists,
       limit: params.limit,
     });
   }
   if (!hasLfm()) return [];
-  return (await fetchLastFmRecommendations({ apiKey: getLfmKey(), ...params })).map((r) => ({
+  return (await fetchLastFmRecommendations({ ...params })).map((r) => ({
     ...r,
     source: 'lastfm' as const,
   }));
@@ -89,7 +87,7 @@ export async function getRecommendations(params: {
 
 export async function getTrackTopGenre(artist: string, track: string): Promise<string> {
   if (getProvider() !== 'lastfm' || !hasLfm()) return '';
-  return lfmTrackTopGenre({ apiKey: getLfmKey(), artist, track });
+  return lfmTrackTopGenre({ artist, track });
 }
 
 export async function getUpNextSongs(params: {

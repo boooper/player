@@ -14,8 +14,8 @@ function notifyDesktopPlaybackCacheUpdated(songId: string): void {
   );
 }
 
-export async function desktopPlaybackLoad(song: Song, autoplay = false): Promise<void> {
-  await invoke('playback_load', { song, autoplay });
+export async function desktopPlaybackLoad(song: Song, autoplay = false, crossfadeMs?: number): Promise<void> {
+  await invoke('playback_load', { song, autoplay, crossfadeMs });
   notifyDesktopPlaybackCacheUpdated(song.id);
 }
 

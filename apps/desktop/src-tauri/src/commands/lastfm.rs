@@ -7,6 +7,16 @@ use serde::Serialize;
 use tauri::State;
 use crate::{AppState, commands::settings};
 
+fn get_lfm_tokens(state: &AppState) -> (String, String, String) {
+    let Ok(db) = state.db.lock() else { return (String::new(), String::new(), String::new()) };
+    let Ok(s) = settings::read_all(&db) else { return (String::new(), String::new(), String::new()) };
+    (
+        s.get("LASTFM_API_KEY").cloned().unwrap_or_default(),
+        s.get("LASTFM_SHARED_SECRET").cloned().unwrap_or_default(),
+        s.get("LASTFM_SESSION_KEY").cloned().unwrap_or_default(),
+    )
+}
+
 const LASTFM_API: &str = "https://ws.audioscrobbler.com/2.0/";
 
 // ── Signing ──────────────────────────────────────────────────────────────────
@@ -134,8 +144,13 @@ pub struct LfmAuthToken {
 #[tauri::command]
 pub async fn lfm_begin_auth(state: State<'_, AppState>) -> Result<LfmAuthToken, String> {
     let (api_key, secret) = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        require_credentials(&settings::read_all(&db)?)?
+        let (k, s, _) = get_lfm_tokens(&state);
+        if !k.is_empty() {
+            (k, s)
+        } else {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            require_credentials(&settings::read_all(&db)?)?
+        }
     };
     let mut params = HashMap::new();
     params.insert("method".to_string(), "auth.getToken".to_string());
@@ -162,8 +177,13 @@ pub async fn lfm_complete_auth(
     token: String,
 ) -> Result<LfmSession, String> {
     let (api_key, secret) = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        require_credentials(&settings::read_all(&db)?)?
+        let (k, s, _) = get_lfm_tokens(&state);
+        if !k.is_empty() {
+            (k, s)
+        } else {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            require_credentials(&settings::read_all(&db)?)?
+        }
     };
     let token = token.trim().to_string();
     let session = tokio::task::spawn_blocking(move || {
@@ -202,8 +222,13 @@ pub async fn lfm_now_playing(
     duration: Option<f64>,
 ) -> Result<(), String> {
     let (api_key, secret, sk) = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        read_session_credentials(&settings::read_all(&db)?)
+        let tokens = get_lfm_tokens(&state);
+        if !tokens.0.is_empty() {
+            tokens
+        } else {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            read_session_credentials(&settings::read_all(&db)?)
+        }
     };
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(());
@@ -227,8 +252,13 @@ pub async fn lfm_scrobble(
     duration: Option<f64>,
 ) -> Result<(), String> {
     let (api_key, secret, sk) = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        read_session_credentials(&settings::read_all(&db)?)
+        let tokens = get_lfm_tokens(&state);
+        if !tokens.0.is_empty() {
+            tokens
+        } else {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            read_session_credentials(&settings::read_all(&db)?)
+        }
     };
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(());
@@ -253,11 +283,16 @@ pub struct UserTaste {
 #[tauri::command]
 pub async fn lfm_user_taste(state: State<'_, AppState>) -> Result<UserTaste, String> {
     let (api_key, secret, sk, username) = {
+        let (k, sec, sk) = get_lfm_tokens(&state);
         let db = state.db.lock().map_err(|e| e.to_string())?;
         let s = settings::read_all(&db)?;
-        let (k, sec, sk) = read_session_credentials(&s);
         let u = s.get("LASTFM_USERNAME").cloned().unwrap_or_default();
-        (k, sec, sk, u)
+        if !k.is_empty() {
+            (k, sec, sk, u)
+        } else {
+            let (k2, sec2, sk2) = read_session_credentials(&s);
+            (k2, sec2, sk2, u)
+        }
     };
     if sk.is_empty() || api_key.is_empty() || secret.is_empty() {
         return Ok(UserTaste { connected: false, username, artists: vec![] });

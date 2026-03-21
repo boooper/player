@@ -40,7 +40,6 @@
   // ── Settings derivations ──────────────────────────────────────────────────
   const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
   const lastFmConnected = $derived($backendSettings.lastFmConnected);
-  const lbzToken = $derived($backendSettings.listenBrainzToken);
   const eqEnabled = $derived($backendSettings.eqEnabled ?? false);
   const eqBands = $derived(normalizeEqBands($backendSettings.eqBands));
 
@@ -89,7 +88,6 @@
   createPlayerScrobbleController({
     getCurrentTrack: () => currentTrack,
     getLastFmConnected: () => lastFmConnected,
-    getLbzToken: () => lbzToken
   });
 
   createPlayerUpNextController({ getLastFmApiKey: () => lastFmApiKey });

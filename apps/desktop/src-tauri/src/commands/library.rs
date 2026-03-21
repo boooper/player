@@ -287,10 +287,7 @@ pub(crate) async fn resolve_playback_song(
         return Ok(song.clone());
     }
 
-    let p = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        get_active_profile(&db)?
-    };
+    let p = get_active_profile(&state)?;
 
     if is_jf(&p) || is_plex(&p) {
         return Err("External playback materialization is only supported for Subsonic-compatible servers.".to_string());
@@ -368,7 +365,7 @@ pub async fn library_search(
     query: String,
     count: Option<u32>,
 ) -> Result<Vec<Song>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::search(&p, &query, count.unwrap_or(20)).await; }
     if is_jf(&p) {
         let songs = crate::commands::jellyfin::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
@@ -390,7 +387,7 @@ pub async fn library_search_bundle(
     album_count: Option<u32>,
     recommendation_count: Option<u32>,
 ) -> Result<SearchBundle, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     let song_limit = song_count.unwrap_or(24);
     let album_limit = album_count.unwrap_or(12);
     let rec_limit = recommendation_count.unwrap_or(16);
@@ -463,7 +460,7 @@ pub async fn library_similar(
     song_id: String,
     count: Option<u32>,
 ) -> Result<Vec<Song>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::similar(&p, &song_id, count.unwrap_or(20)).await; }
     if is_jf(&p) {
         let songs = crate::commands::jellyfin::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
@@ -479,7 +476,7 @@ pub async fn library_similar(
 
 #[tauri::command]
 pub async fn library_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::playlists(&p).await; }
     if is_jf(&p) {
         let playlists = crate::commands::jellyfin::playlists(&state.http, &p).await?;
@@ -498,7 +495,7 @@ pub async fn library_playlist(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<PlaylistDetail, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::playlist(&p, &id).await; }
     if is_jf(&p) {
         let detail = crate::commands::jellyfin::playlist(&state.http, &p, &id).await?;
@@ -518,7 +515,7 @@ pub async fn library_artist_albums(
     query: String,
     count: Option<u32>,
 ) -> Result<Vec<Album>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::artist_albums(&p, &query, count.unwrap_or(20)).await; }
     if is_jf(&p) {
         let albums = crate::commands::jellyfin::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
@@ -537,7 +534,7 @@ pub async fn library_album_songs(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<Song>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::album_songs(&p, &id).await; }
     if is_jf(&p) {
         let songs = crate::commands::jellyfin::album_songs(&state.http, &p, &id).await?;
@@ -556,7 +553,7 @@ pub async fn library_album(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<AlbumDetail, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::album(&p, &id).await; }
     if is_jf(&p) {
         let detail = crate::commands::jellyfin::album(&state.http, &p, &id).await?;
@@ -576,7 +573,7 @@ pub async fn library_album_list(
     kind: Option<String>,
     count: Option<u32>,
 ) -> Result<Vec<Album>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::album_list(&p, &kind.clone().unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await; }
     if is_jf(&p) {
         let albums = crate::commands::jellyfin::album_list(&state.http, &p, &kind.unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await?;
@@ -593,7 +590,7 @@ pub async fn library_album_list(
 
 #[tauri::command]
 pub async fn library_starred(state: State<'_, AppState>) -> Result<Vec<Song>, String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::starred(&p).await; }
     if is_jf(&p) {
         let songs = crate::commands::jellyfin::starred(&state.http, &p).await?;
@@ -616,7 +613,7 @@ pub async fn library_star(
     title: Option<String>,
     album: Option<String>,
 ) -> Result<(), String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) {
         return Err("Favorites are not supported for local libraries yet.".to_string());
     }
@@ -686,7 +683,7 @@ pub async fn library_add_to_playlist(
     title: Option<String>,
     album: Option<String>,
 ) -> Result<(), String> {
-    let p = { let db = state.db.lock().map_err(|e| e.to_string())?; get_active_profile(&db)? };
+    let p = get_active_profile(&state)?;
     if is_local(&p) {
         return Err("Playlists are not supported for local libraries yet.".to_string());
     }
@@ -707,10 +704,7 @@ pub async fn library_create_playlist(
     name: String,
     song_ids: Vec<String>,
 ) -> Result<Playlist, String> {
-    let p = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        get_active_profile(&db)?
-    };
+    let p = get_active_profile(&state)?;
 
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
@@ -743,10 +737,7 @@ pub async fn library_rename_playlist(
     playlist_id: String,
     name: String,
 ) -> Result<(), String> {
-    let p = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        get_active_profile(&db)?
-    };
+    let p = get_active_profile(&state)?;
 
     let trimmed_name = name.trim();
     if playlist_id.trim().is_empty() {
@@ -779,10 +770,7 @@ pub async fn library_delete_playlist(
     state: State<'_, AppState>,
     playlist_id: String,
 ) -> Result<(), String> {
-    let p = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        get_active_profile(&db)?
-    };
+    let p = get_active_profile(&state)?;
 
     if playlist_id.trim().is_empty() {
         return Err("Playlist id is required.".to_string());
@@ -805,10 +793,7 @@ pub async fn library_materialize_song(
     state: State<'_, AppState>,
     song_id: String,
 ) -> Result<(), String> {
-    let p = {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        get_active_profile(&db)?
-    };
+    let p = get_active_profile(&state)?;
 
     if is_jf(&p) || is_plex(&p) {
         return Err("Materializing external tracks is only supported for Subsonic-compatible servers.".to_string());

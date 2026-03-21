@@ -1,22 +1,12 @@
 import { fromStore } from 'svelte/store';
 import { currentTime, duration, addRecentlyPlayedSong } from '$lib/stores/player';
-import { lfmNowPlaying, lfmScrobble } from '$lib/servers';
+import { lfmNowPlaying, lfmScrobble, type Song } from '$lib/servers';
 import { lbzNowPlaying, lbzScrobble } from '$lib/providers/recommendation/listenbrainz';
 import { recordPlay } from '$lib/servers/play-history';
 
-type SongLike = {
-  id: string;
-  title: string;
-  artist: string;
-  album?: string | null;
-  coverArtUrl?: string | null;
-  duration?: number | null;
-};
-
 type PlayerScrobbleControllerOptions = {
-  getCurrentTrack: () => SongLike | null;
+  getCurrentTrack: () => Song | null;
   getLastFmConnected: () => boolean;
-  getLbzToken: () => string | null | undefined;
 };
 
 const currentTimeRef = fromStore(currentTime);
@@ -42,10 +32,7 @@ export function createPlayerScrobbleController(options: PlayerScrobbleController
     if (options.getLastFmConnected()) {
       lfmNowPlaying(track.artist, track.title, track.album || undefined, track.duration || undefined);
     }
-    const lbzToken = options.getLbzToken();
-    if (lbzToken) {
-      lbzNowPlaying(lbzToken, track.artist, track.title, track.album || undefined, track.duration || undefined);
-    }
+    lbzNowPlaying(track.artist, track.title, track.album || undefined, track.duration || undefined);
 
     // Cleanup: fires when the user skips to another track.
     // Only records if the 50% threshold effect hasn't already written a record
@@ -96,10 +83,7 @@ export function createPlayerScrobbleController(options: PlayerScrobbleController
     if (options.getLastFmConnected()) {
       lfmScrobble(track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);
     }
-    const lbzToken = options.getLbzToken();
-    if (lbzToken) {
-      lbzScrobble(lbzToken, track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);
-    }
+    lbzScrobble(track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);
   });
 }
 

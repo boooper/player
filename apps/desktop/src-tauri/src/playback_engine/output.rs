@@ -68,6 +68,19 @@ impl PlaybackHandle {
         self.with_state(|state| state.load(track, autoplay))
     }
 
+    pub fn load_with_crossfade(
+        &self,
+        track: TrackPayload,
+        autoplay: bool,
+        crossfade_ms: u32,
+    ) -> Result<(), String> {
+        self.with_state(|state| {
+            let duration_frames =
+                (crossfade_ms as u64 * state.output_sample_rate() as u64 / 1000) as usize;
+            state.load_with_crossfade(track, autoplay, duration_frames)
+        })
+    }
+
     pub fn play(&self) -> Result<(), String> {
         self.with_state(|state| {
             state.play();
@@ -211,7 +224,12 @@ where
         let volume = state.volume();
         let eq_enabled = state.eq_enabled();
         for (channel, sample) in frame.iter_mut().enumerate() {
-            let mut value = input_frame[channel] * volume;
+            let incoming = input_frame[channel];
+            let mixed = match state.crossfade_outgoing_sample(channel) {
+                Some((outgoing, progress)) => incoming * progress + outgoing * (1.0 - progress),
+                None => incoming,
+            };
+            let mut value = mixed * volume;
             if eq_enabled {
                 value = state.filters_mut()[channel]
                     .iter_mut()

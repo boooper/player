@@ -18,8 +18,7 @@
   const controller = createPlayerVolumeController({
     getCastActive: () => castActive,
     getCastVolume: () => castVolume,
-    getLocalVolume: () => $volume,
-    getAudioEl: () => document.querySelector('audio')
+    getLocalVolume: () => $volume
   });
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;

@@ -8,7 +8,7 @@ import {
   volume,
   queue,
   currentIndex,
-  restorePlaybackRequest
+  restorePlaybackRequest,
 } from '$lib/stores/player';
 import {
   DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
@@ -56,6 +56,9 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
   let preloadedTrackId = $state<string | null>(null);
   let loadPending = $state(false);
   let currentTrackCached = $state(false);
+  let crossfadePending = $state(false);
+  // True while the crossfade IPC call is in-flight — suppress the "wrong track" stop
+  let crossfadeInFlight = false;
 
   function shouldPreload(positionSeconds: number, durationSeconds: number): boolean {
     if (durationSeconds <= 0) return false;
@@ -93,7 +96,7 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
             return;
           }
 
-          if (status.trackId && status.trackId !== activeTrackId) {
+          if (status.trackId && status.trackId !== activeTrackId && !crossfadeInFlight) {
             // The engine still has the previous track while the new one loads
             // (normal for ext- sources that require a server-side download).
             // Stop the old track but preserve loadPending/isBuffering so the
@@ -171,15 +174,20 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
     }
     if (loadedTrackId === track.id) return;
     loadedTrackId = track.id;
+    const isCrossfade = crossfadePending;
+    const crossfadeMs = isCrossfade ? Math.round(options.getCrossfadeSeconds() * 1000) : undefined;
+    crossfadePending = false;
     currentTime.set(0);
     duration.set((track.duration ?? 0) > 0 ? track.duration! : 0);
-    const autoplay = shouldAutoplayRef.current;
-    options.setIsBuffering(true);
-    loadPending = autoplay;
+    const autoplay = isCrossfade || shouldAutoplayRef.current;
+    if (!isCrossfade) options.setIsBuffering(true);
+    loadPending = autoplay && !isCrossfade;
     isPlaying.set(autoplay);
-    if (autoplay) shouldAutoplay.set(false);
-    desktopPlaybackLoad(track as Parameters<typeof desktopPlaybackLoad>[0], autoplay)
+    if (!isCrossfade && autoplay) shouldAutoplay.set(false);
+    crossfadeInFlight = isCrossfade;
+    desktopPlaybackLoad(track as Parameters<typeof desktopPlaybackLoad>[0], autoplay, crossfadeMs)
       .then(() => {
+        crossfadeInFlight = false;
         if (!autoplay) {
           loadPending = false;
           options.setIsBuffering(false);
@@ -187,6 +195,7 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
         }
       })
       .catch(() => {
+        crossfadeInFlight = false;
         loadedTrackId = null;
         loadPending = false;
         options.setIsBuffering(false);
@@ -216,6 +225,28 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
     desktopPlaybackPreload(next as Parameters<typeof desktopPlaybackPreload>[0]).catch(() => {
       if (preloadedTrackId === next.id) preloadedTrackId = null;
     });
+  });
+
+  // Crossfade trigger — fires when position enters the crossfade window and the next
+  // track is already preloaded in memory. Only then do we advance the queue early.
+  $effect(() => {
+    if (options.getCastActive()) return;
+    const crossfadeSeconds = options.getCrossfadeSeconds();
+    if (!crossfadeSeconds || crossfadeSeconds <= 0) return;
+    const items = queueRef.current;
+    const index = currentIndexRef.current;
+    const next = items[index + 1];
+    if (!next?.streamUrl) return;
+    if (preloadedTrackId !== next.id) return; // only crossfade when already buffered
+    if (crossfadePending) return;
+    const track = options.getCurrentTrack();
+    const dur = (track?.duration ?? 0) > 0 ? track!.duration! : durationRef.current;
+    if (dur <= 0) return;
+    const pos = currentTimeRef.current;
+    if (pos < dur - crossfadeSeconds || pos >= dur) return;
+    crossfadePending = true;
+    shouldAutoplay.set(true);
+    nextTrack();
   });
 
   function togglePlay() {

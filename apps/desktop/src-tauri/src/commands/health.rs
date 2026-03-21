@@ -11,10 +11,10 @@ pub struct ServiceHealth {
 
 #[tauri::command]
 pub async fn get_service_health(state: State<'_, AppState>) -> Result<ServiceHealth, String> {
-    // ── Grab everything we need from the DB while holding the lock briefly ───
-    let (profile, lfm_key, lfm_session) = {
+    // ── Grab everything we need while holding locks briefly ──────────────────
+    let profile = get_active_profile(&state).ok();
+    let (lfm_key, lfm_session) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        let profile = get_active_profile(&db).ok();
         let lfm_key = db
             .query_row(
                 "SELECT value FROM settings WHERE key = 'LASTFM_API_KEY'",
@@ -31,7 +31,7 @@ pub async fn get_service_health(state: State<'_, AppState>) -> Result<ServiceHea
             )
             .ok()
             .filter(|v| !v.is_empty());
-        (profile, lfm_key, lfm_session)
+        (lfm_key, lfm_session)
     };
 
     // ── Subsonic: ping the active profile ────────────────────────────────────

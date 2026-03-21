@@ -1,4 +1,4 @@
-const LASTFM_API_URL = 'https://ws.audioscrobbler.com/2.0/';
+import { invoke } from '@tauri-apps/api/core';
 
 export type LastFmTrackRecommendation = {
   id: string;
@@ -67,68 +67,30 @@ function isPlaceholderImage(url: string): boolean {
   return PLACEHOLDER_IMAGE_MARKERS.some((marker) => normalized.includes(marker));
 }
 
-async function callLastFm(
-  method: string,
-  params: Record<string, string | number>,
-  apiKey: string
-): Promise<any> {
-  const url = new URL(LASTFM_API_URL);
-  url.searchParams.set('method', method);
-  url.searchParams.set('api_key', apiKey);
-  url.searchParams.set('format', 'json');
-
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, String(value));
-  });
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Last.fm request failed with status ${response.status}`);
-  }
-
-  const json = await response.json();
-  if (json.error) {
-    throw new Error(json.message || 'Last.fm returned an error');
-  }
-
-  return json;
-}
-
 export async function fetchLastFmRecommendations({
-  apiKey,
   seedArtist,
   seedSongTitle,
   seedGenre,
   likedArtists = [],
   limit = 12
 }: {
-  apiKey: string;
   seedArtist: string;
   seedSongTitle: string;
   seedGenre?: string;
   likedArtists?: string[];
   limit?: number;
 }): Promise<LastFmTrackRecommendation[]> {
-  if (!apiKey) {
-    throw new Error('Missing Last.fm API key');
-  }
-
   const liked = new Set(likedArtists.map(normalize));
   const normalizedGenre = normalize(seedGenre ?? '');
 
   const [similarResult, genreResult] = await Promise.allSettled([
-    callLastFm(
-      'track.getSimilar',
-      {
-        artist: seedArtist,
-        track: seedSongTitle,
-        autocorrect: 1,
-        limit: Math.max(limit * 3, 36)
-      },
-      apiKey
-    ),
+    invoke<any>('lfm_similar_tracks', {
+      artist: seedArtist,
+      track: seedSongTitle,
+      limit: Math.max(limit * 3, 36)
+    }),
     normalizedGenre
-      ? callLastFm('tag.gettoptracks', { tag: normalizedGenre, limit: 100 }, apiKey)
+      ? invoke<any>('lfm_tag_top_tracks', { tag: normalizedGenre, limit: 100 })
       : Promise.resolve({})
   ]);
 
@@ -187,13 +149,11 @@ export async function fetchLastFmRecommendations({
 }
 
 export async function fetchTopArtists({
-  apiKey,
   limit = 24
 }: {
-  apiKey: string;
   limit?: number;
-}): Promise<LastFmArtist[]> {
-  const payload = await callLastFm('chart.gettopartists', { limit }, apiKey);
+} = {}): Promise<LastFmArtist[]> {
+  const payload = await invoke<any>('lfm_chart_top_artists', { limit });
   const list = Array.isArray(payload?.artists?.artist) ? payload.artists.artist : [];
 
   const artists = list
@@ -211,24 +171,15 @@ export async function fetchTopArtists({
 }
 
 export async function searchArtists({
-  apiKey,
   query,
   limit = 12
 }: {
-  apiKey: string;
   query: string;
   limit?: number;
 }): Promise<LastFmArtist[]> {
   if (!query.trim()) return [];
 
-  const payload = await callLastFm(
-    'artist.search',
-    {
-      artist: query,
-      limit
-    },
-    apiKey
-  );
+  const payload = await invoke<any>('lfm_artist_search', { artist: query, limit });
 
   const raw = payload?.results?.artistmatches?.artist;
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
@@ -248,13 +199,11 @@ export async function searchArtists({
 }
 
 export async function fetchTopSongs({
-  apiKey,
   limit = 24
 }: {
-  apiKey: string;
   limit?: number;
-}): Promise<LastFmSong[]> {
-  const payload = await callLastFm('chart.gettoptracks', { limit }, apiKey);
+} = {}): Promise<LastFmSong[]> {
+  const payload = await invoke<any>('lfm_chart_top_tracks', { limit });
   const list = Array.isArray(payload?.tracks?.track) ? payload.tracks.track : [];
 
   const mapped = list
@@ -273,22 +222,17 @@ export async function fetchTopSongs({
 }
 
 export async function searchSongs({
-  apiKey,
   query,
   limit = 12
 }: {
-  apiKey: string;
   query: string;
   limit?: number;
 }): Promise<LastFmSong[]> {
   if (!query.trim()) return [];
 
-  // Run both a track-title search AND an artist top-tracks lookup in parallel.
-  // This way searching "Nirvana" returns Nirvana's songs, not just tracks
-  // whose title happens to contain "nirvana".
   const [trackResult, artistResult] = await Promise.allSettled([
-    callLastFm('track.search', { track: query, limit }, apiKey),
-    callLastFm('artist.getTopTracks', { artist: query, autocorrect: 1, limit }, apiKey)
+    invoke<any>('lfm_track_search', { track: query, limit }),
+    invoke<any>('lfm_artist_top_tracks', { artist: query, limit })
   ]);
 
   const seen = new Set<string>();
@@ -325,18 +269,15 @@ export async function searchSongs({
     addTracks(Array.isArray(raw) ? raw : raw ? [raw] : [], 'top', attrArtist);
   }
 
-  const limited = songs.slice(0, limit);
-  return limited;
+  return songs.slice(0, limit);
 }
 
 export async function fetchTopTags({
-  apiKey,
   limit = 40
 }: {
-  apiKey: string;
   limit?: number;
-}): Promise<string[]> {
-  const payload = await callLastFm('tag.getTopTags', { limit }, apiKey);
+} = {}): Promise<string[]> {
+  const payload = await invoke<any>('lfm_tag_top_tags', { limit });
   const list = Array.isArray(payload?.toptags?.tag) ? payload.toptags.tag : [];
 
   return list
@@ -345,25 +286,15 @@ export async function fetchTopTags({
 }
 
 export async function fetchTrackTopGenre({
-  apiKey,
   artist,
   track
 }: {
-  apiKey: string;
   artist: string;
   track: string;
 }): Promise<string> {
   if (!artist.trim() || !track.trim()) return '';
 
-  const payload = await callLastFm(
-    'track.getTopTags',
-    {
-      artist,
-      track,
-      autocorrect: 1
-    },
-    apiKey
-  );
+  const payload = await invoke<any>('lfm_track_top_tags', { artist, track });
 
   const tags = Array.isArray(payload?.toptags?.tag) ? payload.toptags.tag : [];
   const top = tags
@@ -388,14 +319,12 @@ export type LastFmArtistInfo = {
 };
 
 export async function fetchArtistInfo({
-  apiKey,
   artist
 }: {
-  apiKey: string;
   artist: string;
 }): Promise<LastFmArtistInfo | null> {
   try {
-    const payload = await callLastFm('artist.getinfo', { artist, autocorrect: 1 }, apiKey);
+    const payload = await invoke<any>('lfm_artist_info', { artist });
     const a = payload?.artist;
     if (!a) return null;
 
@@ -428,19 +357,13 @@ export async function fetchArtistInfo({
 }
 
 export async function fetchArtistTopTracks({
-  apiKey,
   artist,
   limit = 10
 }: {
-  apiKey: string;
   artist: string;
   limit?: number;
 }): Promise<LastFmSong[]> {
-  const payload = await callLastFm(
-    'artist.getTopTracks',
-    { artist, autocorrect: 1, limit },
-    apiKey
-  );
+  const payload = await invoke<any>('lfm_artist_top_tracks', { artist, limit });
   const tracks = Array.isArray(payload?.toptracks?.track) ? payload.toptracks.track : [];
   const seen = new Set<string>();
   return tracks
@@ -462,4 +385,3 @@ export async function fetchArtistTopTracks({
     })
     .filter(Boolean) as LastFmSong[];
 }
-

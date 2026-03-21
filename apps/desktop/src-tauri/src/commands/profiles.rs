@@ -3,6 +3,15 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::AppState;
 
+fn validate_server_url(url: &str, server_type: &str) -> Result<(), String> {
+    if server_type == "local" { return Ok(()); }
+    let parsed = url::Url::parse(url).map_err(|_| "Invalid server URL".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(()),
+        s => Err(format!("URL scheme '{s}' is not allowed; use http or https")),
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
@@ -72,6 +81,7 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
 
     if name.is_empty() { return Err("name is required".to_string()); }
     if url.is_empty() { return Err("url is required".to_string()); }
+    validate_server_url(&url, &server_type)?;
     if server_type != "local" && username.is_empty() && server_type != "plex" { return Err("username is required".to_string()); }
     if server_type != "local" && password.is_empty() { return Err("password is required".to_string()); }
 
@@ -145,6 +155,7 @@ pub fn update_profile(
         .map_err(|e| e.to_string())?;
     }
     if !url.is_empty() {
+        validate_server_url(&url, &server_type)?;
         db.execute(
             "UPDATE profiles SET url = ?1, updated_at = datetime('now') WHERE id = ?2",
             rusqlite::params![url, id],
@@ -255,7 +266,8 @@ pub struct ActiveProfile {
     pub server_type: String,
 }
 
-pub fn get_active_profile(db: &rusqlite::Connection) -> Result<ActiveProfile, String> {
+pub fn get_active_profile(state: &crate::AppState) -> Result<ActiveProfile, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
     db.query_row(
         "SELECT url, username, password, COALESCE(server_type, 'subsonic') FROM profiles WHERE is_active = 1 LIMIT 1",
         [],

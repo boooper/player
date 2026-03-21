@@ -12,6 +12,13 @@ use super::{
 
 const CACHE_LIMIT: usize = 3;
 
+struct CrossfadeState {
+    outgoing_samples: Arc<Vec<f32>>,
+    outgoing_frame: usize,
+    duration_frames: usize,
+    elapsed_frames: usize,
+}
+
 pub struct PlaybackState {
     track: Option<TrackPayload>,
     preloaded: Option<TrackPayload>,
@@ -26,6 +33,7 @@ pub struct PlaybackState {
     eq_filters: Vec<Vec<DirectForm1<f32>>>,
     output_channels: u16,
     output_sample_rate: u32,
+    crossfade: Option<CrossfadeState>,
 }
 
 impl PlaybackState {
@@ -44,6 +52,7 @@ impl PlaybackState {
             eq_filters: build_filter_bank(output_sample_rate, output_channels, [0.0; EQ_BANDS])?,
             output_channels,
             output_sample_rate,
+            crossfade: None,
         })
     }
 
@@ -67,6 +76,10 @@ impl PlaybackState {
 
     pub fn output_config(&self) -> (u16, u32) {
         (self.output_channels, self.output_sample_rate)
+    }
+
+    pub fn output_sample_rate(&self) -> u32 {
+        self.output_sample_rate
     }
 
     pub fn is_playing(&self) -> bool {
@@ -99,6 +112,26 @@ impl PlaybackState {
 
     pub fn advance_frame(&mut self) {
         self.frame_index += 1;
+        if let Some(cf) = &mut self.crossfade {
+            cf.elapsed_frames += 1;
+            if cf.elapsed_frames >= cf.duration_frames {
+                self.crossfade = None;
+            }
+        }
+    }
+
+    /// Returns `(outgoing_sample, progress)` when a crossfade is active.
+    /// `progress` goes from 0.0 (full outgoing) → 1.0 (full incoming).
+    pub fn crossfade_outgoing_sample(&self, channel: usize) -> Option<(f32, f32)> {
+        let cf = self.crossfade.as_ref()?;
+        let progress = (cf.elapsed_frames as f32 / cf.duration_frames as f32).clamp(0.0, 1.0);
+        let frame = cf.outgoing_frame + cf.elapsed_frames;
+        let channels = self.output_channels as usize;
+        let sample = cf.outgoing_samples
+            .get(frame * channels + channel)
+            .copied()
+            .unwrap_or(0.0);
+        Some((sample, progress))
     }
 
     pub fn mark_ended(&mut self) {
@@ -118,6 +151,33 @@ impl PlaybackState {
 
     pub fn load(&mut self, track: TrackPayload, autoplay: bool) -> Result<(), String> {
         self.track = Some(track);
+        self.preloaded = None;
+        self.frame_index = 0;
+        self.playing = autoplay;
+        self.ended = false;
+        self.crossfade = None;
+        self.reset_filters()
+    }
+
+    /// Starts playing `incoming` immediately while fading out the current track over
+    /// `duration_frames` frames. If no track is currently playing, falls back to a normal load.
+    pub fn load_with_crossfade(
+        &mut self,
+        incoming: TrackPayload,
+        autoplay: bool,
+        duration_frames: usize,
+    ) -> Result<(), String> {
+        if duration_frames > 0 {
+            if let Some(current) = &self.track {
+                self.crossfade = Some(CrossfadeState {
+                    outgoing_samples: Arc::clone(&current.samples),
+                    outgoing_frame: self.frame_index,
+                    duration_frames,
+                    elapsed_frames: 0,
+                });
+            }
+        }
+        self.track = Some(incoming);
         self.preloaded = None;
         self.frame_index = 0;
         self.playing = autoplay;
@@ -198,6 +258,7 @@ impl PlaybackState {
         self.frame_index = 0;
         self.playing = false;
         self.ended = false;
+        self.crossfade = None;
         self.reset_filters()
     }
 

@@ -169,12 +169,12 @@ async function resolveMetadataArtwork(artist: string): Promise<string> {
   if (provider === 'local') return '';
   if (provider === 'lastfm') {
     if (!hasLfm()) return '';
-    return (await lfmArtistInfo({ apiKey: getLfmKey(), artist }))?.imageUrl || '';
+    return (await lfmArtistInfo({ artist }))?.imageUrl || '';
   }
   if (provider === 'audiodb') return fetchAudioDbArtistPhoto(artist);
 
   const [lfmRes, adbRes] = await Promise.allSettled([
-    hasLfm() ? lfmArtistInfo({ apiKey: getLfmKey(), artist }) : Promise.resolve(null),
+    hasLfm() ? lfmArtistInfo({ artist }) : Promise.resolve(null),
     fetchAudioDbArtist(artist),
   ]);
   const lfmImage = lfmRes.status === 'fulfilled' ? lfmRes.value?.imageUrl || '' : '';
@@ -217,7 +217,7 @@ export async function getTopArtists(limit = 24): Promise<UnifiedArtist[]> {
     `top-artists:${provider}:${limit}`,
     async () =>
       hydrateImages(
-        (await lfmTopArtists({ apiKey: getLfmKey(), limit })).map((a) => ({
+        (await lfmTopArtists({ limit })).map((a) => ({
           ...a,
           source: 'lastfm' as const,
         })),
@@ -233,7 +233,7 @@ export async function searchArtists(query: string, limit = 12): Promise<UnifiedA
   if (provider === 'audiodb' || !hasLfm()) return [];
 
   const remote = await hydrateImages(
-    (await lfmSearchArtists({ apiKey: getLfmKey(), query, limit })).map((a) => ({
+    (await lfmSearchArtists({ query, limit })).map((a) => ({
       ...a,
       source: 'lastfm' as const,
     })),
@@ -251,7 +251,7 @@ export async function getTopSongs(limit = 24): Promise<UnifiedSong[]> {
     `top-songs:${provider}:${limit}`,
     async () =>
       hydrateImages(
-        (await lfmTopSongs({ apiKey: getLfmKey(), limit })).map((s) => ({
+        (await lfmTopSongs({ limit })).map((s) => ({
           ...s,
           source: 'lastfm' as const,
         })),
@@ -275,7 +275,7 @@ export async function searchMetadataSongs(query: string, limit = 12): Promise<Un
   if (provider === 'audiodb' || !hasLfm()) return [];
 
   const remote = await hydrateImages(
-    (await lfmSearchSongs({ apiKey: getLfmKey(), query, limit })).map((s) => ({
+    (await lfmSearchSongs({ query, limit })).map((s) => ({
       ...s,
       source: 'lastfm' as const,
     })),
@@ -313,7 +313,7 @@ export async function getArtistInfo(artist: string): Promise<UnifiedArtistInfo |
 
       if (provider === 'lastfm') {
         if (!hasLfm()) return local;
-        const lfm = await lfmArtistInfo({ apiKey: getLfmKey(), artist });
+        const lfm = await lfmArtistInfo({ artist });
         if (!lfm) return local;
         return {
           name: local?.name || lfm.name,
@@ -332,7 +332,7 @@ export async function getArtistInfo(artist: string): Promise<UnifiedArtistInfo |
 
       // 'both'
       const [lfmRes, adbRes] = await Promise.allSettled([
-        hasLfm() ? lfmArtistInfo({ apiKey: getLfmKey(), artist }) : Promise.resolve(null),
+        hasLfm() ? lfmArtistInfo({ artist }) : Promise.resolve(null),
         fetchAudioDbArtist(artist),
       ]);
       const lfm = lfmRes.status === 'fulfilled' ? lfmRes.value : null;
@@ -381,7 +381,7 @@ export async function getArtistTopTracks(artist: string, limit = 10): Promise<Un
       const local = await getLocalArtistTopTracks(artist, limit);
       if (provider === 'local') return local;
       if (!hasLfm() || provider === 'audiodb') return local;
-      const remote = (await lfmArtistTopTracks({ apiKey: getLfmKey(), artist, limit })).map(
+      const remote = (await lfmArtistTopTracks({ artist, limit })).map(
         (s) => ({ ...s, source: 'lastfm' as const })
       );
       if (provider !== 'both') return remote;
@@ -393,5 +393,5 @@ export async function getArtistTopTracks(artist: string, limit = 10): Promise<Un
 export async function getTopTags(limit = 40): Promise<string[]> {
   const provider = getProvider();
   if (!hasLfm() || provider === 'audiodb' || provider === 'local') return [];
-  return lfmTopTags({ apiKey: getLfmKey(), limit });
+  return lfmTopTags({ limit });
 }

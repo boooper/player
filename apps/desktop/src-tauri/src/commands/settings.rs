@@ -3,18 +3,18 @@ use tauri::State;
 use crate::AppState;
 
 const ALLOWED_KEYS: &[&str] = &[
-    "LASTFM_API_KEY",
-    "LASTFM_SHARED_SECRET",
     "RECOMMENDATION_PROVIDER",
     "METADATA_PROVIDER",
     "SUBSONIC_BASE_URL",
     "SUBSONIC_USERNAME",
     "SUBSONIC_USE_PASSWORD_AUTH",
     "SUBSONIC_PASSWORD",
+    "LASTFM_API_KEY",
+    "LASTFM_SHARED_SECRET",
     "LASTFM_SESSION_KEY",
     "LASTFM_USERNAME",
-    "LISTENBRAINZ_USERNAME",
     "LISTENBRAINZ_TOKEN",
+    "LISTENBRAINZ_USERNAME",
     "VOLUME",
     "SHUFFLE",
     "SMART_SHUFFLE",
@@ -39,7 +39,9 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<HashMap<String, String
     let mut map = HashMap::new();
     for row in rows {
         let (k, v) = row.map_err(|e| e.to_string())?;
-        map.insert(k, v);
+        if ALLOWED_KEYS.contains(&k.as_str()) {
+            map.insert(k, v);
+        }
     }
     Ok(map)
 }
@@ -49,9 +51,10 @@ pub fn update_settings(
     state: State<'_, AppState>,
     updates: HashMap<String, String>,
 ) -> Result<Vec<String>, String> {
+    const MAX_VALUE_LEN: usize = 2048;
     let valid: Vec<(String, String)> = updates
         .into_iter()
-        .filter(|(k, _)| ALLOWED_KEYS.contains(&k.as_str()))
+        .filter(|(k, v)| ALLOWED_KEYS.contains(&k.as_str()) && v.len() <= MAX_VALUE_LEN)
         .collect();
 
     if valid.is_empty() {

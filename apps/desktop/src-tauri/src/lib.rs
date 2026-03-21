@@ -166,6 +166,22 @@ pub fn run() {
             commands::playback::playback_status,
             commands::playback::playback_is_cached,
             commands::playback::playback_cached_ids,
+            // external metadata & recommendation providers
+            commands::providers::audiodb_artist,
+            commands::providers::lfm_chart_top_artists,
+            commands::providers::lfm_artist_search,
+            commands::providers::lfm_chart_top_tracks,
+            commands::providers::lfm_track_search,
+            commands::providers::lfm_artist_top_tracks,
+            commands::providers::lfm_tag_top_tags,
+            commands::providers::lfm_track_top_tags,
+            commands::providers::lfm_artist_info,
+            commands::providers::lfm_similar_tracks,
+            commands::providers::lfm_tag_top_tracks,
+            commands::providers::lbz_cf_recommendations,
+            commands::providers::lbz_recording_metadata,
+            commands::providers::lbz_now_playing,
+            commands::providers::lbz_scrobble,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

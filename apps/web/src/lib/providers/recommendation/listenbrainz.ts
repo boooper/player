@@ -1,67 +1,31 @@
-/**
- * ListenBrainz recommendation provider.
- *
- * Uses the collaborative-filter (CF) recommendation endpoint to fetch
- * personalised track recommendations for a ListenBrainz user, then
- * enriches the results with recording metadata via the metadata API.
- *
- * Also provides scrobbling (submit-listens) using the user's API token.
- *
- * Endpoints used:
- *   GET  https://api.listenbrainz.org/1/cf/recommendation/user/{username}/recording
- *   POST https://api.listenbrainz.org/1/metadata/recording/
- *   POST https://api.listenbrainz.org/1/submit-listens
- */
-
+import { invoke } from '@tauri-apps/api/core';
 import type { UnifiedRecommendation as TrackRecommendation } from '$lib/data/types';
-
-const LBZ_API = 'https://api.listenbrainz.org/1';
 
 function normalize(value: string): string {
 	return value.trim().toLowerCase();
 }
 
 /**
- * Fetch personalised track recommendations from ListenBrainz for the given user.
- * The seed artist/title are not used — LBz CF recommendations are based on the
- * user's full listening history, making them naturally personalised.
+ * Fetch personalised track recommendations from ListenBrainz.
+ * The username is read from app settings in Rust.
  */
 export async function fetchListenBrainzRecommendations({
-	username,
 	likedArtists = [],
 	limit = 12
 }: {
-	username: string;
 	likedArtists?: string[];
 	limit?: number;
-}): Promise<TrackRecommendation[]> {
-	if (!username.trim()) throw new Error('ListenBrainz username is required');
-
+} = {}): Promise<TrackRecommendation[]> {
 	// Fetch more than needed to account for metadata lookup gaps
 	const fetchCount = Math.max(limit * 4, 50);
-	const recResp = await fetch(
-		`${LBZ_API}/cf/recommendation/user/${encodeURIComponent(username.trim())}/recording?count=${fetchCount}`
-	);
-	if (!recResp.ok) {
-		if (recResp.status === 404)
-			throw new Error(`ListenBrainz user "${username}" not found`);
-		throw new Error(`ListenBrainz request failed with status ${recResp.status}`);
-	}
-	const recData = await recResp.json();
+	const recData = await invoke<any>('lbz_cf_recommendations', { count: fetchCount });
+
 	const mbids: Array<{ recording_mbid: string; score: number }> =
 		recData?.payload?.mbids ?? [];
 	if (mbids.length === 0) return [];
 
-	// Look up recording metadata for the returned MBIDs
 	const mbidList = mbids.map((m) => m.recording_mbid);
-	const metaResp = await fetch(`${LBZ_API}/metadata/recording/`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ recording_mbids: mbidList })
-	});
-	if (!metaResp.ok)
-		throw new Error(`ListenBrainz metadata request failed with status ${metaResp.status}`);
-	const meta: Record<string, any> = await metaResp.json();
+	const meta: Record<string, any> = await invoke('lbz_recording_metadata', { mbids: mbidList });
 
 	const liked = new Set(likedArtists.map(normalize));
 	const maxScore = mbids[0]?.score || 1;
@@ -98,67 +62,41 @@ export async function fetchListenBrainzRecommendations({
 
 // ── Scrobbling ────────────────────────────────────────────────────────────────
 
-function submitListen(
-	token: string,
-	listenType: 'single' | 'playing_now',
-	payload: {
-		artist: string;
-		title: string;
-		album?: string;
-		duration?: number;
-		listenedAt?: number;
-	}
-): void {
-	if (!token.trim()) return;
-
-	const trackMeta: Record<string, unknown> = {
-		artist_name: payload.artist,
-		track_name: payload.title,
-		...(payload.album ? { release_name: payload.album } : {}),
-		...(payload.duration
-			? { additional_info: { duration_ms: Math.round(payload.duration * 1000) } }
-			: {})
-	};
-
-	const listen: Record<string, unknown> = { track_metadata: trackMeta };
-	if (listenType === 'single' && payload.listenedAt != null) {
-		listen.listened_at = payload.listenedAt;
-	}
-
-	fetch(`${LBZ_API}/submit-listens`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Token ${token.trim()}`
-		},
-		body: JSON.stringify({ listen_type: listenType, payload: [listen] })
-	}).catch(() => undefined);
-}
-
 /**
  * Submit a "playing now" notification to ListenBrainz (fire-and-forget).
+ * The token is read from app settings in Rust.
  */
 export function lbzNowPlaying(
-	token: string,
 	artist: string,
 	title: string,
 	album?: string,
 	duration?: number
 ): void {
-	submitListen(token, 'playing_now', { artist, title, album, duration });
+	invoke('lbz_now_playing', {
+		artist,
+		title,
+		album: album ?? null,
+		durationMs: duration != null ? Math.round(duration * 1000) : null
+	}).catch(() => undefined);
 }
 
 /**
  * Submit a completed listen to ListenBrainz (fire-and-forget).
+ * The token is read from app settings in Rust.
  * @param listenedAt Unix timestamp (seconds) when the track started playing.
  */
 export function lbzScrobble(
-	token: string,
 	artist: string,
 	title: string,
 	listenedAt: number,
 	album?: string,
 	duration?: number
 ): void {
-	submitListen(token, 'single', { artist, title, album, duration, listenedAt });
+	invoke('lbz_scrobble', {
+		artist,
+		title,
+		listenedAt,
+		album: album ?? null,
+		durationMs: duration != null ? Math.round(duration * 1000) : null
+	}).catch(() => undefined);
 }

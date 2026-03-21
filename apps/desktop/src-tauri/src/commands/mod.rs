@@ -11,6 +11,7 @@ pub mod playback;
 pub mod play_history;
 pub mod plex;
 pub mod profiles;
+pub mod providers;
 pub mod settings;
 pub mod stats;
 pub mod subsonic;
