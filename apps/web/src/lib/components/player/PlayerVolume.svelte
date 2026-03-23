@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Volume2, VolumeX } from '@lucide/svelte';
   import { Slider } from '$lib/components/ui';
+  import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
   import { volume } from '$lib/stores/player';
   import { saveVolume } from '$lib/servers';
   import { createPlayerVolumeController } from '$lib/components/player/player-volume-controller.svelte';
@@ -79,18 +80,16 @@
   aria-label="Volume"
   use:wheelVolume
 >
-  <button
-    type="button"
-    onclick={() => controller.toggleMute(effectiveVolume)}
-    aria-label={isMuted ? 'Unmute' : 'Mute'}
-    class="player-volume-button"
-  >
-    {#if isMuted}
-      <VolumeX class="size-[18px]" />
-    {:else}
-      <Volume2 class="size-[18px]" />
-    {/if}
-  </button>
+  <Tooltip>
+    <TooltipTrigger>
+      {#snippet child({ props })}
+        <button {...props} type="button" onclick={() => controller.toggleMute(effectiveVolume)} aria-label={isMuted ? 'Unmute' : 'Mute'} class="player-volume-button">
+          {#if isMuted}<VolumeX class="size-[18px]" />{:else}<Volume2 class="size-[18px]" />{/if}
+        </button>
+      {/snippet}
+    </TooltipTrigger>
+    <TooltipContent side="top" sideOffset={6}>{isMuted ? 'Unmute' : 'Mute'}</TooltipContent>
+  </Tooltip>
 
   <div class="player-volume-shell">
     <Slider

@@ -1,13 +1,15 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { Clock, X } from '@lucide/svelte';
+  import { Clock, X, Play } from '@lucide/svelte';
 
   import { searchBundle, type SearchBundlePayload, type Song } from '$lib/servers';
-  import { focusTrack, playQueue } from '$lib/stores/player';
-  import { Badge, Button } from '$lib/components/ui';
+  import { focusTrack, playQueue, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { SongRow, SongCard, AlbumCard, ArtistCard } from '$lib/components/media';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
-  import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
+  import {
+    Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
+  } from '$lib/components/ui/carousel';
   import { readUiJson, writeUiJson } from '$lib/ui-storage';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { libraryRefresh } from '$lib/stores/ui-state';
@@ -18,7 +20,6 @@
   let loading = $state(false);
   let error = $state('');
   let results = $state<SearchBundlePayload>({ songs: [], albums: [], recommendations: [] });
-  let selectedSongId = $state<string | null>(null);
   let lastExecutedQuery = '';
 
   const RECENT_KEY = 'madrify_recent_searches';
@@ -29,16 +30,12 @@
   async function loadRecentSearches() {
     recentSearches = await readUiJson<string[]>(RECENT_KEY, [], [LEGACY_RECENT_KEY]);
   }
-
   function removeRecentSearch(q: string) {
     const updated = recentSearches.filter((r) => r !== q);
     recentSearches = updated;
     void writeUiJson(RECENT_KEY, updated, [LEGACY_RECENT_KEY]);
   }
-
-  $effect(() => {
-    loadRecentSearches();
-  });
+  $effect(() => { loadRecentSearches(); });
 
   async function runQuerySearch() {
     const refresh = $libraryRefresh;
@@ -50,23 +47,16 @@
     await loadSearch(query);
   }
 
-  function initials(name: string): string {
-    return name
-      .split(' ')
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() ?? '')
-      .join('');
+  function initials(name: string) {
+    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
   }
 
   async function loadSearch(queryText: string) {
     if (!queryText.trim()) return;
     const loadVersion = ++searchLoadVersion;
-
     loading = true;
     error = '';
     results = { songs: [], albums: [], recommendations: [] };
-    selectedSongId = null;
 
     try {
       const nextResults = await searchBundle(queryText, 24, 12, 16);
@@ -75,22 +65,14 @@
 
       if (results.songs[0]) {
         const song = results.songs[0];
-        selectedSongId = song.id;
-        focusTrack.set({
-          title: song.title,
-          artist: song.artist,
-          imageUrl: song.coverArtUrl,
-          source: 'library',
-          album: song.album
-        });
+        focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
       }
-
       if (!results.songs.length && !results.albums.length && !results.recommendations.length) {
         error = 'No results found for this search.';
       }
     } catch (err) {
       if (loadVersion !== searchLoadVersion) return;
-      error = err instanceof Error ? err.message : 'Search failed.';
+      error = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Search failed.';
     } finally {
       if (loadVersion !== searchLoadVersion) return;
       loading = false;
@@ -102,183 +84,251 @@
     const refresh = $libraryRefresh;
     const metadataProvider = $backendSettings.metadataProvider;
     const recommendationProvider = $backendSettings.recommendationProvider;
-    void queryText;
-    void refresh;
-    void metadataProvider;
-    void recommendationProvider;
+    void queryText; void refresh; void metadataProvider; void recommendationProvider;
     if (!query) {
       lastExecutedQuery = '';
       results = { songs: [], albums: [], recommendations: [] };
-      selectedSongId = null;
       error = '';
       return;
     }
     void runQuerySearch();
   });
 
-  function pick(song: Song) {
-    selectedSongId = song.id;
-    focusTrack.set({
-      title: song.title,
-      artist: song.artist,
-      imageUrl: song.coverArtUrl,
-      source: 'library',
-      album: song.album
-    });
-    const startIndex = results.songs.findIndex((item) => item.id === song.id);
-    if (startIndex >= 0) {
-      playQueue(results.songs, startIndex);
-    } else {
-      playQueue([song], 0);
-    }
+  function playSong(index: number) {
+    playQueue(results.songs, index);
+    focusTrack.set({ title: results.songs[index].title, artist: results.songs[index].artist, imageUrl: results.songs[index].coverArtUrl, source: 'library', album: results.songs[index].album });
   }
 
   function playRecommendation(index: number) {
     if (!results.recommendations.length) return;
     const song = results.recommendations[index];
-    focusTrack.set({
-      title: song.title,
-      artist: song.artist,
-      imageUrl: song.coverArtUrl,
-      source: 'library',
-      album: song.album
-    });
+    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
     playQueue(results.recommendations, index);
   }
+
+  const topResult = $derived(results.songs[0] ?? null);
+  const songRows = $derived(results.songs.slice(0, 5));
+  const isTopActive = $derived($queue[$currentIndex]?.id === topResult?.id);
+
+  const artists = $derived(() => {
+    const seen = new Set<string>();
+    const list: { name: string; image: string }[] = [];
+    for (const song of [...results.songs, ...results.recommendations]) {
+      if (!seen.has(song.artist)) {
+        seen.add(song.artist);
+        list.push({ name: song.artist, image: song.coverArtUrl });
+      }
+    }
+    return list;
+  });
 </script>
 
-<div class="mb-4 flex items-center justify-between gap-3">
-  <h2 class="text-2xl font-bold tracking-tight">Search</h2>
-  {#if query}
-    <p class="text-sm text-muted-foreground">Results for: {query}</p>
-  {/if}
-</div>
-
+<!-- ── No query ─────────────────────────────────────────────────────── -->
 {#if !query}
   {#if recentSearches.length > 0}
     <div class="page-section mb-6">
-      <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recent searches</h3>
-      <div class="divide-y divide-border overflow-hidden rounded-lg border border-input">
+      <p class="section-label">Recent</p>
+      <div class="glass-panel overflow-hidden rounded-2xl">
         {#each recentSearches as term, index (term)}
-          <div class="flex items-center">
+          <div class="flex items-center border-b border-white/[0.05] last:border-b-0">
             <button
-              class="stagger-row flex flex-1 items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
+              class="glass-row stagger-row flex flex-1 items-center gap-3 px-4 py-3 text-left"
               style:--stagger-index={index}
               onclick={() => goto(`/search?q=${encodeURIComponent(term)}`)}
             >
-              <Clock class="size-4 shrink-0 text-muted-foreground" />
+              <Clock class="size-3.5 shrink-0 text-white/30" />
               <span class="text-sm font-medium">{term}</span>
             </button>
             <button
-              class="shrink-0 px-3 text-muted-foreground transition hover:text-foreground"
+              class="shrink-0 px-4 text-white/20 transition-colors hover:text-white/60"
               aria-label="Remove"
               onclick={() => removeRecentSearch(term)}
             >
-              <X class="size-4" />
+              <X class="size-3.5" />
             </button>
           </div>
         {/each}
       </div>
     </div>
   {:else}
-    <p class="text-sm text-muted-foreground">Enter a query in the top bar to search.</p>
+    <p class="text-sm text-white/30">Enter a query in the top bar to search.</p>
   {/if}
+
+<!-- ── Has query ──────────────────────────────────────────────────────── -->
 {:else}
   {#if error}
-    <p class="mb-3 text-sm text-destructive">{error}</p>
+    <div class="mb-6 rounded-xl border border-red-500/20 px-4 py-3" style="background:rgba(239,68,68,0.08)">
+      <p class="text-sm text-red-400">{error}</p>
+    </div>
   {/if}
 
-  <div class="mb-2 flex items-center justify-between">
-    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Songs</h3>
-    {#if loading}
-      <p class="text-sm text-muted-foreground">Loading...</p>
-    {/if}
-  </div>
-  <div class="page-section mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
-    {#each results.songs as song, index (song.id)}
-      <SongContextMenu {song} onplay={() => pick(song)}>
-        <button
-          class={`stagger-row w-full ${selectedSongId === song.id
-            ? 'flex items-center gap-3 bg-accent px-3 py-2.5 text-left ring-1 ring-inset ring-primary'
-            : 'flex items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent'}`}
-          style:--stagger-index={index}
-          onclick={() => pick(song)}
-        >
-          {#if song.coverArtUrl}
-            <img class="h-9 w-9 shrink-0 rounded object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+  <!-- Top result + Songs -->
+  {#if loading || results.songs.length > 0}
+    <div class="mb-8 grid gap-5" style="grid-template-columns: 220px 1fr">
+
+      <!-- Top Result -->
+      <div>
+        <p class="section-label">Top result</p>
+        {#if loading}
+          <div class="glass-panel rounded-2xl p-5">
+            <div class="mb-4 h-[88px] w-[88px] animate-pulse rounded-xl" style="background:rgba(255,255,255,0.07)"></div>
+            <div class="mb-2 h-5 w-3/4 animate-pulse rounded-full" style="background:rgba(255,255,255,0.07)"></div>
+            <div class="h-3 w-1/2 animate-pulse rounded-full" style="background:rgba(255,255,255,0.04)"></div>
+          </div>
+        {:else if topResult}
+          <SongContextMenu song={topResult} onplay={() => playSong(0)}>
+            <button
+              class="top-result-card glass-panel w-full rounded-2xl p-5 text-left"
+              class:top-result-active={isTopActive}
+              onclick={() => isTopActive ? togglePlayRequest.update(n => n + 1) : playSong(0)}
+            >
+              {#if topResult.coverArtUrl}
+                <img class="mb-4 h-[88px] w-[88px] rounded-xl object-cover shadow-xl" src={topResult.coverArtUrl} alt={topResult.title} />
+              {:else}
+                <div class="mb-4 flex h-[88px] w-[88px] items-center justify-center rounded-xl bg-gradient-to-br from-white/15 to-white/5 text-2xl font-bold text-white/40 shadow-xl">
+                  {initials(topResult.title)}
+                </div>
+              {/if}
+              <p class="mb-0.5 line-clamp-2 text-xl font-bold leading-tight" class:text-primary={isTopActive}>{topResult.title}</p>
+              <p class="truncate text-sm text-white/50">{topResult.artist}</p>
+              <span class="mt-3 inline-block rounded-full border border-white/10 px-2.5 py-0.5 text-xs text-white/35" style="background:rgba(255,255,255,0.05)">Song</span>
+              <div class="play-fab flex h-10 w-10 items-center justify-center rounded-full shadow-xl" style="background:hsl(var(--primary))">
+                {#if isTopActive && $isPlaying}
+                  <svg class="size-4 fill-white text-white" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                {:else}
+                  <Play class="size-4 translate-x-px fill-white text-white" />
+                {/if}
+              </div>
+            </button>
+          </SongContextMenu>
+        {/if}
+      </div>
+
+      <!-- Songs list using SongRow -->
+      <div>
+        <p class="section-label">Songs</p>
+        <div class="glass-panel overflow-hidden rounded-2xl px-1 py-1">
+          {#if loading}
+            {#each { length: 5 } as _, i}
+              <div class="flex items-center gap-3 px-3 py-2.5">
+                <div class="h-10 w-10 shrink-0 animate-pulse rounded-lg" style="background:rgba(255,255,255,0.07)"></div>
+                <div class="flex-1 space-y-2">
+                  <div class="h-2.5 animate-pulse rounded-full" style="width:{55+(i*13)%35}%;background:rgba(255,255,255,0.07)"></div>
+                  <div class="h-2 animate-pulse rounded-full" style="width:{28+(i*11)%22}%;background:rgba(255,255,255,0.04)"></div>
+                </div>
+                <div class="h-2 w-7 shrink-0 animate-pulse rounded-full" style="background:rgba(255,255,255,0.04)"></div>
+              </div>
+            {/each}
           {:else}
-            <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
-              {initials(song.title)}
-            </div>
+            {#each songRows as song, i (song.id)}
+              <SongRow {song} index={i} onplay={() => playSong(i)} staggerIndex={i} />
+            {/each}
           {/if}
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <p class="whitespace-normal break-words text-sm font-semibold leading-tight">{song.title}</p>
-              <SongTechBadge id={song.id} audioFormat={song.audioFormat} bitrateKbps={song.bitrateKbps} compact />
-            </div>
-            <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
-          </div>
-        </button>
-      </SongContextMenu>
-    {/each}
-  </div>
-
-  {#if results.albums.length > 0}
-    <div class="mb-2 flex items-center justify-between">
-      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Albums</h3>
-    </div>
-    <div class="page-section mb-6 divide-y divide-border overflow-hidden rounded-lg border border-input">
-      {#each results.albums as album, index (album.id)}
-        <AlbumContextMenu {album}>
-          <button
-            class="stagger-row flex w-full items-center gap-3 bg-secondary px-3 py-2.5 text-left transition hover:bg-accent"
-            style:--stagger-index={index}
-            onclick={() => goto(`/album/${encodeURIComponent(album.id)}`)}
-          >
-            {#if album.coverArtUrl}
-              <img class="h-10 w-10 shrink-0 rounded object-cover" src={album.coverArtUrl} alt={album.name} loading="lazy" />
-            {:else}
-              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
-                {initials(album.name)}
-              </div>
-            {/if}
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-semibold">{album.name}</p>
-              <p class="truncate text-xs text-muted-foreground">{album.artist}</p>
-            </div>
-            <Badge variant="outline">Album</Badge>
-          </button>
-        </AlbumContextMenu>
-      {/each}
+        </div>
+      </div>
     </div>
   {/if}
 
-  {#if results.recommendations.length > 0}
-    <div class="mb-2 flex items-center justify-between">
-      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Recommendations</h3>
+  <!-- Artists carousel -->
+  {#if artists().length > 0}
+    <div class="mb-8">
+      <p class="section-label">Artists</p>
+      <Carousel opts={{ align: 'start', dragFree: true }}>
+        <CarouselContent>
+          {#each artists() as artist (artist.name)}
+            <CarouselItem class="basis-[120px]">
+              <ArtistCard name={artist.name} image={artist.image} />
+            </CarouselItem>
+          {/each}
+        </CarouselContent>
+        <CarouselPrevious />
+        <CarouselNext />
+      </Carousel>
     </div>
-    <div class="page-section divide-y divide-border overflow-hidden rounded-lg border border-input">
-      {#each results.recommendations as song, index (song.id)}
-        <SongContextMenu {song} onplay={() => playRecommendation(index)}>
-          <div class="stagger-row flex items-center gap-3 bg-secondary px-3 py-2.5" style:--stagger-index={index}>
-            {#if song.coverArtUrl}
-              <img class="h-9 w-9 shrink-0 rounded object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
-            {:else}
-              <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold">
-                {initials(song.title)}
-              </div>
-            {/if}
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <p class="whitespace-normal break-words text-sm font-semibold leading-tight">{song.title}</p>
-                <SongTechBadge id={song.id} audioFormat={song.audioFormat} bitrateKbps={song.bitrateKbps} compact />
-              </div>
-              <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
-            </div>
-            <Button size="sm" onclick={() => playRecommendation(index)}>Play</Button>
-          </div>
-        </SongContextMenu>
-      {/each}
+  {/if}
+
+  <!-- Albums carousel -->
+  {#if results.albums.length > 0}
+    <div class="mb-8">
+      <p class="section-label">Albums</p>
+      <Carousel opts={{ align: 'start', dragFree: true }}>
+        <CarouselContent>
+          {#each results.albums as album (album.id)}
+            <CarouselItem class="basis-[160px]">
+              <AlbumCard {album} />
+            </CarouselItem>
+          {/each}
+        </CarouselContent>
+        <CarouselPrevious />
+        <CarouselNext />
+      </Carousel>
+    </div>
+  {/if}
+
+  <!-- Recommendations carousel -->
+  {#if results.recommendations.length > 0}
+    <div class="mb-8">
+      <p class="section-label">Recommended</p>
+      <Carousel opts={{ align: 'start', dragFree: true }}>
+        <CarouselContent>
+          {#each results.recommendations as song, i (song.id)}
+            <CarouselItem class="basis-[160px]">
+              <SongCard {song} onplay={() => playRecommendation(i)} />
+            </CarouselItem>
+          {/each}
+        </CarouselContent>
+        <CarouselPrevious />
+        <CarouselNext />
+      </Carousel>
     </div>
   {/if}
 {/if}
+
+<style>
+  .section-label {
+    margin-bottom: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(255, 255, 255, 0.3);
+  }
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(12px);
+  }
+  .glass-row {
+    transition: background 150ms ease;
+  }
+  .glass-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  /* Top result */
+  .top-result-card {
+    position: relative;
+    min-height: 200px;
+    transition: background 150ms ease;
+  }
+  .top-result-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .top-result-active {
+    background: hsl(var(--primary) / 0.1);
+    border-color: hsl(var(--primary) / 0.25);
+  }
+  .play-fab {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 200ms ease, transform 200ms ease;
+  }
+  .top-result-card:hover .play-fab,
+  .top-result-active .play-fab {
+    opacity: 1;
+    transform: translateY(0);
+  }
+</style>

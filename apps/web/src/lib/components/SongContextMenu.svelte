@@ -1,13 +1,13 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { Heart, HeartOff, ListStart, ListEnd, ListMinus, ListMusic, Play, Radio, User, Disc3 } from '@lucide/svelte';
+  import { Heart, HeartOff, ListStart, ListEnd, ListMinus, ListMusic, Play, Wand2, User, Disc3 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
   import {
     appendToQueue,
     playNextInQueue,
-    startRadio,
+    startMix,
     subsonicPlaylists,
     starredSongIds
   } from '$lib/stores/player';
@@ -33,21 +33,21 @@
 
   const isStarred = $derived($starredSongIds.has(song.id));
 
-  async function launchRadio() {
+  async function launchMix() {
     if (!lastFmApiKey) {
       toast.error('Last.fm API key not configured');
       return;
     }
-    const toastId = toast.loading(`Building radio for "${song.title}"…`);
+    const toastId = toast.loading(`Building mix for "${song.title}"…`);
     try {
-      const { queued } = await startRadio(song, lastFmApiKey);
+      const { queued } = await startMix(song, lastFmApiKey);
       if (queued === 0) {
         toast.warning('No similar tracks found', { id: toastId, description: 'Try a more popular song.' });
       } else {
-        toast.success(`Radio started`, { id: toastId, description: `${song.title} + ${queued} similar tracks` });
+        toast.success(`Mix started`, { id: toastId, description: `${song.title} + ${queued} similar tracks` });
       }
     } catch {
-      toast.error('Failed to build radio', { id: toastId });
+      toast.error('Failed to build mix', { id: toastId });
     }
   }
 
@@ -98,7 +98,7 @@
     {#if onplay}
       <ContextMenu.Item onclick={onplay}><Play />Play now</ContextMenu.Item>
     {/if}
-    <ContextMenu.Item onclick={launchRadio}><Radio />Start radio</ContextMenu.Item>
+    <ContextMenu.Item onclick={launchMix}><Wand2 />Start mix</ContextMenu.Item>
     <ContextMenu.Item onclick={() => playNextInQueue(song)}><ListStart />Play next</ContextMenu.Item>
     <ContextMenu.Item onclick={() => appendToQueue([song])}><ListEnd />Add to queue</ContextMenu.Item>
     {#if onremove}

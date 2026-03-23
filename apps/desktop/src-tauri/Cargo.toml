@@ -57,6 +57,7 @@ rustfm-scrobble = "1.1.1"
 musixmatch-inofficial = "0.4.0"
 genius_lyrics = "1.0.4"
 regex = "1"
+unicode-normalization = "0.1"
 if-addrs = "0.13"
 rust_cast = { version = "0.21.0", features = ["thread_safe"] }
 rustls = { version = "0.23", features = ["ring"] }

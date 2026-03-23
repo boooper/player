@@ -13,6 +13,7 @@
   import { initDrpc } from '$lib/drpc';
   import {
     fetchAppSettings,
+    getActiveServerType,
     fetchListenBrainzToken,
     savePlaybackPrefs,
     fetchLikedArtists,
@@ -46,7 +47,7 @@
     repeatMode,
   } from '$lib/stores/player';
   import { backendSettings } from '$lib/stores/backend-settings';
-  import { libraryRefresh } from '$lib/stores/ui-state';
+  import { libraryRefresh, activeServerType } from '$lib/stores/ui-state';
   import {
     Button,
     ScrollArea,
@@ -59,7 +60,7 @@
     ResizablePanel,
     ResizablePanelGroup,
   } from '$lib/components/ui';
-  import { TooltipProvider } from '$lib/components/ui/tooltip';
+  import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
 
   let { children } = $props();
 
@@ -93,6 +94,14 @@
   }
 
   const parsedLyrics = $derived(lyricsData?.syncedLyrics ? parseLrc(lyricsData.syncedLyrics) : []);
+
+  function lyricLineClass(i: number): string {
+    const d = Math.abs(i - currentLyricIdx);
+    if (i === currentLyricIdx) return 'bg-white/[0.03] text-[28px] font-extrabold text-foreground';
+    if (d === 1) return 'text-xl font-semibold text-foreground/35';
+    if (d === 2) return 'text-lg font-medium text-foreground/20';
+    return 'text-base font-medium text-foreground/10 hover:text-foreground/30';
+  }
 
   const currentLyricIdx = $derived.by(() => {
     if (!parsedLyrics.length) return -1;
@@ -141,7 +150,8 @@
     try {
       const [settings, lbzToken] = await Promise.all([
         fetchAppSettings(),
-        fetchListenBrainzToken().catch(() => '')
+        fetchListenBrainzToken().catch(() => ''),
+        getActiveServerType().then((t) => activeServerType.set(t)).catch(() => {}),
       ]);
       backendSettings.update((current) => ({
         ...current,
@@ -185,17 +195,27 @@
 
   $effect(() => {
     const v = $libraryRefresh;
-    if (v > 0) reloadLibraryData();
+    if (v > 0) {
+      reloadLibraryData();
+      getActiveServerType().then((t) => activeServerType.set(t)).catch(() => {});
+    }
   });
+
+  function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([
+      p,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+  }
 
   async function reloadLibraryData() {
     loading = true;
     error = '';
     const [likedResult, playlistsResult, starredResult, healthResult] = await Promise.allSettled([
-      fetchLikedArtists(),
-      fetchPlaylists(),
-      fetchStarredSongs(),
-      fetchServiceHealth()
+      withTimeout(fetchLikedArtists(), 15_000),
+      withTimeout(fetchPlaylists(), 15_000),
+      withTimeout(fetchStarredSongs(), 15_000),
+      withTimeout(fetchServiceHealth(), 10_000),
     ]);
 
     try {
@@ -329,6 +349,7 @@
   });
 </script>
 
+<TooltipProvider>
 <!-- Single app background — everything else is glass on top of this -->
 <div class="app-bg" aria-hidden="true"></div>
 
@@ -354,11 +375,23 @@
 
   <!-- Nav controls (non-draggable) -->
   <div class="flex shrink-0 items-center gap-0.5 px-2">
-    <Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.back()}><ChevronLeft class="size-3.5" /></Button>
-    <Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.forward()}><ChevronRight class="size-3.5" /></Button>
+    <Tooltip>
+      <TooltipTrigger>{#snippet child({ props })}<Button {...props} variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.back()}><ChevronLeft class="size-3.5" /></Button>{/snippet}</TooltipTrigger>
+      <TooltipContent>Back</TooltipContent>
+    </Tooltip>
+    <Tooltip>
+      <TooltipTrigger>{#snippet child({ props })}<Button {...props} variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" onclick={() => window.history.forward()}><ChevronRight class="size-3.5" /></Button>{/snippet}</TooltipTrigger>
+      <TooltipContent>Forward</TooltipContent>
+    </Tooltip>
     <div class="mx-1.5 h-3.5 w-px bg-white/[0.12]"></div>
-    <a href="/"><Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground"><Home class="size-3.5" /></Button></a>
-    <a href="/settings"><Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground" title="Settings"><Settings class="size-3.5" /></Button></a>
+    <Tooltip>
+      <TooltipTrigger>{#snippet child({ props })}<a href="/" {...props}><Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground"><Home class="size-3.5" /></Button></a>{/snippet}</TooltipTrigger>
+      <TooltipContent>Home</TooltipContent>
+    </Tooltip>
+    <Tooltip>
+      <TooltipTrigger>{#snippet child({ props })}<a href="/settings" {...props}><Button variant="ghost" size="icon" class="size-7 rounded-full text-muted-foreground hover:text-foreground"><Settings class="size-3.5" /></Button></a>{/snippet}</TooltipTrigger>
+      <TooltipContent>Settings</TooltipContent>
+    </Tooltip>
   </div>
 
   <!-- Search bar (non-draggable, centered) -->
@@ -376,38 +409,126 @@
       { label: 'Library', status: subsonicStatus },
       { label: 'Last.fm', status: lastfmStatus },
     ] as svc (svc.label)}
-      <span class="flex items-center gap-1.5" title="{svc.label}: {svc.status}">
-        <span class="size-1.5 rounded-full transition-colors {svc.status === 'online' ? 'bg-emerald-400' : svc.status === 'offline' ? 'bg-rose-400 animate-pulse' : svc.status === 'missing' ? 'bg-amber-400' : 'bg-muted-foreground animate-pulse'}"></span>
-        <span class="text-xs text-muted-foreground">{svc.label}</span>
-      </span>
+      <Tooltip>
+        <TooltipTrigger>
+          {#snippet child({ props })}
+            <span {...props} class="flex cursor-default items-center gap-1.5">
+              <span class="size-1.5 rounded-full transition-colors {svc.status === 'online' ? 'bg-emerald-400' : svc.status === 'offline' ? 'bg-rose-400 animate-pulse' : svc.status === 'missing' ? 'bg-amber-400' : 'bg-muted-foreground animate-pulse'}"></span>
+              <span class="text-xs text-muted-foreground">{svc.label}</span>
+            </span>
+          {/snippet}
+        </TooltipTrigger>
+        <TooltipContent>{svc.label}: {svc.status}</TooltipContent>
+      </Tooltip>
     {/each}
   </div>
 
   <!-- Windows: custom window controls -->
   {#if runningInTauri && !isMac}
     <div class="flex shrink-0 items-stretch self-stretch">
-      <button
-        class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-white/[0.06] hover:text-foreground"
-        onclick={minimizeWindow}
-        aria-label="Minimize"
-      ><Minus class="size-3.5" /></button>
-      <button
-        class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-white/[0.06] hover:text-foreground"
-        onclick={toggleMaximizeWindow}
-        aria-label={windowMaximized ? 'Restore' : 'Maximize'}
-      >{#if windowMaximized}<Minimize2 class="size-3" />{:else}<Square class="size-3" />{/if}</button>
-      <button
-        class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-rose-500 hover:text-white"
-        onclick={closeWindow}
-        aria-label="Close"
-      ><X class="size-3.5" /></button>
+      <Tooltip>
+        <TooltipTrigger>{#snippet child({ props })}<button {...props} class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-white/[0.06] hover:text-foreground" onclick={minimizeWindow} aria-label="Minimize"><Minus class="size-3.5" /></button>{/snippet}</TooltipTrigger>
+        <TooltipContent>Minimize</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger>{#snippet child({ props })}<button {...props} class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-white/[0.06] hover:text-foreground" onclick={toggleMaximizeWindow} aria-label={windowMaximized ? 'Restore' : 'Maximize'}>{#if windowMaximized}<Minimize2 class="size-3" />{:else}<Square class="size-3" />{/if}</button>{/snippet}</TooltipTrigger>
+        <TooltipContent>{windowMaximized ? 'Restore' : 'Maximize'}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger>{#snippet child({ props })}<button {...props} class="flex w-11 items-center justify-center text-muted-foreground/60 transition-colors hover:bg-rose-500 hover:text-white" onclick={closeWindow} aria-label="Close"><X class="size-3.5" /></button>{/snippet}</TooltipTrigger>
+        <TooltipContent>Close</TooltipContent>
+      </Tooltip>
     </div>
   {/if}
 </header>
 
-<TooltipProvider>
 <SidebarProvider style="margin-top: 3rem; height: calc(100svh - 3rem); min-height: calc(100svh - 3rem); overflow: hidden;">
   <div class="app-shell-main flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+    {#snippet mainPanel()}
+      <ScrollArea class="h-full w-full min-w-0" bind:viewportRef={lyricsScrollRef}>
+          {#if $showLyrics}
+            {@const track = $queue[$currentIndex] ?? null}
+            <div class="relative min-h-full">
+              {#if track?.coverArtUrl}
+                <img src={track.coverArtUrl} class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-[0.06] blur-3xl" aria-hidden="true" alt="" />
+              {/if}
+              <div class="relative px-8 pb-8 pt-10">
+                <div class="mx-auto max-w-2xl">
+                  {#if track}
+                    <div class="mb-10 flex items-center gap-5" style="animation: lyric-header-in 0.4s ease both">
+                      {#if track.coverArtUrl}
+                        <img src={track.coverArtUrl} class="size-16 rounded-xl object-cover shadow-lg ring-1 ring-white/10" alt={track.title} />
+                      {/if}
+                      <div>
+                        <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Lyrics</p>
+                        <p class="text-2xl font-bold leading-tight">{track.title}</p>
+                        <p class="mt-0.5 text-sm text-muted-foreground">{track.artist}</p>
+                        {#if lyricsData?.provider}
+                          <div class="mt-2 flex items-center gap-2">
+                            <span class="rounded-full border border-border/70 bg-background/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{lyricsData.provider}</span>
+                            {#if lyricsData.cached}
+                              <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">Cached</span>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                  {/if}
+                  {#if lyricsLoading}
+                    <div class="flex h-48 items-center justify-center">
+                      <div class="w-full max-w-sm space-y-3">
+                        {#each [1, 0.7, 0.5, 0.8, 0.6] as w, i (i)}
+                          <div class="h-5 animate-pulse rounded-full bg-foreground/10" style="width:{w * 100}%"></div>
+                        {/each}
+                      </div>
+                    </div>
+                  {:else if track && lyricsData?.instrumental}
+                    <div class="flex h-48 items-center justify-center">
+                      <p class="text-sm text-muted-foreground">This track is instrumental.</p>
+                    </div>
+                  {:else if parsedLyrics.length > 0}
+                    <div class="py-4">
+                      {#each parsedLyrics as line, i (line.time)}
+                        <button
+                          type="button"
+                          data-lyric-idx={i}
+                          style="animation: lyric-in 0.35s ease both; animation-delay: {Math.min(i * 18, 400)}ms"
+                          class="group relative mb-2 block w-full cursor-pointer select-none rounded-lg px-4 py-1.5 text-left transition-[font-size,color,opacity,background-color] duration-300 ease-out {lyricLineClass(i)}"
+                          onclick={() => seekRequest.set(line.time)}
+                        >
+                          {#if i === currentLyricIdx}
+                            <span class="absolute left-0 top-1/2 h-[60%] w-[3px] -translate-y-1/2 rounded-full bg-primary transition-all duration-300"></span>
+                          {/if}
+                          {line.text}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else if lyricsData?.plainLyrics}
+                    <div class="py-4" style="animation: lyric-in 0.4s ease both">
+                      {#each lyricsData.plainLyrics.split('\n') as line, i (i)}
+                        <p class="mb-2 text-lg leading-relaxed {line.trim() ? 'text-foreground/70' : 'mb-5'}">{line || '\u00a0'}</p>
+                      {/each}
+                    </div>
+                  {:else if !lyricsLoading && track}
+                    <div class="flex h-48 items-center justify-center">
+                      <p class="text-sm text-muted-foreground">No lyrics found for this track.</p>
+                    </div>
+                  {:else if !track}
+                    <div class="flex h-48 items-center justify-center">
+                      <p class="text-sm text-muted-foreground">Play a track to see lyrics.</p>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {:else}
+            <div class="px-8 pb-8 pt-8">
+              {@render children()}
+            </div>
+          {/if}
+        </ScrollArea>
+    {/snippet}
+
     <ResizablePanelGroup direction="horizontal" autoSaveId="madrify-shell-layout" class="min-h-0 flex-1">
       <ResizablePanel
         defaultSize={18}
@@ -453,197 +574,15 @@
         {#if rightOpen}
           <ResizablePanelGroup direction="horizontal" autoSaveId="madrify-shell-right-panel" class="min-h-0 h-full">
             <ResizablePanel defaultSize={76} minSize={50} class="min-h-0">
-              <ScrollArea class="h-full w-full min-w-0" bind:viewportRef={lyricsScrollRef}>
-                {#if $showLyrics}
-                  {@const track = $queue[$currentIndex] ?? null}
-                  <div class="relative min-h-full">
-                    {#if track?.coverArtUrl}
-                      <img
-                        src={track.coverArtUrl}
-                        class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-[0.06] blur-3xl"
-                        aria-hidden="true"
-                        alt=""
-                      />
-                    {/if}
-                    <div class="relative px-8 pb-8 pt-10">
-                      <div class="mx-auto max-w-2xl">
-                        {#if track}
-                          <div class="mb-10 flex items-center gap-5" style="animation: lyric-header-in 0.4s ease both">
-                            {#if track.coverArtUrl}
-                              <img src={track.coverArtUrl} class="size-16 rounded-xl object-cover shadow-lg ring-1 ring-white/10" alt={track.title} />
-                            {/if}
-                          <div>
-                            <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Lyrics</p>
-                            <p class="text-2xl font-bold leading-tight">{track.title}</p>
-                            <p class="mt-0.5 text-sm text-muted-foreground">{track.artist}</p>
-                            {#if lyricsData?.provider}
-                              <div class="mt-2 flex items-center gap-2">
-                                <span class="rounded-full border border-border/70 bg-background/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                  {lyricsData.provider}
-                                </span>
-                                {#if lyricsData.cached}
-                                  <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
-                                    Cached
-                                  </span>
-                                {/if}
-                              </div>
-                            {/if}
-                          </div>
-                        </div>
-                        {/if}
-                        {#if lyricsLoading}
-                          <div class="flex h-48 items-center justify-center">
-                            <div class="w-full max-w-sm space-y-3">
-                              {#each [1,0.7,0.5,0.8,0.6] as w, i (i)}
-                                <div class="h-5 rounded-full bg-foreground/10 animate-pulse" style="width:{w * 100}%"></div>
-                              {/each}
-                            </div>
-                          </div>
-                        {:else if track && lyricsData?.instrumental}
-                          <div class="flex h-48 items-center justify-center">
-                            <p class="text-sm text-muted-foreground">This track is instrumental.</p>
-                          </div>
-                        {:else if parsedLyrics.length > 0}
-                          <div class="py-4">
-                            {#each parsedLyrics as line, i (line.time)}
-                              <button
-                                type="button"
-                                data-lyric-idx={i}
-                                style="animation: lyric-in 0.35s ease both; animation-delay: {Math.min(i * 18, 400)}ms"
-                                class="group relative mb-2 block w-full cursor-pointer select-none rounded-lg px-4 py-1.5 text-left transition-[font-size,color,opacity,background-color] duration-300 ease-out {i === currentLyricIdx ? 'bg-white/[0.03] text-[28px] font-extrabold text-foreground' : Math.abs(i - currentLyricIdx) === 1 ? 'text-xl font-semibold text-foreground/35' : Math.abs(i - currentLyricIdx) === 2 ? 'text-lg font-medium text-foreground/20' : 'text-base font-medium text-foreground/10 hover:text-foreground/30'}"
-                                onclick={() => seekRequest.set(line.time)}
-                              >
-                                {#if i === currentLyricIdx}
-                                  <span class="absolute left-0 top-1/2 h-[60%] w-[3px] -translate-y-1/2 rounded-full bg-primary transition-all duration-300"></span>
-                                {/if}
-                                {line.text}
-                              </button>
-                            {/each}
-                          </div>
-                        {:else if lyricsData?.plainLyrics}
-                          <div class="py-4" style="animation: lyric-in 0.4s ease both">
-                            {#each lyricsData.plainLyrics.split('\n') as line, i (i)}
-                              <p class="mb-2 text-lg leading-relaxed {line.trim() ? 'text-foreground/70' : 'mb-5'}">{line || '\u00a0'}</p>
-                            {/each}
-                          </div>
-                        {:else if !lyricsLoading && track}
-                          <div class="flex h-48 items-center justify-center">
-                            <p class="text-sm text-muted-foreground">No lyrics found for this track.</p>
-                          </div>
-                        {:else if !track}
-                          <div class="flex h-48 items-center justify-center">
-                            <p class="text-sm text-muted-foreground">Play a track to see lyrics.</p>
-                          </div>
-                        {/if}
-                      </div>
-                    </div>
-                  </div>
-                {:else}
-                  <div class="px-8 pb-8 pt-8">
-                    {@render children()}
-                  </div>
-                {/if}
-              </ScrollArea>
+              {@render mainPanel()}
             </ResizablePanel>
-
             <ResizableHandle />
-
             <ResizablePanel defaultSize={24} minSize={18} maxSize={36} class="min-h-0">
               <NowPlayingPanel open={rightOpen} />
             </ResizablePanel>
           </ResizablePanelGroup>
         {:else}
-          <ScrollArea class="h-full w-full min-w-0" bind:viewportRef={lyricsScrollRef}>
-            {#if $showLyrics}
-              {@const track = $queue[$currentIndex] ?? null}
-              <div class="relative min-h-full">
-                {#if track?.coverArtUrl}
-                  <img
-                    src={track.coverArtUrl}
-                    class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-[0.06] blur-3xl"
-                    aria-hidden="true"
-                    alt=""
-                  />
-                {/if}
-                <div class="relative px-8 pb-8 pt-10">
-                  <div class="mx-auto max-w-2xl">
-                    {#if track}
-                      <div class="mb-10 flex items-center gap-5" style="animation: lyric-header-in 0.4s ease both">
-                        {#if track.coverArtUrl}
-                          <img src={track.coverArtUrl} class="size-16 rounded-xl object-cover shadow-lg ring-1 ring-white/10" alt={track.title} />
-                        {/if}
-                        <div>
-                          <p class="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Lyrics</p>
-                          <p class="text-2xl font-bold leading-tight">{track.title}</p>
-                          <p class="mt-0.5 text-sm text-muted-foreground">{track.artist}</p>
-                          {#if lyricsData?.provider}
-                            <div class="mt-2 flex items-center gap-2">
-                              <span class="rounded-full border border-border/70 bg-background/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                {lyricsData.provider}
-                              </span>
-                              {#if lyricsData.cached}
-                                <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300">
-                                  Cached
-                                </span>
-                              {/if}
-                            </div>
-                          {/if}
-                        </div>
-                      </div>
-                    {/if}
-                    {#if lyricsLoading}
-                      <div class="flex h-48 items-center justify-center">
-                        <div class="w-full max-w-sm space-y-3">
-                          {#each [1,0.7,0.5,0.8,0.6] as w, i (i)}
-                            <div class="h-5 rounded-full bg-foreground/10 animate-pulse" style="width:{w * 100}%"></div>
-                          {/each}
-                        </div>
-                      </div>
-                    {:else if track && lyricsData?.instrumental}
-                      <div class="flex h-48 items-center justify-center">
-                        <p class="text-sm text-muted-foreground">This track is instrumental.</p>
-                      </div>
-                    {:else if parsedLyrics.length > 0}
-                      <div class="py-4">
-                        {#each parsedLyrics as line, i (line.time)}
-                          <button
-                            type="button"
-                            data-lyric-idx={i}
-                            style="animation: lyric-in 0.35s ease both; animation-delay: {Math.min(i * 18, 400)}ms"
-                            class="group relative mb-2 block w-full cursor-pointer select-none rounded-lg px-4 py-1.5 text-left transition-[font-size,color,opacity,background-color] duration-300 ease-out {i === currentLyricIdx ? 'bg-white/[0.03] text-[28px] font-extrabold text-foreground' : Math.abs(i - currentLyricIdx) === 1 ? 'text-xl font-semibold text-foreground/35' : Math.abs(i - currentLyricIdx) === 2 ? 'text-lg font-medium text-foreground/20' : 'text-base font-medium text-foreground/10 hover:text-foreground/30'}"
-                            onclick={() => seekRequest.set(line.time)}
-                          >
-                            {#if i === currentLyricIdx}
-                              <span class="absolute left-0 top-1/2 h-[60%] w-[3px] -translate-y-1/2 rounded-full bg-primary transition-all duration-300"></span>
-                            {/if}
-                            {line.text}
-                          </button>
-                        {/each}
-                      </div>
-                    {:else if lyricsData?.plainLyrics}
-                      <div class="py-4" style="animation: lyric-in 0.4s ease both">
-                        {#each lyricsData.plainLyrics.split('\n') as line, i (i)}
-                          <p class="mb-2 text-lg leading-relaxed {line.trim() ? 'text-foreground/70' : 'mb-5'}">{line || '\u00a0'}</p>
-                        {/each}
-                      </div>
-                    {:else if !lyricsLoading && track}
-                      <div class="flex h-48 items-center justify-center">
-                        <p class="text-sm text-muted-foreground">No lyrics found for this track.</p>
-                      </div>
-                    {:else if !track}
-                      <div class="flex h-48 items-center justify-center">
-                        <p class="text-sm text-muted-foreground">Play a track to see lyrics.</p>
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-              </div>
-            {:else}
-              <div class="px-8 pb-8 pt-8">
-                {@render children()}
-              </div>
-            {/if}
-          </ScrollArea>
+          {@render mainPanel()}
         {/if}
       </ResizablePanel>
     </ResizablePanelGroup>

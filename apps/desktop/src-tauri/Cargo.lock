@@ -3096,6 +3096,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "tokio-native-tls",
+ "unicode-normalization",
  "url",
  "walkdir",
 ]

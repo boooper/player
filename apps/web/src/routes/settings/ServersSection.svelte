@@ -34,6 +34,7 @@
     emby: 'Emby',
     plex: 'Plex',
     local: 'Local Folder',
+    octo_fiesta: 'Octo Fiesta',
   };
 
   let {
@@ -424,7 +425,7 @@
               id="dialog-user"
               type="text"
               bind:value={profileDraft.username}
-              placeholder={profileDraft.serverType === 'local' ? 'Not used for local folders' : profileDraft.serverType === 'plex' ? 'Optional for Plex tokens' : 'admin'}
+              placeholder={profileDraft.serverType === 'local' ? 'Not used for local folders' : profileDraft.serverType === 'plex' ? 'Optional for Plex tokens' : profileDraft.serverType === 'octo_fiesta' ? 'Optional' : 'admin'}
               autocomplete="username"
               class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               disabled={profileDraft.serverType === 'local'}
@@ -432,7 +433,7 @@
           </div>
           <div class="space-y-1.5">
             <label class="text-sm font-medium" for="dialog-pass">
-              {#if profileDraft.serverType === 'local'}
+              {#if profileDraft.serverType === 'local' || profileDraft.serverType === 'octo_fiesta'}
                 Password
               {:else if profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby'}
                 API Key{profileDraft.id !== null ? ' (blank = keep current)' : ''}
@@ -447,8 +448,8 @@
                 id="dialog-pass"
                 type={showDraftPassword ? 'text' : 'password'}
                 bind:value={profileDraft.password}
-                placeholder={profileDraft.serverType === 'local'
-                  ? 'Not used for local folders'
+                placeholder={profileDraft.serverType === 'local' || profileDraft.serverType === 'octo_fiesta'
+                  ? 'Not required'
                   : profileDraft.id !== null
                     ? 'Leave blank to keep current'
                     : (profileDraft.serverType === 'jellyfin' || profileDraft.serverType === 'emby')
@@ -458,7 +459,7 @@
                       : 'Password'}
                 autocomplete="current-password"
                 class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-                disabled={profileDraft.serverType === 'local'}
+                disabled={profileDraft.serverType === 'local' || profileDraft.serverType === 'octo_fiesta'}
               />
               <button
                 type="button"

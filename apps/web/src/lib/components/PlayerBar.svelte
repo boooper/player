@@ -27,6 +27,7 @@
   import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
   import { goto } from '$app/navigation';
   import { getExternalSourceLabel } from '$lib/external-source';
+  import SongContextMenu from '$lib/components/SongContextMenu.svelte';
 
   // ── UI state ──────────────────────────────────────────────────────────────
   let castActive = $state(false);
@@ -47,6 +48,23 @@
   const currentTrack = $derived($queue[$currentIndex] ?? null);
   const isStarred = $derived(currentTrack ? $starredSongIds.has(currentTrack.id) : false);
   const isSmartShuffleTrack = $derived(currentTrack ? $smartShuffleTrackIds.has(currentTrack.id) : false);
+
+  // ── UI class derivations ──────────────────────────────────────────────────
+  const favoriteButtonClass = $derived(
+    `player-favorite-button shrink-0 inline-flex items-center justify-center rounded-full border p-1 transition-colors ${isStarred ? 'border-rose-500/30 bg-rose-500/10 text-rose-500' : 'border-border/50 bg-white/[0.03] text-muted-foreground/60 hover:text-rose-400'}`
+  );
+  const repeatButtonClass = $derived(
+    `player-transport-button ${$repeatMode !== 'off' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`
+  );
+  const lyricsButtonClass = $derived(
+    `player-transport-button ${$showLyrics ? 'text-primary is-active' : 'text-muted-foreground hover:text-foreground'}`
+  );
+  const repeatTooltip = $derived(
+    $repeatMode === 'one' ? 'Repeat: One' : $repeatMode === 'all' ? 'Repeat: All' : 'Repeat: Off'
+  );
+  const externalSourceLabel = $derived(
+    (isBuffering || $queueLoading) && currentTrack ? getExternalSourceLabel(currentTrack.id) : null
+  );
 
   // ── Controllers ───────────────────────────────────────────────────────────
   createPlayerEqController({
@@ -185,6 +203,7 @@
   <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
     <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
+        <SongContextMenu song={currentTrack} triggerClass="contents">
         <button
           class="player-track-art-button shrink-0 cursor-pointer"
           onclick={() => showQueue.update((open) => !open)}
@@ -230,7 +249,7 @@
                   <button
                     {...props}
                     onclick={toggleFavorite}
-                    class="player-favorite-button shrink-0 inline-flex items-center justify-center rounded-full border p-1 transition-colors {isStarred ? 'border-rose-500/30 bg-rose-500/10 text-rose-500' : 'border-border/50 bg-white/[0.03] text-muted-foreground/60 hover:text-rose-400'}"
+                    class={favoriteButtonClass}
                     aria-label={isStarred ? 'Remove from favorites' : 'Add to favorites'}
                   >
                     <Heart class="size-3 {isStarred ? 'fill-rose-500' : ''}" />
@@ -242,9 +261,9 @@
               </TooltipContent>
             </Tooltip>
           </div>
-          {#if (isBuffering || $queueLoading) && getExternalSourceLabel(currentTrack.id)}
+          {#if externalSourceLabel}
             <span class="block truncate text-xs text-sky-300/90 animate-pulse">
-              Fetching from {getExternalSourceLabel(currentTrack.id)}…
+              Fetching from {externalSourceLabel}…
             </span>
           {:else}
             <SongArtistLinks
@@ -254,6 +273,7 @@
             />
           {/if}
         </div>
+        </SongContextMenu>
       {:else}
         <p class="text-sm text-muted-foreground">No track selected</p>
       {/if}
@@ -272,15 +292,10 @@
           onShuffleAlbum={shuffleController.shuffleAlbum}
         />
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="player-transport-button text-muted-foreground hover:text-foreground"
-          onclick={prevTrack}
-          aria-label="Previous track"
-        >
-          <SkipBack class="size-[18px]" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger>{#snippet child({ props })}<Button {...props} variant="ghost" size="icon-sm" class="player-transport-button text-muted-foreground hover:text-foreground" onclick={prevTrack} aria-label="Previous track"><SkipBack class="size-[18px]" /></Button>{/snippet}</TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>Previous track</TooltipContent>
+        </Tooltip>
 
         <Button
           class="player-play-button rounded-full shadow-sm {showPauseButton ? 'is-playing' : ''} {isBuffering || $queueLoading ? 'is-buffering' : ''}"
@@ -296,29 +311,21 @@
           {/if}
         </Button>
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class="player-transport-button text-muted-foreground hover:text-foreground"
-          onclick={nextTrack}
-          aria-label="Next track"
-        >
-          <SkipForward class="size-[18px]" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger>{#snippet child({ props })}<Button {...props} variant="ghost" size="icon-sm" class="player-transport-button text-muted-foreground hover:text-foreground" onclick={nextTrack} aria-label="Next track"><SkipForward class="size-[18px]" /></Button>{/snippet}</TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>Next track</TooltipContent>
+        </Tooltip>
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          class={`player-transport-button ${$repeatMode !== 'off' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-          onclick={cycleRepeatMode}
-          aria-label="Cycle repeat mode"
-        >
-          {#if $repeatMode === 'one'}
-            <Repeat1 class="size-3.5" />
-          {:else}
-            <Repeat class="size-3.5" />
-          {/if}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger>
+            {#snippet child({ props })}
+              <Button {...props} variant="ghost" size="icon-sm" class={repeatButtonClass} onclick={cycleRepeatMode} aria-label="Cycle repeat mode">
+                {#if $repeatMode === 'one'}<Repeat1 class="size-3.5" />{:else}<Repeat class="size-3.5" />{/if}
+              </Button>
+            {/snippet}
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{repeatTooltip}</TooltipContent>
+        </Tooltip>
       </div>
 
       <div class="player-progress-row flex w-full items-center gap-2">
@@ -361,15 +368,10 @@
         onStopCast={castController.stopCast}
       />
 
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        class={`player-transport-button ${$showLyrics ? 'text-primary is-active' : 'text-muted-foreground hover:text-foreground'}`}
-        onclick={() => showLyrics.update((v) => !v)}
-        aria-label="Lyrics"
-      >
-        <MicVocal class="size-[18px]" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger>{#snippet child({ props })}<Button {...props} variant="ghost" size="icon-sm" class={lyricsButtonClass} onclick={() => showLyrics.update((v) => !v)} aria-label="Lyrics"><MicVocal class="size-[18px]" /></Button>{/snippet}</TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>Lyrics</TooltipContent>
+      </Tooltip>
 
       <PlayerVolume {castActive} {castVolume} />
     </div>

@@ -100,6 +100,7 @@ pub fn run() {
             commands::profiles::update_profile,
             commands::profiles::delete_profile,
             commands::profiles::activate_profile,
+            commands::profiles::get_active_server_type,
             commands::plex::plex_begin_auth,
             commands::plex::plex_poll_auth,
             // liked artists

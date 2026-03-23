@@ -21,6 +21,23 @@ const repeatModeRef = fromStore(repeatMode);
 const upNextEnabledRef = fromStore(upNextEnabled);
 const smartShuffleModeRef = fromStore(smartShuffleMode);
 
+const LIKED_ARTISTS_TTL = 60_000;
+let likedArtistsCache: { names: string[]; expiresAt: number } | null = null;
+
+function getCachedLikedArtists(): Promise<string[]> {
+  const now = Date.now();
+  if (likedArtistsCache && likedArtistsCache.expiresAt > now) {
+    return Promise.resolve(likedArtistsCache.names);
+  }
+  return fetchLikedArtists()
+    .then((stored) => {
+      const names = stored.map((a) => a.name);
+      likedArtistsCache = { names, expiresAt: Date.now() + LIKED_ARTISTS_TTL };
+      return names;
+    })
+    .catch(() => [] as string[]);
+}
+
 export function createPlayerUpNextController(options: PlayerUpNextControllerOptions) {
   let upNextFetching = false;
   let lastUpNextSeed = '';
@@ -46,9 +63,7 @@ export function createPlayerUpNextController(options: PlayerUpNextControllerOpti
     lastUpNextSeed = seed;
     upNextFetching = true;
 
-    fetchLikedArtists()
-      .then((stored) => stored.map((a) => a.name))
-      .catch(() => [] as string[])
+    getCachedLikedArtists()
       .then((liked) =>
         getUpNextSongs({ artist: track.artist, title: track.title, likedArtists: liked, limit: 5 })
       )

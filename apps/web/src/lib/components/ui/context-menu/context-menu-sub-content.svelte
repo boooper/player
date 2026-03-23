@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ContextMenu as ContextMenuPrimitive } from "bits-ui";
 	import { cn } from "$lib/utils.js";
+	import ContextMenuPortal from "./context-menu-portal.svelte";
 
 	let {
 		ref = $bindable(null),
@@ -9,12 +10,14 @@
 	}: ContextMenuPrimitive.SubContentProps = $props();
 </script>
 
-<ContextMenuPrimitive.SubContent
-	bind:ref
-	data-slot="context-menu-sub-content"
-	class={cn(
-		"liquid-glass border border-white/[0.09] text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-end-2 data-[side=right]:slide-in-from-start-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] origin-(--bits-context-menu-content-transform-origin) overflow-hidden rounded-2xl p-1.5",
-		className
-	)}
-	{...restProps}
-/>
+<ContextMenuPortal>
+	<ContextMenuPrimitive.SubContent
+		bind:ref
+		data-slot="context-menu-sub-content"
+		class={cn(
+			"liquid-glass border border-white/[0.09] text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-end-2 data-[side=right]:slide-in-from-start-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-h-(--bits-context-menu-content-available-height) min-w-[8rem] origin-(--bits-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-2xl p-1.5",
+			className
+		)}
+		{...restProps}
+	/>
+</ContextMenuPortal>

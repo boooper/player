@@ -14,28 +14,21 @@ import {
   getMetadataProviderSetting,
 } from '$lib/stores/backend-settings';
 import type { MetadataSource, UnifiedArtist, UnifiedArtistInfo, UnifiedSong } from './types';
+import { ttlCache } from '$lib/utils';
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
 const artworkCache = new Map<string, Promise<string>>();
-const metadataCache = new Map<string, { expiresAt: number; promise: Promise<unknown> }>();
+const metaCache = ttlCache();
 const SHORT_TTL = 30_000;
 const DEFAULT_TTL = 5 * 60_000;
 
 function cached<T>(key: string, loader: () => Promise<T>, ttlMs = DEFAULT_TTL): Promise<T> {
-  const now = Date.now();
-  const entry = metadataCache.get(key);
-  if (entry && entry.expiresAt > now) return entry.promise as Promise<T>;
-  const promise = loader().catch((err) => {
-    if (metadataCache.get(key)?.promise === promise) metadataCache.delete(key);
-    throw err;
-  });
-  metadataCache.set(key, { expiresAt: now + ttlMs, promise });
-  return promise;
+  return metaCache.get(key, loader, ttlMs);
 }
 
 export function clearMetadataCaches(): void {
-  metadataCache.clear();
+  metaCache.clear();
   artworkCache.clear();
 }
 

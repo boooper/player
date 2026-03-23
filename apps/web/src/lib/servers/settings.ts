@@ -70,7 +70,7 @@ export async function updateAppSettings(data: {
     EQ_ENABLED: String(data.eqEnabled),
     EQ_PRESET: data.eqPreset,
     EQ_BANDS: JSON.stringify(normalizeEqBands(data.eqBands)),
-    DISCORD_RPC_ENABLED: String(data.discordRpcEnabled)
+    DISCORD_RPC_ENABLED: String(data.discordRpcEnabled),
   };
   if (data.lastFmSharedSecret?.trim()) {
     updates.LASTFM_SHARED_SECRET = data.lastFmSharedSecret.trim();

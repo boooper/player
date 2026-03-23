@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play, Pause, Shuffle, ChevronLeft, ChevronRight, Sparkles, Mic2 } from '@lucide/svelte';
+  import { Play, Pause, Shuffle, Sparkles, Mic2 } from '@lucide/svelte';
+  import { Carousel, CarouselContent, CarouselItem } from '$lib/components/ui/carousel';
+  import type { CarouselAPI } from '$lib/components/ui/carousel/context.js';
+  import { ChevronLeft, ChevronRight } from '@lucide/svelte';
+
+  let discographyApi = $state<CarouselAPI | undefined>(undefined);
 
   import {
     DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
@@ -17,16 +22,16 @@
     type DiscoveryArtistInfo as ArtistInfo,
     type DiscoverySong as LastFmSong
   } from '$lib/discovery';
-  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest, queueLoading } from '$lib/stores/player';
+  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest, queueLoading, queue, currentIndex } from '$lib/stores/player';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
+  import { ArtistCard } from '$lib/components/media';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { mergeAlbums, mergeAlbumSongs, type MergedAlbum } from '$lib/media-merge';
   import { formatClockDuration } from '$lib/utils';
-  import { libraryRefresh } from '$lib/stores/ui-state';
   import { isTauri } from '$lib/tauri';
   import {
     DropdownMenu,
@@ -54,9 +59,9 @@
   let artistLoadVersion = 0;
   const ARTIST_LOAD_TIMEOUT_MS = 12000;
 
-  let carouselEl = $state<HTMLDivElement | null>(null);
-  const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
+const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
   const artistIsActive = $derived($playingFrom.href === artistHref);
+  const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
   const desktopPlayback = isTauri();
 
   function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -130,12 +135,8 @@
   }
 
   $effect(() => {
-    const refresh = $libraryRefresh;
-    const metadataProvider = $backendSettings.metadataProvider;
-    const recommendationProvider = $backendSettings.recommendationProvider;
-    void refresh;
-    void metadataProvider;
-    void recommendationProvider;
+    void $backendSettings.metadataProvider;
+    void $backendSettings.recommendationProvider;
     loadArtist(data.name);
   });
 
@@ -278,11 +279,6 @@
     } else {
       playAllTopTracks();
     }
-  }
-
-  function scrollCarousel(dir: -1 | 1) {
-    if (!carouselEl) return;
-    carouselEl.scrollBy({ left: dir * 220, behavior: 'smooth' });
   }
 
   function fmtListeners(n: number): string {
@@ -452,15 +448,29 @@
     </div>
     <div class="space-y-1">
       {#each visibleTopTracks as { lfm, sub }, i (lfm.id)}
+        {@const isCurrentTrack = sub.id === currentTrackId}
         <SongContextMenu song={sub} onplay={() => playTopTrack(i)}>
           <button
-            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors duration-150 hover:bg-white/5"
+            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
             style:--stagger-index={i}
-            onclick={() => playTopTrack(i)}
+            onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playTopTrack(i)}
           >
-            <span class="w-5 shrink-0 text-center text-sm tabular-nums text-muted-foreground group-hover:hidden">{i + 1}</span>
-            <span class="hidden w-5 shrink-0 place-items-center group-hover:grid">
-              <Play class="size-3.5" fill="currentColor" />
+            <span class="relative w-5 shrink-0 flex items-center justify-center">
+              {#if isCurrentTrack}
+                <span class="flex items-end gap-[2px] transition-all duration-150 group-hover:opacity-0 group-hover:scale-50">
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 10px; animation: equalizer 0.8s ease-in-out infinite 0s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 7px; animation: equalizer 0.8s ease-in-out infinite 0.25s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 10px; animation: equalizer 0.8s ease-in-out infinite 0.5s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
+                </span>
+                <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100 text-primary">
+                  {#if $isPlaying}<Pause class="size-3.5" fill="currentColor" />{:else}<Play class="size-3.5" fill="currentColor" />{/if}
+                </span>
+              {:else}
+                <span class="text-center text-sm tabular-nums text-muted-foreground group-hover:hidden">{i + 1}</span>
+                <span class="absolute inset-0 hidden place-items-center group-hover:grid">
+                  <Play class="size-3.5" fill="currentColor" />
+                </span>
+              {/if}
             </span>
             {#if sub.coverArtUrl}
               <img class="size-10 shrink-0 rounded object-cover" src={sub.coverArtUrl} alt={sub.title} loading="lazy" />
@@ -469,7 +479,7 @@
             {/if}
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <p class="whitespace-normal break-words text-sm font-medium leading-tight">{sub.title}</p>
+                <p class="whitespace-normal break-words text-sm font-medium leading-tight {isCurrentTrack ? 'text-primary' : ''}">{sub.title}</p>
                 <SongTechBadge
                   id={sub.id}
                   cached={desktopPlayback ? cachedSongIds.has(sub.id) : null}
@@ -505,54 +515,58 @@
         <h2 class="app-section-title text-xl font-bold">Discography</h2>
       </div>
       <div class="flex gap-1">
-        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scrollCarousel(-1)} aria-label="Scroll left">
+        <button class="app-round-button grid size-8 place-items-center rounded-full disabled:opacity-30" onclick={() => discographyApi?.scrollPrev()} aria-label="Scroll left">
           <ChevronLeft class="size-4" />
         </button>
-        <button class="app-round-button grid size-8 place-items-center rounded-full" onclick={() => scrollCarousel(1)} aria-label="Scroll right">
+        <button class="app-round-button grid size-8 place-items-center rounded-full disabled:opacity-30" onclick={() => discographyApi?.scrollNext()} aria-label="Scroll right">
           <ChevronRight class="size-4" />
         </button>
       </div>
     </div>
-    <div bind:this={carouselEl} class="flex gap-4 overflow-x-auto pb-3" style="scrollbar-width:none;-ms-overflow-style:none">
-      {#each mergedAlbums as album, index (album.id)}
-        <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
-        <div class="app-card app-hover stagger-item group relative flex w-44 shrink-0 flex-col gap-2 rounded-2xl p-3 text-left" style={`--stagger-index:${index};`}>
-          <a
-            href="/album/{encodeURIComponent(album.id)}"
-            class="absolute inset-0 z-10 rounded-2xl"
-            aria-label="Open {album.name}"
-          ></a>
-          <div class="relative w-full">
-            {#if album.coverArtUrl}
-              <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
-            {:else}
-              <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
-            {/if}
-            <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
-              <button
-                onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album); }}
-                aria-label="Play {album.name}"
-                class="grid size-full place-items-center rounded-full"
-              >
-                {#if albumLoading[album.id]}
-                  <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
-                {:else}
-                  <Play class="size-4 translate-x-px" fill="currentColor" />
-                {/if}
-              </button>
-            </div>
-          </div>
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <p class="truncate text-sm font-semibold">{album.name}</p>
-              <ExternalSourceBadge id={album.id} class="shrink-0" />
-            </div>
-            <p class="text-xs text-muted-foreground">{album.year ? `${album.year} · ` : ''}{album.songCount} songs</p>
-          </div>
-        </div>
-        </AlbumContextMenu>
-      {/each}
-    </div>
+    <Carousel opts={{ align: 'start', dragFree: true }} setApi={(api) => (discographyApi = api)}>
+        <CarouselContent>
+          {#each mergedAlbums as album, index (album.id)}
+            <CarouselItem class="basis-[176px]">
+              <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
+                <div class="app-card app-hover stagger-item group relative flex flex-col gap-2 rounded-2xl p-3 text-left" style={`--stagger-index:${index};`}>
+                  <a
+                    href="/album/{encodeURIComponent(album.id)}"
+                    class="absolute inset-0 z-10 rounded-2xl"
+                    aria-label="Open {album.name}"
+                  ></a>
+                  <div class="relative w-full">
+                    {#if album.coverArtUrl}
+                      <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+                    {:else}
+                      <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
+                    {/if}
+                    <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
+                      <button
+                        onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album); }}
+                        aria-label="Play {album.name}"
+                        class="grid size-full place-items-center rounded-full"
+                      >
+                        {#if albumLoading[album.id]}
+                          <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+                        {:else}
+                          <Play class="size-4 translate-x-px" fill="currentColor" />
+                        {/if}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <p class="truncate text-sm font-semibold">{album.name}</p>
+                      <ExternalSourceBadge id={album.id} class="shrink-0" />
+                    </div>
+                    <p class="text-xs text-muted-foreground">{album.year ? `${album.year} · ` : ''}{album.songCount} songs</p>
+                  </div>
+                </div>
+              </AlbumContextMenu>
+            </CarouselItem>
+          {/each}
+        </CarouselContent>
+    </Carousel>
   </section>
 {/if}
 
@@ -563,20 +577,11 @@
       <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Related</p>
       <h2 class="app-section-title text-xl font-bold">Fans also like</h2>
     </div>
-    <div class="flex flex-wrap gap-3">
-      {#each artistInfo.similarArtists as artist, index (artist.name)}
-        <a
-          href="/artist/{encodeURIComponent(artist.name)}"
-          class="app-card app-hover stagger-item flex flex-col items-center gap-2 rounded-2xl p-3 text-center"
-          style={`--stagger-index:${index};`}
-        >
-          {#if artist.imageUrl}
-            <img class="size-16 rounded-full object-cover" src={artist.imageUrl} alt={artist.name} loading="lazy" />
-          {:else}
-            <div class="grid size-16 place-items-center rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-sm font-bold">{initials(artist.name)}</div>
-          {/if}
-          <p class="max-w-[80px] truncate text-xs font-medium">{artist.name}</p>
-        </a>
+    <div class="flex flex-wrap gap-2">
+      {#each artistInfo.similarArtists as artist (artist.name)}
+        <div class="w-[110px]">
+          <ArtistCard name={artist.name} image={artist.imageUrl ?? ''} />
+        </div>
       {/each}
     </div>
   </section>

@@ -1,103 +1,9 @@
-use rand::Rng;
 use std::collections::HashMap;
 use tauri::State;
 use url::Url;
 use crate::{AppState, commands::profiles::{get_active_profile, ActiveProfile}};
 use super::media::{Song, Album, Playlist, PlaylistDetail, AlbumDetail, SearchBundle};
 
-const API_VERSION: &str = "1.16.1";
-const CLIENT_NAME: &str = "madrify";
-
-// ── Auth helpers ─────────────────────────────────────────────────────────────
-
-fn auth_params(p: &ActiveProfile) -> Vec<(String, String)> {
-    let mut base = vec![
-        ("u".to_string(),  p.username.clone()),
-        ("v".to_string(),  API_VERSION.to_string()),
-        ("c".to_string(),  CLIENT_NAME.to_string()),
-        ("f".to_string(),  "json".to_string()),
-    ];
-    if p.server_type == "subsonic_legacy" || p.password.starts_with("enc:") {
-        base.push(("p".to_string(), p.password.clone()));
-    } else {
-        let salt: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(12)
-            .map(char::from)
-            .collect();
-        let token = format!("{:x}", md5::compute(format!("{}{}", p.password, salt).as_bytes()));
-        base.push(("t".to_string(), token));
-        base.push(("s".to_string(), salt));
-    }
-    base
-}
-
-pub(crate) fn build_url(p: &ActiveProfile, path: &str, extra: &[(&str, &str)]) -> String {
-    let base = format!("{}/rest/{}", p.url, path);
-    let mut url = Url::parse(&base).expect("invalid profile url");
-    {
-        let mut q = url.query_pairs_mut();
-        for (k, v) in auth_params(p) {
-            q.append_pair(&k, &v);
-        }
-        for (k, v) in extra {
-            q.append_pair(k, v);
-        }
-    }
-    url.to_string()
-}
-
-pub(crate) async fn request(
-    http: &reqwest::Client,
-    p: &ActiveProfile,
-    path: &str,
-    params: &[(&str, &str)],
-) -> Result<serde_json::Value, String> {
-    let url = build_url(p, path, params);
-    let resp = http.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Subsonic: HTTP {}", resp.status()));
-    }
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let body = json
-        .get("subsonic-response")
-        .ok_or_else(|| "Invalid Subsonic response".to_string())?;
-    if body.get("status").and_then(|s| s.as_str()) != Some("ok") {
-        let msg = body
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .unwrap_or("Subsonic request failed")
-            .to_string();
-        return Err(msg);
-    }
-    Ok(body.clone())
-}
-
-pub(crate) async fn request_binary(
-    http: &reqwest::Client,
-    p: &ActiveProfile,
-    path: &str,
-    params: &[(&str, &str)],
-) -> Result<(), String> {
-    let url = build_url(p, path, params);
-    let resp = http.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Subsonic: HTTP {}", resp.status()));
-    }
-    let _ = resp.bytes().await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn cover_url(p: &ActiveProfile, id: &str, size: u32) -> String {
-    if id.is_empty() { return String::new(); }
-    build_url(p, "getCoverArt", &[("id", id), ("size", &size.to_string())])
-}
-
-fn stream_url(p: &ActiveProfile, id: &str) -> String {
-    if id.is_empty() { return String::new(); }
-    build_url(p, "download", &[("id", id)])
-}
 
 fn is_jf(p: &ActiveProfile) -> bool {
     matches!(p.server_type.as_str(), "jellyfin" | "emby")
@@ -117,20 +23,16 @@ fn is_remote_cover_url(url: &str) -> bool {
         .unwrap_or(false)
 }
 
-async fn cache_cover_url(
-    state: &State<'_, AppState>,
+async fn fetch_cover_url(
+    http: &reqwest::Client,
+    cache: &crate::playback_engine::DiskCache,
     cache_key: &str,
     cover_art_url: &str,
 ) -> String {
     if cover_art_url.is_empty() || !is_remote_cover_url(cover_art_url) {
         return cover_art_url.to_string();
     }
-
-    match state
-        .artwork_cache
-        .get_or_fetch_remote(&state.http, cache_key, "artwork", cover_art_url)
-        .await
-    {
+    match cache.get_or_fetch_remote(http, cache_key, "artwork", cover_art_url).await {
         Ok(local_url) => local_url,
         Err(_) => cover_art_url.to_string(),
     }
@@ -140,7 +42,7 @@ async fn cache_song_covers(state: &State<'_, AppState>, songs: Vec<Song>) -> Vec
     let mut cached = Vec::with_capacity(songs.len());
     for mut song in songs {
         let key = format!("song-cover-{}-240", if song.cover_art.is_empty() { &song.id } else { &song.cover_art });
-        song.cover_art_url = cache_cover_url(state, &key, &song.cover_art_url).await;
+        song.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &song.cover_art_url).await;
         cached.push(song);
     }
     cached
@@ -150,7 +52,7 @@ async fn cache_album_covers(state: &State<'_, AppState>, albums: Vec<Album>) -> 
     let mut cached = Vec::with_capacity(albums.len());
     for mut album in albums {
         let key = format!("album-cover-{}-400", if album.cover_art.is_empty() { &album.id } else { &album.cover_art });
-        album.cover_art_url = cache_cover_url(state, &key, &album.cover_art_url).await;
+        album.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &album.cover_art_url).await;
         cached.push(album);
     }
     cached
@@ -163,7 +65,7 @@ async fn cache_playlist_covers(
     let mut cached = Vec::with_capacity(playlists.len());
     for mut playlist in playlists {
         let key = format!("playlist-cover-{}-240", if playlist.cover_art.is_empty() { &playlist.id } else { &playlist.cover_art });
-        playlist.cover_art_url = cache_cover_url(state, &key, &playlist.cover_art_url).await;
+        playlist.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &playlist.cover_art_url).await;
         cached.push(playlist);
     }
     cached
@@ -174,7 +76,7 @@ async fn cache_album_detail(state: &State<'_, AppState>, mut detail: AlbumDetail
         "album-cover-{}-400",
         if detail.album.cover_art.is_empty() { &detail.album.id } else { &detail.album.cover_art }
     );
-    detail.album.cover_art_url = cache_cover_url(state, &key, &detail.album.cover_art_url).await;
+    detail.album.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &detail.album.cover_art_url).await;
     detail.songs = cache_song_covers(state, detail.songs).await;
     detail
 }
@@ -184,100 +86,11 @@ async fn cache_playlist_detail(
     mut detail: PlaylistDetail,
 ) -> PlaylistDetail {
     let key = format!("playlist-cover-{}-240", detail.playlist.id);
-    detail.playlist.cover_art_url = cache_cover_url(state, &key, &detail.playlist.cover_art_url).await;
+    detail.playlist.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &detail.playlist.cover_art_url).await;
     detail.songs = cache_song_covers(state, detail.songs).await;
     detail
 }
 
-// ── JSON helpers ─────────────────────────────────────────────────────────────
-
-fn s(v: Option<&serde_json::Value>) -> String {
-    v.and_then(|x| x.as_str()).unwrap_or("").to_string()
-}
-fn n(v: Option<&serde_json::Value>) -> f64 {
-    v.and_then(|x| x.as_f64()).unwrap_or(0.0)
-}
-fn optional_string(v: Option<&serde_json::Value>) -> Option<String> {
-    v.and_then(|x| x.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
-fn optional_u32(v: Option<&serde_json::Value>) -> Option<u32> {
-    v.and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|value| value.round() as u64)))
-        .and_then(|value| u32::try_from(value).ok())
-        .filter(|value| *value > 0)
-}
-fn format_from_content_type(content_type: &str) -> Option<String> {
-    content_type
-        .rsplit('/')
-        .next()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-}
-fn arr(v: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
-    match v {
-        Some(serde_json::Value::Array(a)) => a.clone(),
-        Some(item) => vec![item.clone()],
-        None => vec![],
-    }
-}
-
-// ── Output types (canonical — defined in commands::media) ───────────────────
-// Song, Album, Playlist, AlbumDetail, AlbumFull, PlaylistDetail, PlaylistMeta
-// are all imported from super::media above.
-
-fn map_song(v: &serde_json::Value, p: &ActiveProfile) -> Song {
-    let id = s(v.get("id"));
-    let cover = s(v.get("coverArt"));
-    let audio_format = optional_string(v.get("transcodedSuffix"))
-        .or_else(|| optional_string(v.get("suffix")))
-        .or_else(|| optional_string(v.get("contentType")).and_then(|value| format_from_content_type(&value)));
-    Song {
-        cover_art_url: cover_url(p, &cover, 240),
-        stream_url: stream_url(p, &id),
-        id,
-        title: s(v.get("title")),
-        artist: s(v.get("artist")),
-        album: s(v.get("album")),
-        album_id: s(v.get("albumId")),
-        cover_art: cover,
-        duration: n(v.get("duration")),
-        audio_format,
-        bitrate_kbps: optional_u32(v.get("bitRate")).or_else(|| optional_u32(v.get("transcodedBitRate"))),
-    }
-}
-
-fn normalize_match(value: &str) -> String {
-    value.trim().to_lowercase()
-}
-
-fn best_materialized_match(candidates: Vec<Song>, song: &Song) -> Option<Song> {
-    let title = normalize_match(&song.title);
-    let artist = normalize_match(&song.artist);
-
-    candidates
-        .iter()
-        .find(|candidate| {
-            !candidate.id.starts_with("ext-")
-                && normalize_match(&candidate.title) == title
-                && normalize_match(&candidate.artist) == artist
-        })
-        .cloned()
-        .or_else(|| {
-            candidates
-                .iter()
-                .find(|candidate| {
-                    !candidate.id.starts_with("ext-")
-                        && normalize_match(&candidate.title).contains(&title)
-                        && (artist.is_empty()
-                            || normalize_match(&candidate.artist) == artist
-                            || normalize_match(&candidate.artist).contains(&artist))
-                })
-                .cloned()
-        })
-}
 
 pub(crate) async fn resolve_playback_song(
     state: &State<'_, AppState>,
@@ -290,42 +103,14 @@ pub(crate) async fn resolve_playback_song(
     let p = get_active_profile(&state)?;
 
     if is_jf(&p) || is_plex(&p) {
-        return Err("External playback materialization is only supported for Subsonic-compatible servers.".to_string());
+        return Err("External tracks are not supported on this server type.".to_string());
     }
 
-    request_binary(
-        &state.http,
-        &p,
-        "stream",
-        &[("id", song.id.as_str()), ("maxBitRate", "320")],
-    )
-    .await?;
-
-    let query = format!("{} {}", song.artist, song.title).trim().to_string();
-    for _ in 0..8 {
-        let body = request(
-            &state.http,
-            &p,
-            "search3",
-            &[("query", &query), ("songCount", "10"), ("artistCount", "0"), ("albumCount", "0")],
-        )
-        .await?;
-        let candidates: Vec<Song> = arr(body.get("searchResult3").and_then(|r| r.get("song")))
-            .iter()
-            .map(|value| map_song(value, &p))
-            .collect();
-
-        if let Some(resolved) = best_materialized_match(candidates, song) {
-            return Ok(resolved);
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-    }
-
-    Err(format!(
-        "Could not materialize \"{}\" by {} for playback",
-        song.title, song.artist
-    ))
+    // For octo-fiesta: the song's stream_url already points to /rest/stream?id=ext-...
+    // Fetching it triggers octo-fiesta to download from the external provider and stream
+    // the audio back directly. load_track_payload will fetch via stream_url — no separate
+    // materialisation trigger or polling needed.
+    Ok(song.clone())
 }
 
 async fn resolve_library_song_id(
@@ -392,41 +177,46 @@ pub async fn library_search_bundle(
     let album_limit = album_count.unwrap_or(12);
     let rec_limit = recommendation_count.unwrap_or(16);
 
-    let songs = if is_local(&p) {
-        crate::commands::local::search(&p, &query, song_limit).await?
-    } else if is_jf(&p) {
-        let songs = crate::commands::jellyfin::search(&state.http, &p, &query, song_limit).await?;
-        cache_song_covers(&state, songs).await
-    } else if is_plex(&p) {
-        let songs = crate::commands::plex::search(&state.http, &p, &query, song_limit).await?;
-        cache_song_covers(&state, songs).await
-    } else {
-        let songs = crate::commands::subsonic::search(&state.http, &p, &query, song_limit).await?;
-        cache_song_covers(&state, songs).await
+    let songs_fut = async {
+        if is_local(&p) {
+            crate::commands::local::search(&p, &query, song_limit).await
+        } else if is_jf(&p) {
+            let songs = crate::commands::jellyfin::search(&state.http, &p, &query, song_limit).await?;
+            Ok(cache_song_covers(&state, songs).await)
+        } else if is_plex(&p) {
+            let songs = crate::commands::plex::search(&state.http, &p, &query, song_limit).await?;
+            Ok(cache_song_covers(&state, songs).await)
+        } else {
+            let songs = crate::commands::subsonic::search(&state.http, &p, &query, song_limit).await?;
+            Ok(cache_song_covers(&state, songs).await)
+        }
     };
 
-    let albums = if is_local(&p) {
-        crate::commands::local::artist_albums(&p, &query, album_limit).await?
-    } else if is_jf(&p) {
-        let albums = crate::commands::jellyfin::artist_albums(&state.http, &p, &query, album_limit).await?;
-        cache_album_covers(&state, albums).await
-    } else if is_plex(&p) {
-        let albums = crate::commands::plex::artist_albums(&state.http, &p, &query, album_limit).await?;
-        cache_album_covers(&state, albums).await
-    } else {
-        let albums = crate::commands::subsonic::artist_albums(&state.http, &p, &query, album_limit).await?;
-        cache_album_covers(&state, albums).await
+    let albums_fut = async {
+        let albums = if is_local(&p) {
+            crate::commands::local::artist_albums(&p, &query, album_limit).await.unwrap_or_default()
+        } else if is_jf(&p) {
+            crate::commands::jellyfin::artist_albums(&state.http, &p, &query, album_limit).await.unwrap_or_default()
+        } else if is_plex(&p) {
+            crate::commands::plex::artist_albums(&state.http, &p, &query, album_limit).await.unwrap_or_default()
+        } else {
+            crate::commands::subsonic::artist_albums(&state.http, &p, &query, album_limit).await.unwrap_or_default()
+        };
+        if is_local(&p) { albums } else { cache_album_covers(&state, albums).await }
     };
+
+    let (songs, albums) = tokio::join!(songs_fut, albums_fut);
+    let songs = songs?;
 
     let recommendations = if let Some(seed) = songs.first() {
         let recs = if is_local(&p) {
-            crate::commands::local::similar(&p, &seed.id, rec_limit).await?
+            crate::commands::local::similar(&p, &seed.id, rec_limit).await.unwrap_or_default()
         } else if is_jf(&p) {
-            crate::commands::jellyfin::similar(&state.http, &p, &seed.id, rec_limit).await?
+            crate::commands::jellyfin::similar(&state.http, &p, &seed.id, rec_limit).await.unwrap_or_default()
         } else if is_plex(&p) {
-            crate::commands::plex::similar(&state.http, &p, &seed.id, rec_limit).await?
+            crate::commands::plex::similar(&state.http, &p, &seed.id, rec_limit).await.unwrap_or_default()
         } else {
-            crate::commands::subsonic::similar(&state.http, &p, &seed.id, rec_limit).await?
+            crate::commands::subsonic::similar(&state.http, &p, &seed.id, rec_limit).await.unwrap_or_default()
         };
 
         let mut deduped = Vec::new();
@@ -460,6 +250,10 @@ pub async fn library_similar(
     song_id: String,
     count: Option<u32>,
 ) -> Result<Vec<Song>, String> {
+    // ext- IDs are external/unmaterialized tracks unknown to the server's similar-songs index
+    if song_id.starts_with("ext-") {
+        return Ok(vec![]);
+    }
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::similar(&p, &song_id, count.unwrap_or(20)).await; }
     if is_jf(&p) {

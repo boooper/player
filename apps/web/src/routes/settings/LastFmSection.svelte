@@ -121,13 +121,15 @@
       <h2 class="font-semibold">Last.fm</h2>
     </div>
     <p class="mt-0.5 text-xs text-muted-foreground">
-      Required for recommendations, radio, and artist info.
+      Required for recommendations, mixes, and artist info.
       Get a free API key at
       <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer" class="text-primary underline-offset-2 hover:underline">last.fm/api</a>.
     </p>
   </div>
   <!-- svelte-ignore a11y_no_redundant_roles -->
   <form class="space-y-5 px-5 py-5" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
+    <!-- Hidden username field satisfies browser accessibility requirement for password forms -->
+    <input type="text" name="username" autocomplete="username" aria-hidden="true" class="sr-only" tabindex="-1" />
 
     <!-- API Key -->
     <div class="space-y-1.5">
@@ -319,7 +321,7 @@
           type="text"
           bind:value={listenBrainzUsername}
           placeholder="e.g. your_listenbrainz_username"
-          autocomplete="new-password"
+          autocomplete="username"
           class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>

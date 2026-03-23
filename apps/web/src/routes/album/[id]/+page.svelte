@@ -22,11 +22,9 @@
     type Song
   } from '$lib/servers';
   import { findAlbumGroupIds, mergeAlbumSongs } from '$lib/media-merge';
-  import { focusTrack, playQueue, playingFrom, enableShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
-  import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import { focusTrack, playQueue, playingFrom, enableShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
-  import SongTechBadge from '$lib/components/SongTechBadge.svelte';
-  import { formatClockDuration } from '$lib/utils';
+  import { SongRow } from '$lib/components/media';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -38,7 +36,6 @@
   import { libraryRefresh } from '$lib/stores/ui-state';
   import { isTauri } from '$lib/tauri';
 
-  const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
   const albumHref = $derived(`/album/${encodeURIComponent(data.id)}`);
   const albumIsActive = $derived($playingFrom.href === albumHref);
 
@@ -184,10 +181,6 @@
   function activateSmartShuffle() { enableSmartShuffle(); }
   function deactivateShuffle() { disableShuffle(); }
 
-  function fmt(seconds: number): string {
-    return formatClockDuration(seconds);
-  }
-
   function fmtDuration(totalSeconds: number): string {
     if (!isFinite(totalSeconds) || !totalSeconds) return '';
     const h = Math.floor(totalSeconds / 3600);
@@ -328,9 +321,10 @@
   <div class="page-section rounded-lg">
     <!-- Header row -->
     <div class="mb-1 grid items-center gap-3 border-b px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-      style="grid-template-columns: 2rem 1fr 6rem"
+      style="grid-template-columns: 2rem 2.5rem 1fr 4rem"
     >
       <span class="text-center">#</span>
+      <span></span>
       <span>Title</span>
       <span class="flex items-center justify-end gap-1"><Clock3 class="size-3.5" /></span>
     </div>
@@ -346,69 +340,13 @@
       {/each}
     {:else}
       {#each songs as song, i (song.id)}
-        {@const isCurrentTrack = song.id === currentTrackId}
-        <SongContextMenu {song} onplay={() => playFrom(i)}>
-          <button
-            class="stagger-row group grid w-full items-center gap-3 rounded-md px-3 py-2 text-left transition hover:bg-accent {isCurrentTrack ? 'bg-primary/5' : ''}"
-            style="grid-template-columns: 2rem 1fr 6rem"
-            style:--stagger-index={i}
-            onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playFrom(i)}
-          >
-            <span class="text-center text-sm tabular-nums text-muted-foreground {isCurrentTrack ? 'hidden' : 'group-hover:hidden'}">{i + 1}</span>
-            {#if isCurrentTrack}
-              <span class="relative flex items-center justify-center">
-                <span class="flex items-end gap-[2px] transition-all duration-150 group-hover:opacity-0 group-hover:scale-50">
-                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 12px; animation: equalizer 0.8s ease-in-out infinite 0s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
-                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 8px; animation: equalizer 0.8s ease-in-out infinite 0.25s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
-                  <span class="w-[3px] rounded-[1px] bg-primary origin-bottom" style="height: 12px; animation: equalizer 0.8s ease-in-out infinite 0.5s; animation-play-state: {$isPlaying ? 'running' : 'paused'};"></span>
-                </span>
-                <span class="absolute inset-0 flex items-center justify-center scale-50 opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100 text-primary">
-                  {#if $isPlaying}
-                    <Pause class="size-3.5" fill="currentColor" />
-                  {:else}
-                    <Play class="size-3.5" fill="currentColor" />
-                  {/if}
-                </span>
-              </span>
-            {:else}
-              <span class="hidden place-items-center group-hover:grid">
-                <Play class="size-3.5" fill="currentColor" />
-              </span>
-            {/if}
-
-            <div class="flex min-w-0 items-center gap-3">
-              {#if song.coverArtUrl}
-                <img
-                  class="size-10 shrink-0 rounded object-cover"
-                  src={song.coverArtUrl}
-                  alt={song.title}
-                  loading="lazy"
-                />
-              {:else}
-                <div class="grid size-10 shrink-0 place-items-center rounded bg-secondary text-xs font-bold">
-                  {initials(song.title)}
-                </div>
-              {/if}
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
-                  <p class="whitespace-normal break-words text-sm font-medium leading-tight {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
-                  <SongTechBadge
-                    id={song.id}
-                    cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
-                    audioFormat={song.audioFormat}
-                    bitrateKbps={song.bitrateKbps}
-                    compact
-                  />
-                </div>
-                <div class="mt-0.5 flex min-w-0 items-center gap-2">
-                  <p class="truncate text-xs text-muted-foreground">{song.artist}</p>
-                </div>
-              </div>
-            </div>
-
-            <span class="text-right text-xs tabular-nums text-muted-foreground">{fmt(song.duration)}</span>
-          </button>
-        </SongContextMenu>
+        <SongRow
+          {song}
+          index={i}
+          onplay={() => playFrom(i)}
+          cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+          staggerIndex={i}
+        />
       {/each}
     {/if}
   </div>

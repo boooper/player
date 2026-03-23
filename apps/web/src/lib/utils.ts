@@ -19,6 +19,25 @@ export function formatClockDuration(seconds: number | null | undefined): string 
 	return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
+/** Creates an isolated TTL promise-cache. Entries are deduplicated and evicted on error. */
+export function ttlCache() {
+  const store = new Map<string, { expiresAt: number; promise: Promise<unknown> }>();
+  return {
+    get<T>(key: string, loader: () => Promise<T>, ttlMs: number): Promise<T> {
+      const now = Date.now();
+      const entry = store.get(key);
+      if (entry && entry.expiresAt > now) return entry.promise as Promise<T>;
+      const promise = loader().catch((err) => {
+        if (store.get(key)?.promise === promise) store.delete(key);
+        throw err;
+      });
+      store.set(key, { expiresAt: now + ttlMs, promise });
+      return promise;
+    },
+    clear: () => store.clear(),
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WithoutChild<T> = T extends { child?: any } ? Omit<T, "child"> : T;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

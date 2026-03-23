@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { splitSongArtists } from '$lib/song-artists';
 
   let {
@@ -16,10 +17,9 @@
 
 <span class={className}>
   {#each artists as name, index (name)}
-    <a
-      href={`/artist/${encodeURIComponent(name)}`}
+    <button
       class={linkClass}
-      onclick={(event) => event.stopPropagation()}
-    >{name}</a>{#if index < artists.length - 1}<span class="px-1">·</span>{/if}
+      onclick={(event) => { event.stopPropagation(); goto(`/artist/${encodeURIComponent(name)}`); }}
+    >{name}</button>{#if index < artists.length - 1}<span class="px-1">·</span>{/if}
   {/each}
 </span>

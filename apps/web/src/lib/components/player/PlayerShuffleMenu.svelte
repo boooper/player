@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -40,6 +41,22 @@
   }: Props = $props();
 </script>
 
+{#snippet menuItem(icon: Snippet, label: string, desc: string, active: boolean, onclick: () => void, disabled = false)}
+  <DropdownMenuItem {onclick} {disabled} class="gap-3 {active ? 'text-primary' : ''}">
+    {@render icon()}
+    <div>
+      <p class="font-medium">{label}</p>
+      <p class="truncate max-w-36 text-xs text-muted-foreground">{desc}</p>
+    </div>
+    {#if active}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
+  </DropdownMenuItem>
+{/snippet}
+
+{#snippet shuffleIcon()}<Shuffle class="size-4 shrink-0" />{/snippet}
+{#snippet smartShuffleIcon()}<Sparkles class="size-4 shrink-0 transition-opacity {smartShuffleFetching ? 'animate-pulse' : ''}" />{/snippet}
+{#snippet mic2Icon()}<Mic2 class="size-4 shrink-0" />{/snippet}
+{#snippet disc3Icon()}<Disc3 class="size-4 shrink-0" />{/snippet}
+
 <DropdownMenu>
   <DropdownMenuTrigger>
     {#snippet child({ props })}
@@ -61,58 +78,23 @@
   </DropdownMenuTrigger>
 
   <DropdownMenuContent side="top" align="start" class="min-w-56">
-    <DropdownMenuItem onclick={onActivateShuffle} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
-      <Shuffle class="size-4 shrink-0" />
-      <div>
-        <p class="font-medium">Shuffle</p>
-        <p class="text-xs text-muted-foreground">Play queue in random order</p>
-      </div>
-      {#if $shuffleEnabled && !$smartShuffleMode}
-        <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-      {/if}
-    </DropdownMenuItem>
-
-    <DropdownMenuItem onclick={onActivateSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
-      <Sparkles class="size-4 shrink-0" />
-      <div>
-        <p class="font-medium">Smart Shuffle</p>
-        <p class="text-xs text-muted-foreground">Weaves in Last.fm recommendations</p>
-      </div>
-      {#if $smartShuffleMode}
-        <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-      {/if}
-    </DropdownMenuItem>
+    {@render menuItem(shuffleIcon, 'Shuffle', 'Play queue in random order', $shuffleEnabled && !$smartShuffleMode, onActivateShuffle)}
+    {@render menuItem(smartShuffleIcon, 'Smart Shuffle', 'Weaves in Last.fm recommendations', $smartShuffleMode, onActivateSmartShuffle)}
 
     {#if currentTrack}
       <DropdownMenuSeparator />
-      <DropdownMenuItem onclick={onShuffleArtist} class="gap-3">
-        <Mic2 class="size-4 shrink-0" />
-        <div>
-          <p class="font-medium">Shuffle Artist</p>
-          <p class="truncate max-w-36 text-xs text-muted-foreground">{formatSongArtists(currentTrack.artist)}</p>
-        </div>
-      </DropdownMenuItem>
-
-      <DropdownMenuItem onclick={onShuffleAlbum} disabled={!currentTrack.albumId} class="gap-3">
-        <Disc3 class="size-4 shrink-0" />
-        <div>
-          <p class="font-medium">Shuffle Album</p>
-          <p class="truncate max-w-36 text-xs text-muted-foreground">{currentTrack.album}</p>
-        </div>
-      </DropdownMenuItem>
+      {@render menuItem(mic2Icon, 'Shuffle Artist', formatSongArtists(currentTrack.artist), false, onShuffleArtist)}
+      {@render menuItem(disc3Icon, 'Shuffle Album', currentTrack.album ?? '', false, onShuffleAlbum, !currentTrack.albumId)}
     {/if}
 
     <DropdownMenuSeparator />
-
     <DropdownMenuItem onclick={onDeactivateShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
-      <span class="size-4 shrink-0 flex items-center justify-center text-xs font-bold">—</span>
+      <span class="flex size-4 shrink-0 items-center justify-center text-xs font-bold">—</span>
       <div>
         <p class="font-medium">Off</p>
         <p class="text-xs text-muted-foreground">Play in order</p>
       </div>
-      {#if !$shuffleEnabled && !$smartShuffleMode}
-        <span class="ml-auto size-1.5 rounded-full bg-primary"></span>
-      {/if}
+      {#if !$shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
     </DropdownMenuItem>
   </DropdownMenuContent>
 </DropdownMenu>

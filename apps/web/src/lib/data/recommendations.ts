@@ -7,22 +7,15 @@ import {
   getRecommendationProviderSetting,
 } from '$lib/stores/backend-settings';
 import type { RecommendationSource, UnifiedRecommendation } from './types';
+import { ttlCache } from '$lib/utils';
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
-const recCache = new Map<string, { expiresAt: number; promise: Promise<unknown> }>();
+const recCache = ttlCache();
 const SHORT_TTL = 30_000;
 
 function cached<T>(key: string, loader: () => Promise<T>, ttlMs = SHORT_TTL): Promise<T> {
-  const now = Date.now();
-  const entry = recCache.get(key);
-  if (entry && entry.expiresAt > now) return entry.promise as Promise<T>;
-  const promise = loader().catch((err) => {
-    if (recCache.get(key)?.promise === promise) recCache.delete(key);
-    throw err;
-  });
-  recCache.set(key, { expiresAt: now + ttlMs, promise });
-  return promise;
+  return recCache.get(key, loader, ttlMs);
 }
 
 export function clearRecommendationCaches(): void {
@@ -135,13 +128,15 @@ export async function getUpNextSongs(params: {
         })
         .sort((a, b) => b.score - a.score);
 
-      // Step 2 — Find local library matches
+      // Step 2 — Find local library matches (parallel)
+      const toSearch = reranked.slice(0, limit * 3);
+      const searchResults = await Promise.all(
+        toSearch.map((rec) => searchLocal(`${rec.artist} ${rec.title}`, 10).then((hits) => ({ rec, hits })))
+      );
       const candidates: { song: LibrarySong; recScore: number }[] = [];
       const seen = new Set<string>();
-
-      for (const rec of reranked) {
+      for (const { rec, hits } of searchResults) {
         if (candidates.length >= limit * 3) break;
-        const hits = await searchLocal(`${rec.artist} ${rec.title}`, 10);
         const match = matchSong(hits, rec.artist, rec.title);
         if (!match || seen.has(match.id)) continue;
         seen.add(match.id);

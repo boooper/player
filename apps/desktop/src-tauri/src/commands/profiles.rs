@@ -66,7 +66,7 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
     let name = data.name.trim().to_string();
     let username = data.username.trim().to_string();
     let password = data.password.unwrap_or_default().trim().to_string();
-    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "plex", "local"]
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "plex", "local", "octo_fiesta"]
         .contains(&data.server_type.as_str())
     {
         data.server_type.clone()
@@ -82,8 +82,8 @@ pub fn create_profile(state: State<'_, AppState>, data: ProfileDraft) -> Result<
     if name.is_empty() { return Err("name is required".to_string()); }
     if url.is_empty() { return Err("url is required".to_string()); }
     validate_server_url(&url, &server_type)?;
-    if server_type != "local" && username.is_empty() && server_type != "plex" { return Err("username is required".to_string()); }
-    if server_type != "local" && password.is_empty() { return Err("password is required".to_string()); }
+    if server_type != "local" && username.is_empty() && !matches!(server_type.as_str(), "plex" | "octo_fiesta") { return Err("username is required".to_string()); }
+    if server_type != "local" && server_type != "octo_fiesta" && password.is_empty() { return Err("password is required".to_string()); }
 
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let count: i64 = db
@@ -134,7 +134,7 @@ pub fn update_profile(
 
     let name = data.name.trim().to_string();
     let username = data.username.trim().to_string();
-    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "plex", "local"]
+    let server_type = if ["subsonic", "subsonic_legacy", "jellyfin", "emby", "plex", "local", "octo_fiesta"]
         .contains(&data.server_type.as_str())
     {
         data.server_type.clone()
@@ -256,6 +256,12 @@ pub fn activate_profile(state: State<'_, AppState>, id: i64) -> Result<(), Strin
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_active_server_type(state: State<'_, AppState>) -> Result<String, String> {
+    let p = get_active_profile(&state)?;
+    Ok(p.server_type)
 }
 
 /// Internal helper used by subsonic / jellyfin commands.

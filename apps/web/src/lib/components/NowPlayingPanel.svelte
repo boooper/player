@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { ChevronDown, ChevronUp, PanelRight } from '@lucide/svelte';
   import { flip } from 'svelte/animate';
   import { cubicOut } from 'svelte/easing';
@@ -14,6 +15,7 @@
     showQueue,
     playQueue,
     removeFromQueue,
+    reorderQueue,
     smartShuffleTrackIds,
   } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -49,6 +51,47 @@
   let panelArtistLoading = $state(false);
   let aboutDialogOpen = $state(false);
   let upNextExpanded = $state(false);
+  let dragFromIndex = $state<number | null>(null);
+  let dragOverIndex = $state<number | null>(null);
+  // non-reactive: tracks whether pointer moved enough to count as a real drag
+  let _dragActive = false;
+  let _dragStartY = 0;
+
+  function onGripPointerDown(e: PointerEvent, queueIndex: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragFromIndex = queueIndex;
+    dragOverIndex = queueIndex;
+    _dragStartY = e.clientY;
+    _dragActive = false;
+  }
+
+  function onGripPointerMove(e: PointerEvent) {
+    if (dragFromIndex === null) return;
+    if (!_dragActive && Math.abs(e.clientY - _dragStartY) < 5) return;
+    _dragActive = true;
+    e.preventDefault();
+    const list = (e.currentTarget as HTMLElement).closest('[data-upnext-list]');
+    if (!list) return;
+    const rows = list.querySelectorAll<HTMLElement>('[data-queue-index]');
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (e.clientY >= rect.top && e.clientY < rect.bottom) {
+        dragOverIndex = parseInt(row.dataset.queueIndex!);
+        break;
+      }
+    }
+  }
+
+  function onGripPointerUp() {
+    if (_dragActive && dragFromIndex !== null && dragOverIndex !== null && dragFromIndex !== dragOverIndex) {
+      reorderQueue(dragFromIndex, dragOverIndex);
+    }
+    dragFromIndex = null;
+    dragOverIndex = null;
+    _dragActive = false;
+  }
   let relatedExpanded = $state(false);
   let creditsExpanded = $state(false);
   let creditsAlbum = $state<{ year?: number; genre?: string } | null>(null);
@@ -79,15 +122,16 @@
       }
     }
 
-    if (song.artist && song.artist !== _panelArtist) {
-      _panelArtist = primarySongArtist(song.artist);
+    const primary = primarySongArtist(song.artist);
+    if (primary && primary !== _panelArtist) {
+      _panelArtist = primary;
       panelArtistInfo = null;
       panelArtistLoading = true;
       aboutDialogOpen = false;
-      getArtistInfo(primarySongArtist(song.artist))
-        .then((info) => { panelArtistInfo = info; })
+      getArtistInfo(primary)
+        .then((info) => { if (_panelArtist === primary) panelArtistInfo = info; })
         .catch(() => {})
-        .finally(() => { panelArtistLoading = false; });
+        .finally(() => { if (_panelArtist === primary) panelArtistLoading = false; });
     }
   });
 
@@ -328,11 +372,10 @@
               {/if}
             </div>
             <div class="border-t border-white/[0.08] px-6 py-4">
-              <a
-                href={`/artist/${encodeURIComponent(primarySongArtist(displaySong.artist))}`}
-                onclick={() => { aboutDialogOpen = false; }}
+              <button
+                onclick={() => { aboutDialogOpen = false; goto(`/artist/${encodeURIComponent(primarySongArtist(displaySong.artist))}`); }}
                 class="text-sm font-medium hover:underline"
-              >Go to artist page →</a>
+              >Go to artist page →</button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
@@ -411,12 +454,14 @@
             out:fade={{ duration: 140 }}
           >Nothing queued</p>
         {:else}
-          <div class="space-y-1">
+          <div class="space-y-1" data-upnext-list>
             {#each (upNextExpanded ? upNext : upNext.slice(0, 1)) as item (item.song.id + '-' + item.index)}
               <div
-                animate:flip={{ duration: 220, easing: cubicOut }}
+                animate:flip={{ duration: dragFromIndex !== null ? 0 : 220, easing: cubicOut }}
                 in:fly={{ y: 12, opacity: 0.15, duration: 220, easing: cubicOut }}
                 out:fade={{ duration: 150 }}
+                data-queue-index={item.index}
+                class="rounded-md transition-colors {dragOverIndex === item.index && dragFromIndex !== item.index ? 'ring-1 ring-primary/50 bg-primary/5' : ''} {dragFromIndex === item.index ? 'opacity-40' : ''}"
               >
                 <SongContextMenu
                   song={item.song}
@@ -424,29 +469,48 @@
                   onremove={() => removeFromQueue(item.index)}
                   triggerClass="block w-full"
                 >
-                  <button
-                    class="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition hover:bg-accent"
-                    onclick={() => playFromUpNext(item.index)}
-                  >
-                    {#if item.song.coverArtUrl}
-                      <img class="size-9 rounded object-cover shrink-0" src={item.song.coverArtUrl} alt={item.song.title} loading="lazy" />
-                    {:else}
-                      <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(item.song.title)}</span>
-                    {/if}
-                    <span class="min-w-0">
-                      <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{item.song.title}</span>
-                      <SongArtistLinks
-                        artist={item.song.artist}
-                        class="block truncate text-xs text-muted-foreground"
-                        linkClass="hover:text-foreground hover:underline transition-colors"
-                      />
-                      {#if $smartShuffleTrackIds.has(item.song.id)}
-                        <span class="mt-1 inline-flex rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                          From Smart Shuffle
-                        </span>
-                      {/if}
+                  <div class="flex w-full items-center gap-1 rounded-md pr-2 transition hover:bg-accent">
+                    <span
+                      role="button"
+                      tabindex="-1"
+                      aria-label="Drag to reorder"
+                      class="shrink-0 cursor-grab touch-none px-1.5 py-3 text-muted-foreground/40 hover:text-muted-foreground transition-colors {dragFromIndex === item.index ? 'cursor-grabbing' : ''}"
+                      onpointerdown={(e) => onGripPointerDown(e, item.index)}
+                      onpointermove={onGripPointerMove}
+                      onpointerup={onGripPointerUp}
+                      onpointercancel={onGripPointerUp}
+                      onkeydown={() => {}}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/>
+                        <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
+                        <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
+                      </svg>
                     </span>
-                  </button>
+                    <button
+                      class="flex flex-1 items-center gap-3 py-2 text-left"
+                      onclick={() => playFromUpNext(item.index)}
+                    >
+                      {#if item.song.coverArtUrl}
+                        <img class="size-9 rounded object-cover shrink-0" src={item.song.coverArtUrl} alt={item.song.title} loading="lazy" />
+                      {:else}
+                        <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(item.song.title)}</span>
+                      {/if}
+                      <span class="min-w-0">
+                        <span class="block whitespace-normal break-words text-sm font-medium leading-tight">{item.song.title}</span>
+                        <SongArtistLinks
+                          artist={item.song.artist}
+                          class="block truncate text-xs text-muted-foreground"
+                          linkClass="hover:text-foreground hover:underline transition-colors"
+                        />
+                        {#if $smartShuffleTrackIds.has(item.song.id)}
+                          <span class="mt-1 inline-flex rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                            From Smart Shuffle
+                          </span>
+                        {/if}
+                      </span>
+                    </button>
+                  </div>
                 </SongContextMenu>
               </div>
             {/each}

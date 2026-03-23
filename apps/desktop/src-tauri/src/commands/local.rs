@@ -21,7 +21,14 @@ use crate::commands::{
 type AlbumBuild = (Album, Vec<Song>, SystemTime, Option<String>);
 
 fn normalize(value: &str) -> String {
-    value.trim().to_lowercase()
+    use unicode_normalization::UnicodeNormalization;
+    value
+        .trim()
+        .to_lowercase()
+        .nfd()
+        .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
+        .filter(|c| c.is_alphanumeric())
+        .collect()
 }
 
 fn supported_extension(path: &Path) -> bool {

@@ -202,7 +202,7 @@
         {/if}
         <p class="min-w-0 flex-1 truncate text-sm font-semibold leading-tight">{item.name}</p>
         <button
-          class="relative z-10 ml-auto grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:opacity-100"
+          class="relative z-10 ml-auto grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition {activeHref === item.href ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}"
           onclick={(e) => { e.preventDefault(); activeHref === item.href ? togglePlayRequest.update(n => n + 1) : playRecentItem(item); }}
           aria-label="{activeHref === item.href && $isPlaying ? 'Pause' : 'Play'} {item.name}"
         >
@@ -293,12 +293,14 @@
                   </div>
                 {/if}
                 <button
-                  class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
-                  onclick={(e) => { e.preventDefault(); playAlbum(album); }}
+                  class="absolute bottom-2 right-2 z-10 grid size-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition {activeHref === `/album/${encodeURIComponent(album.id)}` ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 group-hover:translate-y-0 group-hover:opacity-100'}"
+                  onclick={(e) => { e.preventDefault(); activeHref === `/album/${encodeURIComponent(album.id)}` ? togglePlayRequest.update(n => n + 1) : playAlbum(album); }}
                   aria-label="Play {album.name}"
                 >
                   {#if albumLoadingId === album.id}
                     <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+                  {:else if activeHref === `/album/${encodeURIComponent(album.id)}` && $isPlaying}
+                    <Pause class="size-4" fill="currentColor" />
                   {:else}
                     <Play class="size-4 translate-x-px" fill="currentColor" />
                   {/if}
@@ -374,12 +376,14 @@
                   </div>
                 {/if}
                 <button
-                  class="absolute bottom-2 right-2 z-10 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
-                  onclick={(e) => { e.preventDefault(); playAlbum(album); }}
+                  class="absolute bottom-2 right-2 z-10 grid size-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition {activeHref === `/album/${encodeURIComponent(album.id)}` ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 group-hover:translate-y-0 group-hover:opacity-100'}"
+                  onclick={(e) => { e.preventDefault(); activeHref === `/album/${encodeURIComponent(album.id)}` ? togglePlayRequest.update(n => n + 1) : playAlbum(album); }}
                   aria-label="Play {album.name}"
                 >
                   {#if albumLoadingId === album.id}
                     <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+                  {:else if activeHref === `/album/${encodeURIComponent(album.id)}` && $isPlaying}
+                    <Pause class="size-4" fill="currentColor" />
                   {:else}
                     <Play class="size-4 translate-x-px" fill="currentColor" />
                   {/if}

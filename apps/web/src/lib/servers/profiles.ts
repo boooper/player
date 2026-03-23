@@ -26,6 +26,10 @@ export async function activateProfile(id: number): Promise<void> {
   await invoke('activate_profile', { id });
 }
 
+export async function getActiveServerType(): Promise<string> {
+  return invoke<string>('get_active_server_type');
+}
+
 export async function plexBeginAuth(): Promise<PlexAuthStartPayload> {
   return invoke<PlexAuthStartPayload>('plex_begin_auth');
 }

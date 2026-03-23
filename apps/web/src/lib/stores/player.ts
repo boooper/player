@@ -376,6 +376,19 @@ export function appendToQueue(items: Song[]): void {
   });
 }
 
+export function reorderQueue(fromIndex: number, toIndex: number): void {
+  const idx = get(currentIndex);
+  // only allow reordering songs after the current track
+  if (fromIndex <= idx || toIndex <= idx) return;
+  queue.update((current) => {
+    const next = [...current];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    syncSmartShuffleTrackIds(next);
+    return next;
+  });
+}
+
 export function removeFromQueue(index: number): void {
   const idx = get(currentIndex);
   if (index <= idx) return; // never remove already-played or current song
@@ -404,7 +417,7 @@ export function pruneQueueHistory(keepPrev = 1): void {
   currentIndex.update((i) => i - removeCount);
 }
 
-export async function startRadio(
+export async function startMix(
   song: Song,
   apiKey: string,
   limit = 25
