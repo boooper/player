@@ -53,14 +53,22 @@
   let upNextExpanded = $state(false);
   let dragFromIndex = $state<number | null>(null);
   let dragOverIndex = $state<number | null>(null);
-  // non-reactive: tracks whether pointer moved enough to count as a real drag
+  // non-reactive drag state
   let _dragActive = false;
   let _dragStartY = 0;
+  let _rowRects: { index: number; top: number; bottom: number }[] = [];
 
   function onGripPointerDown(e: PointerEvent, queueIndex: number) {
     e.preventDefault();
-    e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    // Read all row positions once — avoids repeated forced reflow during move
+    const list = (e.currentTarget as HTMLElement).closest('[data-upnext-list]');
+    _rowRects = list
+      ? Array.from(list.querySelectorAll<HTMLElement>('[data-queue-index]')).map((row) => {
+          const r = row.getBoundingClientRect();
+          return { index: parseInt(row.dataset.queueIndex!), top: r.top, bottom: r.bottom };
+        })
+      : [];
     dragFromIndex = queueIndex;
     dragOverIndex = queueIndex;
     _dragStartY = e.clientY;
@@ -72,13 +80,9 @@
     if (!_dragActive && Math.abs(e.clientY - _dragStartY) < 5) return;
     _dragActive = true;
     e.preventDefault();
-    const list = (e.currentTarget as HTMLElement).closest('[data-upnext-list]');
-    if (!list) return;
-    const rows = list.querySelectorAll<HTMLElement>('[data-queue-index]');
-    for (const row of rows) {
-      const rect = row.getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY < rect.bottom) {
-        dragOverIndex = parseInt(row.dataset.queueIndex!);
+    for (const r of _rowRects) {
+      if (e.clientY >= r.top && e.clientY < r.bottom) {
+        if (dragOverIndex !== r.index) dragOverIndex = r.index;
         break;
       }
     }
@@ -91,6 +95,7 @@
     dragFromIndex = null;
     dragOverIndex = null;
     _dragActive = false;
+    _rowRects = [];
   }
   let relatedExpanded = $state(false);
   let creditsExpanded = $state(false);

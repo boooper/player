@@ -317,6 +317,7 @@
       <Dialog.Description>Configure your server connection. Subsonic-compatible servers like Navidrome and Octo-Fiesta use the Subsonic options. Jellyfin, Emby, and Plex use an API or auth token as the password. Local Folder uses a filesystem path.</Dialog.Description>
     </Dialog.Header>
     {#if profileDraft !== null}
+      <form id="server-profile-form" onsubmit={(e) => { e.preventDefault(); saveProfile(); }}>
       <div class="space-y-4 py-2">
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-1.5">
@@ -473,6 +474,7 @@
           </div>
         </div>
       </div>
+      </form>
     {/if}
     <Dialog.Footer>
       <button
@@ -484,6 +486,8 @@
       </button>
       <button
         class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
+        type="submit"
+        form="server-profile-form"
         onclick={saveProfile}
         disabled={savingProfile}
       >
