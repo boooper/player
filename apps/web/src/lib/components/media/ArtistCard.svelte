@@ -31,7 +31,7 @@
     }
     loading = true;
     try {
-      const songs = await searchSongs(name, 100);
+      const songs = await searchSongs(name, 50);
       const isOctoFiesta = $activeServerType === 'octo_fiesta';
       const playable = isOctoFiesta ? songs : songs.filter((s) => !s.id.startsWith('ext-'));
       const artistSongs = playable.filter((s) => s.artist?.toLowerCase().includes(name.toLowerCase()));
@@ -52,7 +52,7 @@
       {#if image}
         <img class="h-16 w-16 rounded-full object-cover shadow-md ring-2 ring-white/5" src={image} alt={name} loading="lazy" />
       {:else}
-        <div class="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-white/10 to-white/5 text-base font-bold text-white/40 ring-2 ring-white/5">
+        <div class="flex h-16 w-16 items-center justify-center rounded-full bg-card text-base font-bold text-muted-foreground ring-2 ring-border/10">
           {initials(name)}
         </div>
       {/if}
@@ -83,6 +83,6 @@
     cursor: default;
   }
   .artist-card:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: color-mix(in srgb, var(--color-muted) 6%, transparent);
   }
 </style>

@@ -43,6 +43,7 @@ export type EmblaContext = {
 	scrollTo: (index: number, jump?: boolean) => void;
 	scrollSnaps: number[];
 	selectedIndex: number;
+	hasSeeAll: boolean;
 };
 
 export function setEmblaContext(config: EmblaContext): EmblaContext {

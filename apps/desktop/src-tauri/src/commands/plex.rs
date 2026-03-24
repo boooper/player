@@ -11,12 +11,20 @@ use crate::AppState;
 use rand::{distributions::Alphanumeric, Rng};
 use roxmltree::{Document, Node};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use tauri::State;
 use url::Url;
 use url::form_urlencoded;
 
 const PLEX_CLIENT_ID_KEY: &str = "PLEX_CLIENT_ID";
 const PLEX_PRODUCT_NAME: &str = "Madrify";
+
+static SECTION_KEY_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn section_key_cache() -> &'static Mutex<HashMap<String, String>> {
+    SECTION_KEY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -392,9 +400,14 @@ fn first_music_section_key(doc: &Document<'_>) -> Option<String> {
 }
 
 async fn music_section_key(http: &reqwest::Client, p: &ActiveProfile) -> Result<String, String> {
+    if let Some(key) = section_key_cache().lock().unwrap().get(&p.url).cloned() {
+        return Ok(key);
+    }
     let xml = get_xml(http, p, "/library/sections", &[]).await?;
     let doc = parse_doc(&xml)?;
-    first_music_section_key(&doc).ok_or_else(|| "No Plex music library section found.".to_string())
+    let key = first_music_section_key(&doc).ok_or_else(|| "No Plex music library section found.".to_string())?;
+    section_key_cache().lock().unwrap().insert(p.url.clone(), key.clone());
+    Ok(key)
 }
 
 fn map_song(node: Node<'_, '_>, p: &ActiveProfile) -> Song {

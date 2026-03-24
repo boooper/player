@@ -60,8 +60,8 @@
             {#if $isPlaying}<Pause class="size-3.5" fill="currentColor" />{:else}<Play class="size-3.5" fill="currentColor" />{/if}
           </span>
         {:else}
-          <span class="absolute inset-0 flex items-center justify-center text-xs tabular-nums text-white/30 transition-all duration-150 group-hover:opacity-0">{index + 1}</span>
-          <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-150 group-hover:opacity-100 text-white/70">
+          <span class="absolute inset-0 flex items-center justify-center text-xs tabular-nums text-muted-foreground/60 transition-all duration-150 group-hover:opacity-0">{index + 1}</span>
+          <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-150 group-hover:opacity-100 text-muted-foreground">
             <Play class="size-3.5" fill="currentColor" />
           </span>
         {/if}
@@ -71,9 +71,9 @@
     <!-- Cover art -->
     {#if song.coverArtUrl}
       <img class="h-10 w-10 shrink-0 rounded-md object-cover shadow-sm" src={song.coverArtUrl} alt={song.title} loading="lazy" />
-    {:else}
-      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-white/10 to-white/5 text-xs font-bold text-white/40">
-        {initials(song.title)}
+      {:else}
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--color-muted) 10%, transparent) 0%, color-mix(in srgb, var(--color-muted) 5%, transparent) 100%);">
+        <span class="text-xs font-bold text-muted-foreground/70">{initials(song.title)}</span>
       </div>
     {/if}
 
@@ -85,18 +85,18 @@
       </div>
       <SongArtistLinks
         artist={song.artist}
-        class="truncate text-xs text-white/40"
-        linkClass="hover:underline hover:text-white/70 transition-colors"
+        class="truncate text-xs text-muted-foreground/70"
+        linkClass="hover:underline hover:text-muted-foreground transition-colors"
       />
     </div>
 
     <!-- Album (optional) -->
     {#if showAlbum}
-      <span class="truncate text-xs text-white/30">{song.album}</span>
+      <span class="truncate text-xs text-muted-foreground/60">{song.album}</span>
     {/if}
 
     <!-- Duration -->
-    <span class="text-right text-xs tabular-nums text-white/30">{formatDuration(song.duration ?? 0)}</span>
+    <span class="text-right text-xs tabular-nums text-muted-foreground/60">{formatDuration(song.duration ?? 0)}</span>
   </button>
 </SongContextMenu>
 
@@ -105,13 +105,13 @@
     transition: background 150ms ease;
   }
   .song-row:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: color-mix(in srgb, var(--color-muted) 8%, transparent);
   }
   .song-row-active {
-    background: hsl(var(--primary) / 0.1);
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   }
   .song-row-active:hover {
-    background: hsl(var(--primary) / 0.15);
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
   }
 
 </style>

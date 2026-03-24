@@ -122,12 +122,12 @@
 <!-- Hero -->
 <div class="page-hero app-glass mb-6 flex gap-4 rounded-[2rem] p-5">
   {#if loading}
-    <div class="h-36 w-36 shrink-0 animate-pulse rounded-2xl bg-white/[0.07]"></div>
+    <div class="h-36 w-36 shrink-0 animate-pulse rounded-2xl bg-muted"></div>
     <div class="flex flex-col justify-end gap-3 flex-1">
-      <div class="h-3 w-16 animate-pulse rounded-full bg-white/[0.07]"></div>
-      <div class="h-8 w-48 animate-pulse rounded-lg bg-white/[0.07]"></div>
-      <div class="h-3 w-32 animate-pulse rounded-full bg-white/[0.05]"></div>
-      <div class="mt-1 h-14 w-14 animate-pulse rounded-full bg-white/[0.07]"></div>
+      <div class="h-3 w-16 animate-pulse rounded-full bg-muted"></div>
+      <div class="h-8 w-48 animate-pulse rounded-lg bg-muted"></div>
+      <div class="h-3 w-32 animate-pulse rounded-full bg-muted"></div>
+      <div class="mt-1 h-14 w-14 animate-pulse rounded-full bg-muted"></div>
     </div>
   {:else}
     {#if coverArtUrl}
@@ -221,14 +221,14 @@
     <div class="mt-1 space-y-0.5">
       {#each Array(8) as _, i (i)}
         <div class="grid items-center gap-3 rounded-lg px-3 py-2.5" style="grid-template-columns: 2rem 2.5rem 1fr 1fr 4rem">
-          <div class="h-3 w-3 mx-auto animate-pulse rounded-full bg-white/[0.07]"></div>
-          <div class="h-10 w-10 animate-pulse rounded-md bg-white/[0.07]"></div>
+          <div class="h-3 w-3 mx-auto animate-pulse rounded-full bg-muted"></div>
+          <div class="h-10 w-10 animate-pulse rounded-md bg-muted"></div>
           <div class="space-y-2">
-            <div class="h-3 animate-pulse rounded-full bg-white/[0.07]" style="width:{50 + (i * 17) % 35}%"></div>
-            <div class="h-2.5 animate-pulse rounded-full bg-white/[0.04]" style="width:{25 + (i * 11) % 25}%"></div>
+            <div class="h-3 animate-pulse rounded-full bg-muted" style="width:{50 + (i * 17) % 35}%"></div>
+            <div class="h-2.5 animate-pulse rounded-full bg-muted" style="width:{25 + (i * 11) % 25}%"></div>
           </div>
-          <div class="hidden h-2.5 animate-pulse rounded-full bg-white/[0.04] md:block" style="width:{40 + (i * 13) % 30}%"></div>
-          <div class="ml-auto h-2.5 w-8 animate-pulse rounded-full bg-white/[0.04]"></div>
+          <div class="hidden h-2.5 animate-pulse rounded-full bg-muted md:block" style="width:{40 + (i * 13) % 30}%"></div>
+          <div class="ml-auto h-2.5 w-8 animate-pulse rounded-full bg-muted"></div>
         </div>
       {/each}
     </div>

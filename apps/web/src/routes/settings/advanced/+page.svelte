@@ -133,7 +133,7 @@
         </button>
       {:else}
         <button
-          class="flex shrink-0 items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium transition hover:bg-white/5 disabled:opacity-60"
+          class="flex shrink-0 items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium transition hover:bg-border/20 disabled:opacity-60"
           onclick={handleCheckForUpdates}
           disabled={updateChecking || updateInstalling}
         >

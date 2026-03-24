@@ -97,11 +97,13 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
           }
 
           if (status.trackId && status.trackId !== activeTrackId && !crossfadeInFlight) {
-            // The engine still has the previous track while the new one loads
-            // (normal for ext- sources that require a server-side download).
-            // Stop the old track but preserve loadPending/isBuffering so the
-            // PlayerBar keeps showing the loading state.
-            desktopPlaybackStop().catch(() => undefined);
+            // The engine still has the previous track while the new one loads.
+            // Only send stop when no load is already in-flight: if loadPending is
+            // true the stop could race with the load and clear the just-loaded
+            // track before it starts playing.
+            if (!loadPending) {
+              desktopPlaybackStop().catch(() => undefined);
+            }
             loadedTrackId = activeTrackId;
             endedTrackId = null;
             currentTime.set(0);
@@ -192,9 +194,10 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
         // clear the buffering spinner immediately instead of waiting for the poll.
         loadPending = false;
         options.setIsBuffering(false);
-        if (!autoplay) {
-          isPlaying.set(false);
-        }
+        // Explicitly sync isPlaying: the poll may have set it to false while the
+        // load was in-flight (mismatched-trackId branch), so restore the correct
+        // state now that the load has confirmed success.
+        isPlaying.set(autoplay);
       })
       .catch(() => {
         crossfadeInFlight = false;

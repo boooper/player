@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use futures::future::join_all;
 use tauri::State;
 use url::Url;
 use crate::{AppState, commands::profiles::{get_active_profile, ActiveProfile}};
@@ -17,6 +18,13 @@ fn is_local(p: &ActiveProfile) -> bool {
     p.server_type == "local"
 }
 
+/// Only Jellyfin/Emby omit auth from image URLs, so we must proxy-download artwork
+/// for those servers. Plex embeds X-Plex-Token and Subsonic embeds its token as
+/// query params, so the webview can load those images directly.
+fn needs_artwork_proxy(p: &ActiveProfile) -> bool {
+    is_jf(p)
+}
+
 fn is_remote_cover_url(url: &str) -> bool {
     Url::parse(url)
         .map(|parsed| matches!(parsed.scheme(), "http" | "https"))
@@ -28,8 +36,9 @@ async fn fetch_cover_url(
     cache: &crate::playback_engine::DiskCache,
     cache_key: &str,
     cover_art_url: &str,
+    proxy: bool,
 ) -> String {
-    if cover_art_url.is_empty() || !is_remote_cover_url(cover_art_url) {
+    if !proxy || cover_art_url.is_empty() || !is_remote_cover_url(cover_art_url) {
         return cover_art_url.to_string();
     }
     match cache.get_or_fetch_remote(http, cache_key, "artwork", cover_art_url).await {
@@ -38,56 +47,75 @@ async fn fetch_cover_url(
     }
 }
 
-async fn cache_song_covers(state: &State<'_, AppState>, songs: Vec<Song>) -> Vec<Song> {
-    let mut cached = Vec::with_capacity(songs.len());
-    for mut song in songs {
-        let key = format!("song-cover-{}-240", if song.cover_art.is_empty() { &song.id } else { &song.cover_art });
-        song.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &song.cover_art_url).await;
-        cached.push(song);
-    }
-    cached
+async fn cache_song_covers(state: &State<'_, AppState>, songs: Vec<Song>, proxy: bool) -> Vec<Song> {
+    if !proxy { return songs; }
+    let http = state.http.clone();
+    let cache = state.artwork_cache.clone();
+    join_all(songs.into_iter().map(|mut song| {
+        let http = http.clone();
+        let cache = cache.clone();
+        async move {
+            let key = format!("song-cover-{}-240", if song.cover_art.is_empty() { &song.id } else { &song.cover_art });
+            song.cover_art_url = fetch_cover_url(&http, &cache, &key, &song.cover_art_url, true).await;
+            song
+        }
+    })).await
 }
 
-async fn cache_album_covers(state: &State<'_, AppState>, albums: Vec<Album>) -> Vec<Album> {
-    let mut cached = Vec::with_capacity(albums.len());
-    for mut album in albums {
-        let key = format!("album-cover-{}-400", if album.cover_art.is_empty() { &album.id } else { &album.cover_art });
-        album.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &album.cover_art_url).await;
-        cached.push(album);
-    }
-    cached
+async fn cache_album_covers(state: &State<'_, AppState>, albums: Vec<Album>, proxy: bool) -> Vec<Album> {
+    if !proxy { return albums; }
+    let http = state.http.clone();
+    let cache = state.artwork_cache.clone();
+    join_all(albums.into_iter().map(|mut album| {
+        let http = http.clone();
+        let cache = cache.clone();
+        async move {
+            let key = format!("album-cover-{}-400", if album.cover_art.is_empty() { &album.id } else { &album.cover_art });
+            album.cover_art_url = fetch_cover_url(&http, &cache, &key, &album.cover_art_url, true).await;
+            album
+        }
+    })).await
 }
 
 async fn cache_playlist_covers(
     state: &State<'_, AppState>,
     playlists: Vec<Playlist>,
+    proxy: bool,
 ) -> Vec<Playlist> {
-    let mut cached = Vec::with_capacity(playlists.len());
-    for mut playlist in playlists {
-        let key = format!("playlist-cover-{}-240", if playlist.cover_art.is_empty() { &playlist.id } else { &playlist.cover_art });
-        playlist.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &playlist.cover_art_url).await;
-        cached.push(playlist);
-    }
-    cached
+    if !proxy { return playlists; }
+    let http = state.http.clone();
+    let cache = state.artwork_cache.clone();
+    join_all(playlists.into_iter().map(|mut playlist| {
+        let http = http.clone();
+        let cache = cache.clone();
+        async move {
+            let key = format!("playlist-cover-{}-240", if playlist.cover_art.is_empty() { &playlist.id } else { &playlist.cover_art });
+            playlist.cover_art_url = fetch_cover_url(&http, &cache, &key, &playlist.cover_art_url, true).await;
+            playlist
+        }
+    })).await
 }
 
-async fn cache_album_detail(state: &State<'_, AppState>, mut detail: AlbumDetail) -> AlbumDetail {
+async fn cache_album_detail(state: &State<'_, AppState>, mut detail: AlbumDetail, proxy: bool) -> AlbumDetail {
+    if !proxy { return detail; }
     let key = format!(
         "album-cover-{}-400",
         if detail.album.cover_art.is_empty() { &detail.album.id } else { &detail.album.cover_art }
     );
-    detail.album.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &detail.album.cover_art_url).await;
-    detail.songs = cache_song_covers(state, detail.songs).await;
+    detail.album.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &detail.album.cover_art_url, true).await;
+    detail.songs = cache_song_covers(state, detail.songs, true).await;
     detail
 }
 
 async fn cache_playlist_detail(
     state: &State<'_, AppState>,
     mut detail: PlaylistDetail,
+    proxy: bool,
 ) -> PlaylistDetail {
+    if !proxy { return detail; }
     let key = format!("playlist-cover-{}-240", detail.playlist.id);
-    detail.playlist.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &detail.playlist.cover_art_url).await;
-    detail.songs = cache_song_covers(state, detail.songs).await;
+    detail.playlist.cover_art_url = fetch_cover_url(&state.http, &state.artwork_cache, &key, &detail.playlist.cover_art_url, true).await;
+    detail.songs = cache_song_covers(state, detail.songs, true).await;
     detail
 }
 
@@ -152,16 +180,15 @@ pub async fn library_search(
 ) -> Result<Vec<Song>, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::search(&p, &query, count.unwrap_or(20)).await; }
-    if is_jf(&p) {
-        let songs = crate::commands::jellyfin::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    if is_plex(&p) {
-        let songs = crate::commands::plex::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    let songs = crate::commands::subsonic::search(&state.http, &p, &query, count.unwrap_or(20)).await?;
-    Ok(cache_song_covers(&state, songs).await)
+    let proxy = needs_artwork_proxy(&p);
+    let songs = if is_jf(&p) {
+        crate::commands::jellyfin::search(&state.http, &p, &query, count.unwrap_or(20)).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::search(&state.http, &p, &query, count.unwrap_or(20)).await?
+    } else {
+        crate::commands::subsonic::search(&state.http, &p, &query, count.unwrap_or(20)).await?
+    };
+    Ok(cache_song_covers(&state, songs, proxy).await)
 }
 
 #[tauri::command]
@@ -177,18 +204,20 @@ pub async fn library_search_bundle(
     let album_limit = album_count.unwrap_or(12);
     let rec_limit = recommendation_count.unwrap_or(16);
 
+    let proxy = needs_artwork_proxy(&p);
+
     let songs_fut = async {
         if is_local(&p) {
             crate::commands::local::search(&p, &query, song_limit).await
         } else if is_jf(&p) {
             let songs = crate::commands::jellyfin::search(&state.http, &p, &query, song_limit).await?;
-            Ok(cache_song_covers(&state, songs).await)
+            Ok(cache_song_covers(&state, songs, proxy).await)
         } else if is_plex(&p) {
             let songs = crate::commands::plex::search(&state.http, &p, &query, song_limit).await?;
-            Ok(cache_song_covers(&state, songs).await)
+            Ok(cache_song_covers(&state, songs, proxy).await)
         } else {
             let songs = crate::commands::subsonic::search(&state.http, &p, &query, song_limit).await?;
-            Ok(cache_song_covers(&state, songs).await)
+            Ok(cache_song_covers(&state, songs, proxy).await)
         }
     };
 
@@ -202,7 +231,7 @@ pub async fn library_search_bundle(
         } else {
             crate::commands::subsonic::artist_albums(&state.http, &p, &query, album_limit).await.unwrap_or_default()
         };
-        if is_local(&p) { albums } else { cache_album_covers(&state, albums).await }
+        if is_local(&p) { albums } else { cache_album_covers(&state, albums, proxy).await }
     };
 
     let (songs, albums) = tokio::join!(songs_fut, albums_fut);
@@ -231,7 +260,7 @@ pub async fn library_search_bundle(
         if is_local(&p) {
             deduped
         } else {
-            cache_song_covers(&state, deduped).await
+            cache_song_covers(&state, deduped, proxy).await
         }
     } else {
         Vec::new()
@@ -256,32 +285,30 @@ pub async fn library_similar(
     }
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::similar(&p, &song_id, count.unwrap_or(20)).await; }
-    if is_jf(&p) {
-        let songs = crate::commands::jellyfin::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    if is_plex(&p) {
-        let songs = crate::commands::plex::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    let songs = crate::commands::subsonic::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?;
-    Ok(cache_song_covers(&state, songs).await)
+    let proxy = needs_artwork_proxy(&p);
+    let songs = if is_jf(&p) {
+        crate::commands::jellyfin::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?
+    } else {
+        crate::commands::subsonic::similar(&state.http, &p, &song_id, count.unwrap_or(20)).await?
+    };
+    Ok(cache_song_covers(&state, songs, proxy).await)
 }
 
 #[tauri::command]
 pub async fn library_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::playlists(&p).await; }
-    if is_jf(&p) {
-        let playlists = crate::commands::jellyfin::playlists(&state.http, &p).await?;
-        return Ok(cache_playlist_covers(&state, playlists).await);
-    }
-    if is_plex(&p) {
-        let playlists = crate::commands::plex::playlists(&state.http, &p).await?;
-        return Ok(cache_playlist_covers(&state, playlists).await);
-    }
-    let playlists = crate::commands::subsonic::playlists(&state.http, &p).await?;
-    Ok(cache_playlist_covers(&state, playlists).await)
+    let proxy = needs_artwork_proxy(&p);
+    let playlists = if is_jf(&p) {
+        crate::commands::jellyfin::playlists(&state.http, &p).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::playlists(&state.http, &p).await?
+    } else {
+        crate::commands::subsonic::playlists(&state.http, &p).await?
+    };
+    Ok(cache_playlist_covers(&state, playlists, proxy).await)
 }
 
 #[tauri::command]
@@ -291,16 +318,15 @@ pub async fn library_playlist(
 ) -> Result<PlaylistDetail, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::playlist(&p, &id).await; }
-    if is_jf(&p) {
-        let detail = crate::commands::jellyfin::playlist(&state.http, &p, &id).await?;
-        return Ok(cache_playlist_detail(&state, detail).await);
-    }
-    if is_plex(&p) {
-        let detail = crate::commands::plex::playlist(&state.http, &p, &id).await?;
-        return Ok(cache_playlist_detail(&state, detail).await);
-    }
-    let detail = crate::commands::subsonic::playlist(&state.http, &p, &id).await?;
-    Ok(cache_playlist_detail(&state, detail).await)
+    let proxy = needs_artwork_proxy(&p);
+    let detail = if is_jf(&p) {
+        crate::commands::jellyfin::playlist(&state.http, &p, &id).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::playlist(&state.http, &p, &id).await?
+    } else {
+        crate::commands::subsonic::playlist(&state.http, &p, &id).await?
+    };
+    Ok(cache_playlist_detail(&state, detail, proxy).await)
 }
 
 #[tauri::command]
@@ -311,16 +337,15 @@ pub async fn library_artist_albums(
 ) -> Result<Vec<Album>, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::artist_albums(&p, &query, count.unwrap_or(20)).await; }
-    if is_jf(&p) {
-        let albums = crate::commands::jellyfin::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
-        return Ok(cache_album_covers(&state, albums).await);
-    }
-    if is_plex(&p) {
-        let albums = crate::commands::plex::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
-        return Ok(cache_album_covers(&state, albums).await);
-    }
-    let albums = crate::commands::subsonic::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?;
-    Ok(cache_album_covers(&state, albums).await)
+    let proxy = needs_artwork_proxy(&p);
+    let albums = if is_jf(&p) {
+        crate::commands::jellyfin::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?
+    } else {
+        crate::commands::subsonic::artist_albums(&state.http, &p, &query, count.unwrap_or(20)).await?
+    };
+    Ok(cache_album_covers(&state, albums, proxy).await)
 }
 
 #[tauri::command]
@@ -330,16 +355,15 @@ pub async fn library_album_songs(
 ) -> Result<Vec<Song>, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::album_songs(&p, &id).await; }
-    if is_jf(&p) {
-        let songs = crate::commands::jellyfin::album_songs(&state.http, &p, &id).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    if is_plex(&p) {
-        let songs = crate::commands::plex::album_songs(&state.http, &p, &id).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    let songs = crate::commands::subsonic::album_songs(&state.http, &p, &id).await?;
-    Ok(cache_song_covers(&state, songs).await)
+    let proxy = needs_artwork_proxy(&p);
+    let songs = if is_jf(&p) {
+        crate::commands::jellyfin::album_songs(&state.http, &p, &id).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::album_songs(&state.http, &p, &id).await?
+    } else {
+        crate::commands::subsonic::album_songs(&state.http, &p, &id).await?
+    };
+    Ok(cache_song_covers(&state, songs, proxy).await)
 }
 
 #[tauri::command]
@@ -349,16 +373,15 @@ pub async fn library_album(
 ) -> Result<AlbumDetail, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::album(&p, &id).await; }
-    if is_jf(&p) {
-        let detail = crate::commands::jellyfin::album(&state.http, &p, &id).await?;
-        return Ok(cache_album_detail(&state, detail).await);
-    }
-    if is_plex(&p) {
-        let detail = crate::commands::plex::album(&state.http, &p, &id).await?;
-        return Ok(cache_album_detail(&state, detail).await);
-    }
-    let detail = crate::commands::subsonic::album(&state.http, &p, &id).await?;
-    Ok(cache_album_detail(&state, detail).await)
+    let proxy = needs_artwork_proxy(&p);
+    let detail = if is_jf(&p) {
+        crate::commands::jellyfin::album(&state.http, &p, &id).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::album(&state.http, &p, &id).await?
+    } else {
+        crate::commands::subsonic::album(&state.http, &p, &id).await?
+    };
+    Ok(cache_album_detail(&state, detail, proxy).await)
 }
 
 #[tauri::command]
@@ -369,33 +392,31 @@ pub async fn library_album_list(
 ) -> Result<Vec<Album>, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::album_list(&p, &kind.clone().unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await; }
-    if is_jf(&p) {
-        let albums = crate::commands::jellyfin::album_list(&state.http, &p, &kind.unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await?;
-        return Ok(cache_album_covers(&state, albums).await);
-    }
-    if is_plex(&p) {
-        let albums = crate::commands::plex::album_list(&state.http, &p, &kind.clone().unwrap_or_else(|| "newest".to_string()), count.unwrap_or(20).min(100)).await?;
-        return Ok(cache_album_covers(&state, albums).await);
-    }
+    let proxy = needs_artwork_proxy(&p);
     let kind = kind.unwrap_or_else(|| "newest".to_string());
-    let albums = crate::commands::subsonic::album_list(&state.http, &p, &kind, count.unwrap_or(20).min(100)).await?;
-    Ok(cache_album_covers(&state, albums).await)
+    let albums = if is_jf(&p) {
+        crate::commands::jellyfin::album_list(&state.http, &p, &kind, count.unwrap_or(20).min(100)).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::album_list(&state.http, &p, &kind, count.unwrap_or(20).min(100)).await?
+    } else {
+        crate::commands::subsonic::album_list(&state.http, &p, &kind, count.unwrap_or(20).min(100)).await?
+    };
+    Ok(cache_album_covers(&state, albums, proxy).await)
 }
 
 #[tauri::command]
 pub async fn library_starred(state: State<'_, AppState>) -> Result<Vec<Song>, String> {
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::starred(&p).await; }
-    if is_jf(&p) {
-        let songs = crate::commands::jellyfin::starred(&state.http, &p).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    if is_plex(&p) {
-        let songs = crate::commands::plex::starred(&state.http, &p).await?;
-        return Ok(cache_song_covers(&state, songs).await);
-    }
-    let songs = crate::commands::subsonic::starred(&state.http, &p).await?;
-    Ok(cache_song_covers(&state, songs).await)
+    let proxy = needs_artwork_proxy(&p);
+    let songs = if is_jf(&p) {
+        crate::commands::jellyfin::starred(&state.http, &p).await?
+    } else if is_plex(&p) {
+        crate::commands::plex::starred(&state.http, &p).await?
+    } else {
+        crate::commands::subsonic::starred(&state.http, &p).await?
+    };
+    Ok(cache_song_covers(&state, songs, proxy).await)
 }
 
 #[tauri::command]
@@ -522,7 +543,7 @@ pub async fn library_create_playlist(
     }
 
     let playlist = crate::commands::subsonic::create_playlist(&state.http, &p, trimmed_name, &song_ids).await?;
-    Ok(cache_playlist_covers(&state, vec![playlist]).await.into_iter().next().unwrap())
+    Ok(cache_playlist_covers(&state, vec![playlist], needs_artwork_proxy(&p)).await.into_iter().next().unwrap())
 }
 
 #[tauri::command]

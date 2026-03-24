@@ -24,7 +24,7 @@
 	class={cn(
 		"absolute size-8 rounded-full",
 		emblaCtx.orientation === "horizontal"
-			? "top-0 end-9 -translate-y-full"
+			? emblaCtx.hasSeeAll ? "top-0 end-[6.75rem] -translate-y-full" : "top-0 end-9 -translate-y-full"
 			: "start-1/2 -top-12 -translate-x-1/2 rotate-90",
 		className
 	)}

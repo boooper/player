@@ -45,6 +45,10 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
   let castDevice = $state<CastDeviceInfo | null>(null);
   let castVolume = $state<number | null>(null);
   let lastPlayerState = $state<string | null>(null);
+  // Last state that was not IDLE — used to confirm a song actually played
+  // before advancing. lastPlayerState itself becomes 'IDLE' on the first idle
+  // poll, so checking it on the second poll would always be false.
+  let lastNonIdleState: string | null = null;
   // Counts consecutive IDLE polls. We require 2 in a row before advancing the
   // track, so that transient IDLE responses from network hiccups or external
   // cast events don't prematurely skip to the next song.
@@ -66,6 +70,7 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
 
     if (status.playerState === 'PLAYING' || status.playerState === 'PAUSED') {
       consecutiveIdleCount = 0;
+      lastNonIdleState = status.playerState;
       const t = status.currentTime;
       if (Number.isFinite(t) && t >= 0) options.setCurrentTime(t);
       castPlaying = status.playerState === 'PLAYING';
@@ -74,14 +79,16 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
       // Buffering is an active state — reset idle counter and keep castPlaying as-is
       // so a brief BUFFERING → IDLE blip doesn't trigger a track advance.
       consecutiveIdleCount = 0;
+      lastNonIdleState = status.playerState;
     } else if (status.playerState === 'IDLE') {
       consecutiveIdleCount++;
       castPlaying = false;
       options.setCastPlaying(false);
 
       // Only advance after 2 consecutive IDLE polls so transient network blips
-      // or external cast messages don't cause a spurious track skip.
-      if (consecutiveIdleCount === 2 && lastPlayerState && lastPlayerState !== 'IDLE') {
+      // don't cause spurious skips. Use lastNonIdleState (not lastPlayerState)
+      // because lastPlayerState is already 'IDLE' by the second poll.
+      if (consecutiveIdleCount === 2 && lastNonIdleState !== null) {
         options.onAdvanceTrack?.();
       }
     }
@@ -120,6 +127,7 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
       castPlaying = false;
       consecutiveIdleCount = 0;
       lastPlayerState = null;
+      lastNonIdleState = null;
       syncStateToOwner();
 
       const track = options.getCurrentTrack();
@@ -175,6 +183,7 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     castVolume = null;
     castDevice = null;
     lastPlayerState = null;
+    lastNonIdleState = null;
     consecutiveIdleCount = 0;
     syncStateToOwner();
 
@@ -240,6 +249,7 @@ export function createPlayerCastController(options: PlayerCastControllerOptions)
     castPlaying = true;
     consecutiveIdleCount = 0;
     lastPlayerState = null;
+    lastNonIdleState = null;
     options.setCurrentTime(0);
     options.setDuration((track.duration ?? 0) > 0 ? track.duration! : 0);
     syncStateToOwner();

@@ -82,7 +82,7 @@
       </p>
     </div>
     <button
-      class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors disabled:opacity-50"
+      class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-border/20 hover:text-foreground transition-colors disabled:opacity-50"
       disabled={loading}
       onclick={() => loadAlbums(activeTab)}
     >

@@ -52,17 +52,17 @@
 
 <style>
   .song-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
     transition: background 150ms ease, transform 150ms ease;
   }
   .song-card:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: color-mix(in srgb, var(--color-muted) 7%, transparent);
     transform: translateY(-2px);
   }
   .song-card-active {
-    border-color: hsl(var(--primary) / 0.3);
-    background: hsl(var(--primary) / 0.08);
+    border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+    background: color-mix(in srgb, var(--color-primary) 8%, transparent);
   }
 
   .play-fab {

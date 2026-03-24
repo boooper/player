@@ -159,7 +159,7 @@
   }
 </script>
 
-<aside class="liquid-glass flex h-full w-full shrink-0 flex-col overflow-hidden border-l border-white/[0.07]">
+<aside class="flex h-full w-full shrink-0 flex-col overflow-hidden border-l border-white/[0.06]" style="background: transparent;">
   <div class="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-4 py-4">
     {#if $playingFrom.type}
       <div class="flex min-w-0 flex-1 flex-col">
@@ -199,10 +199,10 @@
               href={$playingFrom.href}
               class="absolute inset-0 flex flex-col justify-end rounded-lg bg-gradient-to-t from-black/80 via-black/20 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover/art:opacity-100"
             >
-              <span class="text-[10px] font-semibold uppercase tracking-wider text-white/70">
+              <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                 {$playingFrom.type === 'favorites' ? 'Playing from' : $playingFrom.type === 'playlist' ? 'Playing from playlist' : $playingFrom.type === 'artist' ? 'Playing from artist' : 'Playing from album'}
               </span>
-              <span class="truncate text-sm font-bold text-white">{$playingFrom.name}</span>
+              <span class="truncate text-sm font-bold text-foreground">{$playingFrom.name}</span>
             </a>
           {/if}
         </div>
@@ -376,7 +376,7 @@
                 <p class="text-sm leading-relaxed text-muted-foreground">{panelArtistInfo.bio.replace(/<[^>]*>/g, '').trim()}</p>
               {/if}
             </div>
-            <div class="border-t border-white/[0.08] px-6 py-4">
+            <div class="border-t border-white/[0.06] px-6 py-4">
               <button
                 onclick={() => { aboutDialogOpen = false; goto(`/artist/${encodeURIComponent(primarySongArtist(displaySong.artist))}`); }}
                 class="text-sm font-medium hover:underline"

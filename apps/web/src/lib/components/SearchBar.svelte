@@ -11,10 +11,18 @@
   let {
     onPlaySong,
     onGotoArtist,
+    onclose,
   }: {
     onPlaySong: (song: Song) => void;
     onGotoArtist: (artist: string) => void;
+    onclose?: () => void;
   } = $props();
+
+  let inputEl = $state<HTMLInputElement | null>(null);
+
+  export function focus() {
+    inputEl?.focus();
+  }
 
   let value = $state('');
   let dropdownSongs = $state<Song[]>([]);
@@ -70,6 +78,20 @@
   }
 
   let dropdownTimer = 0;
+  let blurTimer = 0;
+
+  function cancelClose() {
+    clearTimeout(blurTimer);
+  }
+
+  function scheduleClose() {
+    cancelClose();
+    blurTimer = window.setTimeout(() => {
+      searchFocused = false;
+      dropdownOpen = false;
+      onclose?.();
+    }, 140);
+  }
 
   function onInput() {
     const q = value.trim();
@@ -130,24 +152,24 @@
 </script>
 
 <div
-  class="search-shell relative w-full max-w-sm"
+  class="search-shell relative w-full max-w-lg"
   class:is-active={searchFocused || dropdownOpen}
   class:is-idle={!searchFocused && !dropdownOpen}
 >
   <form onsubmit={onSubmit}>
-    <div class="search-backdrop absolute inset-0 rounded-full" aria-hidden="true"></div>
-    <div class="search-highlight absolute inset-x-10 top-0 h-px" aria-hidden="true"></div>
-    <span class="search-icon-wrap pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
-      <Search class="size-3.5 {searchFocused ? 'text-primary' : 'text-muted-foreground'}" />
+    <div class="search-backdrop absolute inset-0 rounded-[18px]" aria-hidden="true"></div>
+    <span class="search-icon-wrap pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">
+      <Search class="size-4 {searchFocused ? 'text-primary/90' : 'text-muted-foreground'}" />
     </span>
     <div class="search-input-wrap">
       <Input
+        bind:ref={inputEl}
         bind:value
-        class="relative h-9 rounded-full border-white/10 bg-white/[0.06] pl-9 pr-4 text-sm text-foreground placeholder:text-muted-foreground/60 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.05)] backdrop-blur-xl focus-visible:border-primary/35 focus-visible:bg-white/[0.08] focus-visible:ring-0 focus-visible:shadow-none"
+        class="relative h-11 rounded-[18px] border-white/8 bg-transparent pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground/55 shadow-none backdrop-blur-0 focus-visible:border-primary/35 focus-visible:bg-transparent focus-visible:ring-0 focus-visible:shadow-none"
         placeholder="What do you want to play?"
         oninput={onInput}
-        onfocus={() => { void openSearchDropdown(); }}
-        onblur={() => { searchFocused = false; dropdownOpen = false; }}
+        onfocus={() => { cancelClose(); void openSearchDropdown(); }}
+        onblur={scheduleClose}
       />
     </div>
   </form>
@@ -157,8 +179,8 @@
       role="listbox"
       aria-label={hasQuery ? 'Search results' : 'Recent searches'}
       tabindex="-1"
-      class="search-dropdown liquid-glass absolute left-0 top-full z-50 mt-2 w-full overflow-hidden rounded-2xl"
-      onmousedown={(e) => e.preventDefault()}
+      class="search-dropdown pointer-events-auto absolute left-0 top-full z-[120] mt-3 w-full overflow-hidden rounded-[20px]"
+      onpointerdown={cancelClose}
     >
       {#if !hasQuery}
         <!-- Recents panel -->
@@ -167,6 +189,7 @@
             <div class="mb-2 flex items-center justify-between px-2">
               <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">Recent</span>
               <button
+                type="button"
                 class="text-[11px] text-muted-foreground/40 transition-colors hover:text-muted-foreground"
                 onclick={clearAllRecents}
               >
@@ -179,16 +202,18 @@
                 style="--stagger-index: {i}"
               >
                 <button
-                  class="flex flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-accent"
+                  type="button"
+                  class="flex flex-1 items-center gap-3 rounded-[16px] px-2.5 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
                   onclick={() => { value = term; dropdownOpen = false; saveRecentSearch(term); goto(`/search?q=${encodeURIComponent(term)}`); }}
                 >
-                  <span class="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06]">
+                  <span class="grid size-7 shrink-0 place-items-center rounded-lg bg-transparent">
                     <Clock class="size-3.5 text-muted-foreground/70" />
                   </span>
                   <span class="flex-1 truncate text-sm">{term}</span>
                   <ArrowRight class="size-3.5 shrink-0 text-muted-foreground/0 transition-opacity group-hover:text-muted-foreground/50" />
                 </button>
                 <button
+                  type="button"
                   class="rounded-lg p-1.5 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-foreground"
                   aria-label="Remove"
                   onclick={() => removeRecentSearch(term)}
@@ -200,8 +225,8 @@
           </div>
         {:else}
           <!-- Empty state -->
-          <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
-            <span class="grid size-11 place-items-center rounded-2xl bg-white/[0.05]">
+            <div class="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <span class="grid size-11 place-items-center rounded-2xl bg-transparent">
               <Search class="size-5 text-muted-foreground/40" />
             </span>
             <div>
@@ -226,14 +251,15 @@
               <p class="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">Songs</p>
               {#each dropdownSongs as song, i (song.id)}
                 <button
-                  class="search-row flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-accent"
+                  type="button"
+                  class="search-row flex w-full items-center gap-3 rounded-[16px] px-2.5 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
                   style="--stagger-index: {i}"
                   onclick={() => { onPlaySong(song); dropdownOpen = false; }}
                 >
                   {#if song.coverArtUrl}
                     <img class="size-9 shrink-0 rounded-lg object-cover" src={song.coverArtUrl} alt={song.title} />
                   {:else}
-                    <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-white/[0.07] text-[10px] font-bold text-muted-foreground">{initials(song.title)}</span>
+                    <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-transparent text-[10px] font-bold text-muted-foreground">{initials(song.title)}</span>
                   {/if}
                   <span class="min-w-0 flex-1">
                     <span class="block truncate text-sm font-medium leading-tight">{song.title}</span>
@@ -253,7 +279,8 @@
               <p class="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">Artists</p>
               {#each dropdownArtists as artist, i (artist)}
                 <button
-                  class="search-row flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-accent"
+                  type="button"
+                  class="search-row flex w-full items-center gap-3 rounded-[16px] px-2.5 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
                   style="--stagger-index: {i + (dropdownSongs.length)}"
                   onclick={() => { onGotoArtist(artist); dropdownOpen = false; }}
                 >
@@ -278,7 +305,8 @@
 
           <div class="border-t border-white/[0.06] px-2 py-1.5">
             <button
-              class="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs text-muted-foreground/50 transition-colors hover:bg-accent hover:text-muted-foreground"
+              type="button"
+              class="flex w-full items-center justify-between rounded-[16px] px-3 py-2.5 text-xs text-muted-foreground/50 transition-colors hover:bg-white/[0.04] hover:text-muted-foreground"
               onclick={() => { dropdownOpen = false; saveRecentSearch(value.trim()); goto(`/search?q=${encodeURIComponent(value.trim())}`); }}
             >
               <span>See all results for <span class="font-medium text-foreground/70">"{value}"</span></span>
@@ -305,26 +333,13 @@
   }
 
   .search-backdrop {
-    background:
-      radial-gradient(circle at 14% 50%, hsl(var(--primary) / 0.2), transparent 18%),
-      linear-gradient(180deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.015)),
-      rgb(20 20 24 / 0.52);
-    border: 1px solid rgb(255 255 255 / 0.08);
-    box-shadow:
-      0 14px 32px rgb(0 0 0 / 0.18),
-      inset 0 1px 0 rgb(255 255 255 / 0.06);
-    opacity: 0.92;
+    background: rgb(20 20 26 / 0.96);
+    border: 1px solid rgb(255 255 255 / 0.07);
+    box-shadow: none;
+    opacity: 1;
     transition:
-      opacity 220ms ease,
-      transform 220ms ease,
-      box-shadow 220ms ease,
-      border-color 220ms ease;
-  }
-
-  .search-highlight {
-    opacity: 0.4;
-    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.32), transparent);
-    transition: opacity 220ms ease, transform 220ms ease;
+      background-color 180ms ease,
+      border-color 180ms ease;
   }
 
   .search-icon-wrap {
@@ -340,6 +355,9 @@
   }
 
   .search-dropdown {
+    border: 1px solid rgb(255 255 255 / 0.07);
+    background: rgb(20 20 26 / 0.98);
+    box-shadow: 0 16px 36px rgb(0 0 0 / 0.34);
     transform-origin: top center;
     animation: search-dropdown-in 200ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
   }
@@ -351,17 +369,8 @@
   }
 
   .search-shell.is-active .search-backdrop {
-    opacity: 1;
-    border-color: rgb(255 255 255 / 0.11);
-    box-shadow:
-      0 18px 40px rgb(0 0 0 / 0.22),
-      0 0 0 1px hsl(var(--primary) / 0.12),
-      inset 0 1px 0 rgb(255 255 255 / 0.08);
-  }
-
-  .search-shell.is-active .search-highlight {
-    opacity: 0.72;
-    transform: scaleX(1.04);
+    border-color: rgb(255 255 255 / 0.1);
+    background: rgb(24 24 32 / 0.98);
   }
 
   .search-shell.is-active .search-icon-wrap {

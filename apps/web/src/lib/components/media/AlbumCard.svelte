@@ -41,14 +41,14 @@
 </script>
 
 <AlbumContextMenu {album}>
-  <div class="album-card group relative w-full rounded-xl p-3 text-left">
+  <div class="album-card group relative w-full rounded-xl text-left">
     <!-- Cover art with play overlay -->
     <div class="relative mb-3">
       <button class="block w-full" onclick={() => goto(albumHref)} aria-label="Open {album.name}">
         {#if album.coverArtUrl}
           <img class="aspect-square w-full rounded-lg object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
         {:else}
-          <div class="flex aspect-square w-full items-center justify-center rounded-lg bg-gradient-to-br from-white/10 to-white/5 text-xl font-bold text-white/40">
+          <div class="flex aspect-square w-full items-center justify-center rounded-lg bg-card text-xl font-bold text-muted-foreground ring-1 ring-border/6">
             {initials(album.name)}
           </div>
         {/if}
@@ -77,12 +77,11 @@
 
 <style>
   .album-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    transition: background 150ms ease, transform 150ms ease;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: background 150ms ease;
   }
   .album-card:hover {
-    background: rgba(255, 255, 255, 0.07);
-    transform: translateY(-2px);
+    background: color-mix(in srgb, var(--color-muted) 7%, transparent);
   }
 </style>

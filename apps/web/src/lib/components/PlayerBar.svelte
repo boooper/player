@@ -51,7 +51,7 @@
 
   // ── UI class derivations ──────────────────────────────────────────────────
   const favoriteButtonClass = $derived(
-    `player-favorite-button shrink-0 inline-flex items-center justify-center rounded-full border p-1 transition-colors ${isStarred ? 'border-rose-500/30 bg-rose-500/10 text-rose-500' : 'border-border/50 bg-white/[0.03] text-muted-foreground/60 hover:text-rose-400'}`
+    `player-favorite-button shrink-0 inline-flex items-center justify-center rounded-full border p-1 transition-colors ${isStarred ? 'border-rose-500/30 bg-rose-500/10 text-rose-500' : 'border-border/50 bg-transparent text-muted-foreground/60 hover:text-rose-400'}`
   );
   const repeatButtonClass = $derived(
     `player-transport-button ${$repeatMode !== 'off' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`

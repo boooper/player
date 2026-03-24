@@ -25,7 +25,10 @@ export async function removeLikedArtist(name: string): Promise<void> {
 }
 
 export async function searchSongs(query: string, count = 20): Promise<Song[]> {
-  return (await invoke<Song[]>('library_search', { query, count })).map(normalizeSong);
+  return cached(
+    `search-songs:${query.trim().toLowerCase()}:${count}`,
+    async () => (await invoke<Song[]>('library_search', { query, count })).map(normalizeSong)
+  );
 }
 
 export async function searchBundle(

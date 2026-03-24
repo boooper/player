@@ -190,20 +190,6 @@
 </div>
 
 <style>
-  .song-row {
-    animation: song-row-in 280ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
-    animation-delay: min(calc(var(--row-index) * 11ms), 260ms);
-    transition:
-      transform 150ms ease,
-      background-color 150ms ease,
-      box-shadow 150ms ease;
-  }
-
-  .song-row:hover {
-    transform: translateX(2px);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
-  }
-
   @keyframes song-row-in {
     from {
       opacity: 0;

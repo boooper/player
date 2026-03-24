@@ -196,7 +196,7 @@
         {@const isCurrentTrack = song.id === currentTrackId && active}
         <SongContextMenu {song} onplay={() => playSong(index)}>
           <button
-            class="stagger-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
+            class="stagger-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-border/20 {isCurrentTrack ? 'bg-primary/5' : ''}"
             style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
             style:--stagger-index={index}
             onclick={() => isCurrentTrack ? togglePlayRequest.update((n) => n + 1) : playSong(index)}

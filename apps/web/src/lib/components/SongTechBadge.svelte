@@ -29,7 +29,7 @@
           {...props}
           class="shrink-0 inline-flex cursor-default items-center justify-center rounded-full border p-0.5 {cached
             ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-            : 'border-border/50 bg-white/[0.03] text-muted-foreground/50'}"
+            : 'border-border/50 bg-transparent text-muted-foreground/50'}"
         >
           <Disc3 class="size-2.5" />
         </span>

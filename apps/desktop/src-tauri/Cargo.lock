@@ -3059,6 +3059,7 @@ dependencies = [
  "base64 0.22.1",
  "biquad",
  "cpal",
+ "futures",
  "genius_lyrics",
  "if-addrs",
  "jellyfin-sdk",

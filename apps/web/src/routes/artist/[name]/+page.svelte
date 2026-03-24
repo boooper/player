@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Play, Pause, Shuffle, Sparkles, Mic2 } from '@lucide/svelte';
-  import { Carousel, CarouselContent, CarouselItem } from '$lib/components/ui/carousel';
-  import type { CarouselAPI } from '$lib/components/ui/carousel/context.js';
-  import { ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext, CarouselSeeAll } from '$lib/components/ui/carousel';
 
-  let discographyApi = $state<CarouselAPI | undefined>(undefined);
+  let showAllDiscography = $state(false);
+  let showAllFans = $state(false);
 
   import {
     DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
@@ -95,35 +94,27 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
     albumSongs = {};
     albumLoading = {};
     showAllTracks = false;
+
+    // Phase 1: local data — renders the page immediately
     try {
-      const [infoResult, topResult, subResult, albumResult] = await Promise.allSettled([
-        withTimeout(getArtistInfo(name), ARTIST_LOAD_TIMEOUT_MS, 'Artist metadata load'),
-        withTimeout(getArtistTopTracks(name, 10), ARTIST_LOAD_TIMEOUT_MS, 'Artist top tracks load'),
-        withTimeout(searchSongs(name, 30), ARTIST_LOAD_TIMEOUT_MS, 'Artist songs load'),
+      const [subResult, albumResult] = await Promise.allSettled([
+        withTimeout(searchSongs(name, 50), ARTIST_LOAD_TIMEOUT_MS, 'Artist songs load'),
         withTimeout(fetchArtistAlbums(name, 24), ARTIST_LOAD_TIMEOUT_MS, 'Artist albums load')
       ]);
       if (loadVersion !== artistLoadVersion) return;
-      artistInfo = infoResult.status === 'fulfilled' ? infoResult.value : null;
-      topTracks = topResult.status === 'fulfilled' ? topResult.value : [];
+
       subsonicSongs = subResult.status === 'fulfilled' ? subResult.value : [];
       albums = albumResult.status === 'fulfilled' ? albumResult.value : [];
       mergedAlbums = mergeAlbums(albums);
-      if (!desktopPlayback) {
-        cachedSongIds = new Set();
-      } else {
-        desktopPlaybackCachedIds(subsonicSongs)
-          .then((ids) => {
-            if (loadVersion !== artistLoadVersion) return;
-            cachedSongIds = new Set(ids);
-          })
-          .catch(() => {
-            if (loadVersion !== artistLoadVersion) return;
-            cachedSongIds = new Set();
-          });
+
+      if (subsonicSongs.length === 0 && albums.length === 0) {
+        throw new Error('Failed to load artist.');
       }
 
-      if (!artistInfo && topTracks.length === 0 && subsonicSongs.length === 0 && albums.length === 0) {
-        throw new Error('Failed to load artist.');
+      if (desktopPlayback) {
+        desktopPlaybackCachedIds(subsonicSongs)
+          .then((ids) => { if (loadVersion === artistLoadVersion) cachedSongIds = new Set(ids); })
+          .catch(() => { if (loadVersion === artistLoadVersion) cachedSongIds = new Set(); });
       }
     } catch (err) {
       if (loadVersion !== artistLoadVersion) return;
@@ -132,6 +123,16 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
       if (loadVersion !== artistLoadVersion) return;
       loading = false;
     }
+
+    // Phase 2: external metadata — augments after page is visible
+    const EXTERNAL_TIMEOUT_MS = 8000;
+    const [infoResult, topResult] = await Promise.allSettled([
+      withTimeout(getArtistInfo(name), EXTERNAL_TIMEOUT_MS, 'Artist metadata load'),
+      withTimeout(getArtistTopTracks(name, 10), EXTERNAL_TIMEOUT_MS, 'Artist top tracks load'),
+    ]);
+    if (loadVersion !== artistLoadVersion) return;
+    artistInfo = infoResult.status === 'fulfilled' ? infoResult.value : null;
+    topTracks = topResult.status === 'fulfilled' ? topResult.value : [];
   }
 
   $effect(() => {
@@ -310,7 +311,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
   <div class="relative grid gap-8 px-6 pb-7 pt-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end lg:gap-10 lg:pb-9 lg:pt-10">
     <div>
       {#if loading}
-        <div class="h-16 w-56 animate-pulse rounded bg-white/10"></div>
+        <div class="h-16 w-56 animate-pulse rounded bg-muted"></div>
       {:else}
         <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">Artist</p>
         <h1 class="app-section-title max-w-3xl text-5xl font-black tracking-tight sm:text-6xl lg:text-7xl">{data.name}</h1>
@@ -335,7 +336,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
       {/if}
       <div class="mt-6 flex items-center gap-3">
         <button
-          class="grid size-14 shrink-0 place-items-center rounded-full bg-white text-black shadow-[0_16px_40px_rgba(0,0,0,0.35)] transition duration-200 hover:scale-[1.04] disabled:opacity-40"
+          class="app-round-button grid size-14 shrink-0 place-items-center rounded-full text-foreground shadow-[0_16px_40px_rgba(0,0,0,0.35)] transition duration-200 hover:scale-[1.04] disabled:opacity-40"
           onclick={() => artistIsActive ? togglePlayRequest.update((n) => n + 1) : playOrShuffleAll()}
           disabled={playableTopTracks.length === 0 && !shuffleAllArtist}
           aria-label={artistIsActive && $isPlaying ? 'Pause' : 'Play'}
@@ -451,7 +452,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
         {@const isCurrentTrack = sub.id === currentTrackId}
         <SongContextMenu song={sub} onplay={() => playTopTrack(i)}>
           <button
-            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors duration-150 hover:bg-white/5 {isCurrentTrack ? 'bg-primary/5' : ''}"
+            class="stagger-row group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors duration-150 hover:bg-border/20 {isCurrentTrack ? 'bg-primary/5' : ''}"
             style:--stagger-index={i}
             onclick={() => isCurrentTrack ? togglePlayRequest.update(n => n + 1) : playTopTrack(i)}
           >
@@ -481,7 +482,6 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
               <div class="flex items-center gap-2">
                 <p class="whitespace-normal break-words text-sm font-medium leading-tight {isCurrentTrack ? 'text-primary' : ''}">{sub.title}</p>
                 <SongTechBadge
-                  id={sub.id}
                   cached={desktopPlayback ? cachedSongIds.has(sub.id) : null}
                   audioFormat={sub.audioFormat}
                   bitrateKbps={sub.bitrateKbps}
@@ -514,26 +514,52 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
         <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Collection</p>
         <h2 class="app-section-title text-xl font-bold">Discography</h2>
       </div>
-      <div class="flex gap-1">
-        <button class="app-round-button grid size-8 place-items-center rounded-full disabled:opacity-30" onclick={() => discographyApi?.scrollPrev()} aria-label="Scroll left">
-          <ChevronLeft class="size-4" />
-        </button>
-        <button class="app-round-button grid size-8 place-items-center rounded-full disabled:opacity-30" onclick={() => discographyApi?.scrollNext()} aria-label="Scroll right">
-          <ChevronRight class="size-4" />
-        </button>
-      </div>
+      {#if showAllDiscography}
+        <button class="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground" onclick={() => showAllDiscography = false}>Show Less</button>
+      {/if}
     </div>
-    <Carousel opts={{ align: 'start', dragFree: true }} setApi={(api) => (discographyApi = api)}>
+    {#if showAllDiscography}
+      <div class="section-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        {#each mergedAlbums as album, index (album.id)}
+          <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
+            <div class="app-card app-hover stagger-item group relative flex flex-col gap-2 rounded-2xl p-3 text-left" style={`--stagger-index:${index};`}>
+              <a href="/album/{encodeURIComponent(album.id)}" class="absolute inset-0 z-10 rounded-2xl" aria-label="Open {album.name}"></a>
+              <div class="relative w-full">
+                {#if album.coverArtUrl}
+                  <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+                {:else}
+                  <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
+                {/if}
+                <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
+                  <button onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album); }} aria-label="Play {album.name}" class="grid size-full place-items-center rounded-full">
+                    {#if albumLoading[album.id]}
+                      <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+                    {:else}
+                      <Play class="size-4 translate-x-px" fill="currentColor" />
+                    {/if}
+                  </button>
+                </div>
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <p class="truncate text-sm font-semibold">{album.name}</p>
+                  <ExternalSourceBadge id={album.id} class="shrink-0" />
+                </div>
+                <p class="text-xs text-muted-foreground">{album.year ? `${album.year} · ` : ''}{album.songCount} songs</p>
+              </div>
+            </div>
+          </AlbumContextMenu>
+        {/each}
+      </div>
+    {:else}
+      <div class="section-enter">
+      <Carousel opts={{ align: 'start', dragFree: true }}>
         <CarouselContent>
           {#each mergedAlbums as album, index (album.id)}
-            <CarouselItem class="basis-[176px]">
+            <CarouselItem class="basis-[140px]">
               <AlbumContextMenu album={album} onplay={() => loadAndPlayAlbum(album)}>
                 <div class="app-card app-hover stagger-item group relative flex flex-col gap-2 rounded-2xl p-3 text-left" style={`--stagger-index:${index};`}>
-                  <a
-                    href="/album/{encodeURIComponent(album.id)}"
-                    class="absolute inset-0 z-10 rounded-2xl"
-                    aria-label="Open {album.name}"
-                  ></a>
+                  <a href="/album/{encodeURIComponent(album.id)}" class="absolute inset-0 z-10 rounded-2xl" aria-label="Open {album.name}"></a>
                   <div class="relative w-full">
                     {#if album.coverArtUrl}
                       <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
@@ -541,11 +567,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
                       <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
                     {/if}
                     <div class="absolute bottom-2 right-2 z-20 grid size-10 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100">
-                      <button
-                        onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album); }}
-                        aria-label="Play {album.name}"
-                        class="grid size-full place-items-center rounded-full"
-                      >
+                      <button onclick={(e) => { e.preventDefault(); loadAndPlayAlbum(album); }} aria-label="Play {album.name}" class="grid size-full place-items-center rounded-full">
                         {#if albumLoading[album.id]}
                           <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
                         {:else}
@@ -566,23 +588,69 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
             </CarouselItem>
           {/each}
         </CarouselContent>
-    </Carousel>
+        <CarouselPrevious />
+        <CarouselNext />
+        {#if mergedAlbums.length > 8}
+          <CarouselSeeAll onclick={() => showAllDiscography = true} />
+        {/if}
+      </Carousel>
+      </div>
+    {/if}
   </section>
 {/if}
 
 <!-- Fans also like -->
 {#if artistInfo?.similarArtists?.length}
   <section class="page-section mb-8">
-    <div class="mb-4">
-      <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Related</p>
-      <h2 class="app-section-title text-xl font-bold">Fans also like</h2>
+    <div class="mb-4 flex items-center justify-between">
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/60">Related</p>
+        <h2 class="app-section-title text-xl font-bold">Fans also like</h2>
+      </div>
+      {#if showAllFans}
+        <button class="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground" onclick={() => showAllFans = false}>Show Less</button>
+      {/if}
     </div>
-    <div class="flex flex-wrap gap-2">
-      {#each artistInfo.similarArtists as artist (artist.name)}
-        <div class="w-[110px]">
+    {#if showAllFans}
+      <div class="section-enter grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10">
+        {#each artistInfo.similarArtists as artist (artist.name)}
           <ArtistCard name={artist.name} image={artist.imageUrl ?? ''} />
-        </div>
-      {/each}
-    </div>
+        {/each}
+      </div>
+    {:else}
+      <div class="section-enter">
+        <Carousel opts={{ align: 'start', dragFree: true }}>
+          <CarouselContent>
+            {#each artistInfo.similarArtists as artist (artist.name)}
+              <CarouselItem class="basis-[90px] sm:basis-[100px]">
+                <ArtistCard name={artist.name} image={artist.imageUrl ?? ''} />
+              </CarouselItem>
+            {/each}
+          </CarouselContent>
+          <CarouselPrevious />
+          <CarouselNext />
+          {#if artistInfo.similarArtists.length > 8}
+            <CarouselSeeAll onclick={() => showAllFans = true} />
+          {/if}
+        </Carousel>
+      </div>
+    {/if}
   </section>
 {/if}
+
+<style>
+  .section-enter {
+    animation: section-enter 240ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+  }
+
+  @keyframes section-enter {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>

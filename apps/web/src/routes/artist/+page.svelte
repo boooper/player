@@ -114,7 +114,7 @@
         <ArtistContextMenu name={artist.name}>
         <a
           href={`/artist/${encodeURIComponent(artist.name)}`}
-          class="artist-tile group flex flex-col items-center gap-3 rounded-xl p-4 transition-colors hover:bg-white/5"
+          class="artist-tile group flex flex-col items-center gap-3 rounded-xl p-4 transition-colors hover:bg-border/20"
           style={`--tile-index:${index};`}
         >
           <div class="size-24 shrink-0 overflow-hidden rounded-full shadow-md ring-1 ring-white/10">
@@ -123,7 +123,7 @@
             {:else}
               <div class="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-600 to-slate-800">
                 {#if loading}
-                  <span class="block size-6 animate-pulse rounded-full bg-white/20"></span>
+                  <span class="block size-6 animate-pulse rounded-full bg-transparent"></span>
                 {:else}
                   <span class="text-base font-bold text-white/70">{initials(artist.name)}</span>
                 {/if}

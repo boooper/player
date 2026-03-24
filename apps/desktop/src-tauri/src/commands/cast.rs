@@ -654,7 +654,29 @@ pub async fn cast_play(
         (stream_url, title, artist, cover_url)
     };
 
-    // Start a fresh actor (drops the previous one if any).
+    // Try to reuse an existing connection to the same device — avoids tearing
+    // down the TLS socket mid-stream (OS 10053) on track advance.
+    // If the actor exists but its connection is stale, the LOAD will fail and
+    // we fall through to a full reconnect.
+    let same_device = {
+        let guard = state.cast_actor.lock().map_err(|e| e.to_string())?;
+        guard.as_ref().map_or(false, |h| h.device_addr == device_addr && h.device_port == device_port)
+    };
+
+    if same_device {
+        let result = actor_send!(state, |resp| CastActorCmd::Play {
+            stream_url: stream_url.clone(),
+            title: title.clone(),
+            artist: artist.clone(),
+            cover_url: cover_url.clone(),
+            resp,
+        });
+        if result.is_ok() {
+            return Ok(());
+        }
+        // Connection is dead — fall through to full reconnect below.
+    }
+
     *state.cast_actor.lock().map_err(|e| e.to_string())? = None;
 
     let (name, addr, port) = (device_name.clone(), device_addr.clone(), device_port);
@@ -666,7 +688,6 @@ pub async fn cast_play(
 
     *state.cast_actor.lock().map_err(|e| e.to_string())? = Some(handle);
 
-    // Now play on the already-connected actor.
     actor_send!(state, |resp| CastActorCmd::Play {
         stream_url, title, artist, cover_url, resp
     })

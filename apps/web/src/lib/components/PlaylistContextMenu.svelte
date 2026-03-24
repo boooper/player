@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
   import * as Dialog from '$lib/components/ui/dialog';
+  import { Button } from '$lib/components/ui/button/index.js';
   import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists, pinnedPlaylistIds, togglePlaylistPinned } from '$lib/stores/player';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import { get } from 'svelte/store';
@@ -154,15 +155,12 @@
         </Dialog.Description>
       </Dialog.Header>
       <Dialog.Footer class="mt-6 flex justify-end gap-2">
-        <Dialog.Close class="app-round-button h-10 px-4 text-sm">Cancel</Dialog.Close>
-        <button
-          class="app-round-button h-10 px-4 text-sm text-destructive disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={deleting}
-          onclick={() => void submitDelete()}
-          type="button"
-        >
+        <Dialog.Close>
+          <Button variant="outline" size="default">Cancel</Button>
+        </Dialog.Close>
+        <Button variant="destructive" size="default" disabled={deleting} onclick={() => void submitDelete()} type="button">
           {deleting ? 'Deleting...' : 'Delete'}
-        </button>
+        </Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Portal>
@@ -189,10 +187,12 @@
           />
         </label>
         <Dialog.Footer class="flex justify-end gap-2">
-          <Dialog.Close class="app-round-button h-10 px-4 text-sm">Cancel</Dialog.Close>
-          <button class="app-round-button h-10 px-4 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-50" disabled={renaming} type="submit">
+          <Dialog.Close>
+            <Button variant="outline" size="default">Cancel</Button>
+          </Dialog.Close>
+          <Button variant="default" size="default" disabled={renaming} type="submit">
             {renaming ? 'Saving...' : 'Save'}
-          </button>
+          </Button>
         </Dialog.Footer>
       </form>
     </Dialog.Content>

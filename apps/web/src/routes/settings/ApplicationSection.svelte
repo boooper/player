@@ -225,19 +225,19 @@
           </Select.Root>
         </div>
 
-        <div class="mt-4 rounded-[28px] border border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+        <div class="mt-4 rounded-[28px] border border-border/60 bg-card p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
           <div class="flex gap-4">
             <div class="flex w-11 shrink-0 flex-col justify-between py-5 text-xs font-semibold text-muted-foreground">
               <span>+12dB</span>
               <span>-12dB</span>
             </div>
-            <div class="min-w-0 flex-1">
+              <div class="min-w-0 flex-1">
               <div
-                class="relative h-60 w-full touch-none overflow-hidden rounded-[24px] border border-white/5 bg-[#232323] px-8 pt-5 pb-11 {eqEnabled ? '' : 'opacity-50'}"
+                class="relative h-60 w-full touch-none overflow-hidden rounded-[24px] border border-border/40 bg-card px-8 pt-5 pb-11 {eqEnabled ? '' : 'opacity-50'}"
                 role="group"
                 aria-label="Equalizer graph"
               >
-                <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.05),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(0,0,0,0.14))]"></div>
+                <div class="pointer-events-none absolute inset-0" style="background: radial-gradient(circle at top, color-mix(in srgb, var(--foreground) 5%, transparent) 0%, transparent 55%), linear-gradient(180deg, color-mix(in srgb, var(--foreground) 4%, transparent) 0%, rgba(0,0,0,0.14) 100%);"></div>
                 <div
                   bind:this={eqGraphEl}
                   class="absolute inset-x-8 top-5 bottom-11"
