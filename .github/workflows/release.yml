@@ -70,6 +70,17 @@ jobs:
       - name: Install frontend dependencies
         run: bun install
 
+      - name: Bump app version to match tag
+        shell: bash
+        run: |
+          VERSION="${{ needs.tag.outputs.new_tag }}"
+          VERSION="${VERSION#v}"
+          jq --arg v "$VERSION" '.version = $v' \
+            apps/desktop/src-tauri/tauri.conf.json > tmp.json && \
+            mv tmp.json apps/desktop/src-tauri/tauri.conf.json
+          sed -i "0,/^version = /s/^version = \"[^\"]*\"/version = \"$VERSION\"/" \
+            apps/desktop/src-tauri/Cargo.toml
+
       - name: Inject updater pubkey into release config
         shell: bash
         run: |
