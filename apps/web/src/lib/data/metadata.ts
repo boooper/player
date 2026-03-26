@@ -1,4 +1,5 @@
 import { fetchAudioDbArtist, fetchAudioDbArtistPhoto } from '$lib/providers/metadata/audiodb';
+import { normalizeString as norm, uniqueBy } from '$lib/utils';
 import {
   fetchTopArtists as lfmTopArtists,
   searchArtists as lfmSearchArtists,
@@ -40,20 +41,8 @@ function getProvider(): MetadataSource {
   return 'both';
 }
 
-function getLfmKey(): string { return getLastFmApiKey(); }
-function hasLfm(): boolean { return Boolean(getLfmKey()); }
+function hasLfm(): boolean { return Boolean(getLastFmApiKey()); }
 
-function norm(value: string): string { return value.trim().toLowerCase(); }
-
-function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const k = key(item);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}
 
 async function hydrateImages<T extends { imageUrl: string }>(
   items: T[],
@@ -73,7 +62,8 @@ async function searchLocalSongs(query: string, limit = 12): Promise<LibrarySong[
 
 async function searchLocalArtists(query: string, limit = 12): Promise<UnifiedArtist[]> {
   const songs = await searchLocalSongs(query, Math.max(limit * 4, 24));
-  const filtered = songs.filter((s) => norm(s.artist).includes(norm(query)));
+  const normQuery = norm(query);
+  const filtered = songs.filter((s) => norm(s.artist).includes(normQuery));
   return uniqueBy(filtered, (s) => norm(s.artist))
     .slice(0, limit)
     .map((s) => ({
@@ -96,7 +86,8 @@ async function getLocalArtistSongs(artist: string, limit = 30): Promise<LibraryS
     `local-songs:${norm(artist)}:${limit}`,
     async () => {
       const songs = await searchLocalSongs(artist, Math.max(limit * 2, 30));
-      return songs.filter((s) => norm(s.artist) === norm(artist)).slice(0, limit);
+      const normArtist = norm(artist);
+      return songs.filter((s) => norm(s.artist) === normArtist).slice(0, limit);
     }
   );
 }
@@ -112,12 +103,11 @@ async function getLocalArtistInfo(artist: string): Promise<UnifiedArtistInfo | n
     albums.find((a) => a.coverArtUrl)?.coverArtUrl ||
     songs.find((s) => s.coverArtUrl)?.coverArtUrl ||
     '';
-  const tags = uniqueBy(
-    songs.map((s) => s.album).filter(Boolean).map((v) => ({ v })),
-    (item) => norm(item.v)
-  )
-    .slice(0, 5)
-    .map((item) => item.v);
+  const seenAlbums = new Set<string>();
+  const tags = songs
+    .map((s) => s.album)
+    .filter((a): a is string => Boolean(a) && !seenAlbums.has(norm(a)) && !!seenAlbums.add(norm(a)))
+    .slice(0, 5);
 
   return {
     name: artist,

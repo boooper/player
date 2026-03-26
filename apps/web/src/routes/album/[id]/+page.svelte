@@ -1,20 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { Play, Pause, Shuffle, Clock3, ArrowLeft } from '@lucide/svelte';
-  import { page } from '$app/state';
+  import { Play, Pause, Shuffle, Clock3, ArrowLeft, Sparkles } from '@lucide/svelte';
   import { goto } from '$app/navigation';
-
-  function goBack() {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      goto('/');
-    }
-  }
-
   import {
-    DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
-    desktopPlaybackCachedIds,
     fetchAlbumDetail,
     fetchAlbumSongs,
     fetchArtistAlbums,
@@ -22,7 +9,7 @@
     type Song
   } from '$lib/servers';
   import { findAlbumGroupIds, mergeAlbumSongs } from '$lib/media-merge';
-  import { focusTrack, playQueue, playingFrom, enableShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { startQueue, playingFrom, activateShuffle, enableSmartShuffle, disableShuffle, shuffleEnabled, smartShuffleMode, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import { SongRow } from '$lib/components/media';
   import {
@@ -32,43 +19,35 @@
     DropdownMenuItem,
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
-  import { Sparkles } from '@lucide/svelte';
   import { libraryRefresh } from '$lib/stores/ui-state';
-  import { isTauri } from '$lib/tauri';
+  import { initials, withTimeout, formatDurationHuman, sumDuration } from '$lib/utils';
+  import { DesktopCache } from '$lib/hooks/use-desktop-cache.svelte';
+
+  function goBack() {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      goto('/');
+    }
+  }
+
+  function buildAlbum(base: Album, trackList: Song[]): Album & { genre?: string } {
+    return { ...base, songCount: trackList.length, duration: sumDuration(trackList) };
+  }
+
+  let { data } = $props<{ data: { id: string } }>();
 
   const albumHref = $derived(`/album/${encodeURIComponent(data.id)}`);
   const albumIsActive = $derived($playingFrom.href === albumHref);
-
-  let { data } = $props<{ data: { id: string } }>();
 
   let loading = $state(true);
   let merging = $state(false);
   let error = $state('');
   let album = $state<(Album & { genre?: string }) | null>(null);
   let songs = $state<Song[]>([])
-  let cachedSongIds = $state<Set<string>>(new Set());
+  const cache = new DesktopCache();
   let albumLoadVersion = 0;
   const ALBUM_LOAD_TIMEOUT_MS = 12000;
-  const desktopPlayback = isTauri();
-
-  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error(`${label} timed out.`));
-      }, ms);
-
-      promise.then(
-        (value) => {
-          window.clearTimeout(timeout);
-          resolve(value);
-        },
-        (reason) => {
-          window.clearTimeout(timeout);
-          reject(reason);
-        }
-      );
-    });
-  }
 
   async function loadAlbum() {
     const loadVersion = ++albumLoadVersion;
@@ -79,11 +58,7 @@
       if (loadVersion !== albumLoadVersion) return;
 
       // Show initial content immediately — don't wait for related album merging.
-      album = {
-        ...detail.album,
-        songCount: detail.songs.length,
-        duration: detail.songs.reduce((total, song) => total + (song.duration || 0), 0)
-      };
+      album = buildAlbum(detail.album, detail.songs);
       songs = detail.songs;
       loading = false;
       merging = true;
@@ -107,29 +82,13 @@
         const merged = mergeAlbumSongs([...detail.songs, ...extra]);
         if (loadVersion !== albumLoadVersion) return;
         const resolved = merged.length ? merged : detail.songs;
-        album = {
-          ...detail.album,
-          songCount: resolved.length,
-          duration: resolved.reduce((total, song) => total + (song.duration || 0), 0)
-        };
+        album = buildAlbum(detail.album, resolved);
         songs = resolved;
       }
 
       if (loadVersion !== albumLoadVersion) return;
       merging = false;
-      if (!desktopPlayback) {
-        cachedSongIds = new Set();
-      } else {
-        desktopPlaybackCachedIds(songs)
-          .then((ids) => {
-            if (loadVersion !== albumLoadVersion) return;
-            cachedSongIds = new Set(ids);
-          })
-          .catch(() => {
-            if (loadVersion !== albumLoadVersion) return;
-            cachedSongIds = new Set();
-          });
-      }
+      void cache.load(songs, loadVersion, () => albumLoadVersion);
     } catch (err) {
       if (loadVersion !== albumLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load album.';
@@ -144,54 +103,13 @@
     loadAlbum();
   });
 
-  onMount(() => {
-    if (!desktopPlayback) return;
-
-    function handleDesktopCacheUpdated(event: Event) {
-      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
-      if (!songId) return;
-      cachedSongIds = new Set([...cachedSongIds, songId]);
-    }
-
-    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    return () => {
-      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    };
-  });
 
   function playFrom(index: number) {
     if (!songs.length) return;
-    const song = songs[index];
-    focusTrack.set({
-      title: song.title,
-      artist: song.artist,
-      imageUrl: song.coverArtUrl,
-      source: 'library',
-      album: song.album
-    });
-    playQueue(songs, index);
-    if (album) playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(data.id)}` });
+    if (album) startQueue(songs, index, { type: 'album', name: album.name, href: albumHref });
   }
 
-  function playAll() {
-    playFrom(0);
-  }
 
-  function activateShuffle() { smartShuffleMode.set(false); enableShuffle(); }
-  function activateSmartShuffle() { enableSmartShuffle(); }
-  function deactivateShuffle() { disableShuffle(); }
-
-  function fmtDuration(totalSeconds: number): string {
-    if (!isFinite(totalSeconds) || !totalSeconds) return '';
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
-    if (h > 0) return `${h} hr ${m} min`;
-    return `${m} min`;
-  }
-
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 </script>
 
 <div class="w-full">
@@ -249,7 +167,7 @@
           <span>{album.songCount} songs</span>
           {#if album.duration}
             <span>·</span>
-            <span>{fmtDuration(album.duration)}</span>
+            <span>{formatDurationHuman(album.duration)}</span>
           {/if}
         </div>
       {/if}
@@ -258,7 +176,7 @@
         <div class="mt-5 flex items-center gap-3">
           <button
             class="relative grid size-14 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 disabled:opacity-40"
-            onclick={() => albumIsActive ? togglePlayRequest.update((n) => n + 1) : playAll()}
+            onclick={() => albumIsActive ? togglePlayRequest.update((n) => n + 1) : playFrom(0)}
             disabled={songs.length === 0}
             aria-label={albumIsActive && $isPlaying ? 'Pause album' : 'Play album'}
           >
@@ -295,13 +213,13 @@
                 Shuffle
                 {#if $shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
               </DropdownMenuItem>
-              <DropdownMenuItem onclick={activateSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
+              <DropdownMenuItem onclick={enableSmartShuffle} class="gap-3 {$smartShuffleMode ? 'text-primary' : ''}">
                 <Sparkles class="size-4 shrink-0" />
                 Smart Shuffle
                 {#if $smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onclick={deactivateShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
+              <DropdownMenuItem onclick={disableShuffle} class="gap-3 {!$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : 'text-muted-foreground'}">
                 <span class="size-4 shrink-0 flex items-center justify-center text-xs font-bold">—</span>
                 Off
                 {#if !$shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
@@ -344,7 +262,7 @@
           {song}
           index={i}
           onplay={() => playFrom(i)}
-          cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+          cached={cache.enabled ? cache.ids.has(song.id) : null}
           staggerIndex={i}
         />
       {/each}

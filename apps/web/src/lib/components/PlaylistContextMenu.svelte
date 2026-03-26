@@ -6,9 +6,8 @@
   import * as ContextMenu from '$lib/components/ui/context-menu';
   import * as Dialog from '$lib/components/ui/dialog';
   import { Button } from '$lib/components/ui/button/index.js';
-  import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists, pinnedPlaylistIds, togglePlaylistPinned } from '$lib/stores/player';
+  import { appendToQueue, startQueue, addRecentlyPlayed, playNextInQueueBatch, playingFrom, subsonicPlaylists, pinnedPlaylistIds, togglePlaylistPinned } from '$lib/stores/player';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
-  import { get } from 'svelte/store';
   import { fetchPlaylistSongs, fetchPlaylists, renamePlaylist, deletePlaylist, type Playlist } from '$lib/servers';
 
   let { playlist, onplay, children, triggerClass }: {
@@ -35,25 +34,14 @@
     }
     if (!songs.length) { toast.warning('Playlist has no tracks'); return; }
 
+    const playlistHref = `/playlist/${encodeURIComponent(playlist.id)}`;
+    const playlistFrom = { type: 'playlist' as const, name: playlist.name, href: playlistHref };
     if (mode === 'now') {
-      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
-      playQueue(songs, 0);
-      playingFrom.set({ type: 'playlist', name: playlist.name, href: `/playlist/${encodeURIComponent(playlist.id)}` });
-      addRecentlyPlayed({ id: playlist.id, name: playlist.name, coverArtUrl: playlist.coverArtUrl, href: `/playlist/${encodeURIComponent(playlist.id)}`, type: 'playlist' });
+      startQueue(songs, 0, playlistFrom);
+      addRecentlyPlayed({ id: playlist.id, name: playlist.name, coverArtUrl: playlist.coverArtUrl, href: playlistHref, type: 'playlist' });
     } else if (mode === 'next') {
-      if (!get(queue).length) {
-        focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
-        playQueue(songs, 0);
-        playingFrom.set({ type: 'playlist', name: playlist.name, href: `/playlist/${encodeURIComponent(playlist.id)}` });
-      } else {
-        const idx = get(currentIndex);
-        queue.update((current) => {
-          const next = [...current];
-          next.splice(idx + 1, 0, ...songs);
-          return next;
-        });
-        toast.success('Playing next', { description: playlist.name });
-      }
+      playNextInQueueBatch(songs, playlistFrom);
+      toast.success('Playing next', { description: playlist.name });
     } else {
       appendToQueue(songs);
       toast.success('Added to queue', { description: `${songs.length} tracks from ${playlist.name}` });

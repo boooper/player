@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { SvelteSet } from 'svelte/reactivity';
   import { Mic2, Search, X } from '@lucide/svelte';
 
   import { fetchAlbumList } from '$lib/servers';
+  import { initials } from '$lib/utils';
   import { getArtistArtworkMap } from '$lib/discovery';
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
   import { libraryRefresh } from '$lib/stores/ui-state';
@@ -15,18 +15,14 @@
   let error = $state('');
   let artistsLoadVersion = 0;
 
-  // Client-side filter.
-  const artists = $derived(
-    query.trim()
-      ? allArtists.filter((a) => a.name.toLowerCase().includes(query.toLowerCase()))
-      : allArtists
-  );
+  const artists = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allArtists;
+    return allArtists.filter((a) => a.name.toLowerCase().includes(q));
+  });
 
   function clearSearch() { query = ''; }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 
   async function loadArtists() {
     const loadVersion = ++artistsLoadVersion;
@@ -35,7 +31,7 @@
     try {
       // Fetch a large album list and extract unique artist names.
       const albums = await fetchAlbumList('newest', 200);
-      const seen = new SvelteSet<string>();
+      const seen = new Set<string>();
       const entries: ArtistEntry[] = [];
       for (const album of albums) {
         if (album.artist && !seen.has(album.artist)) {

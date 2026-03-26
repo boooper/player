@@ -4,8 +4,9 @@
   import type { Album } from '$lib/servers';
   import { fetchAlbumSongs } from '$lib/servers';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
-  import { focusTrack, playQueue, playingFrom, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { startQueue, playingFrom, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { activeServerType } from '$lib/stores/ui-state';
+  import { initials } from '$lib/utils';
   import { toast } from 'svelte-sonner';
 
   let { album }: { album: Album } = $props();
@@ -14,10 +15,6 @@
 
   const albumHref = $derived(`/album/${encodeURIComponent(album.id)}`);
   const isActive = $derived($playingFrom.href === albumHref);
-
-  function initials(name: string) {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 
   async function play(event: MouseEvent) {
     event.stopPropagation();
@@ -31,9 +28,7 @@
       const isOctoFiesta = $activeServerType === 'octo_fiesta';
       const songs = isOctoFiesta ? all : all.filter((s) => !s.id.startsWith('ext-'));
       if (!songs.length) { toast.warning('No locally available tracks for this album'); return; }
-      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
-      playingFrom.set({ type: 'album', name: album.name, href: albumHref });
-      playQueue(songs, 0);
+      startQueue(songs, 0, { type: 'album', name: album.name, href: albumHref });
     } finally {
       loading = false;
     }

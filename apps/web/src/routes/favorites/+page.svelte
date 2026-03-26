@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Play, Pause, Shuffle, Heart, Sparkles } from '@lucide/svelte';
 
-  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, desktopPlaybackCachedIds, fetchStarredSongs, type Song } from '$lib/servers';
-  import { focusTrack, playQueue, playingFrom, starredSongIds, smartShuffleMode, shuffleEnabled, isPlaying, togglePlayRequest, enableShuffle, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
+  import { fetchStarredSongs, type Song } from '$lib/servers';
+  import { startQueue, playingFrom, starredSongIds, activateShuffle, smartShuffleMode, shuffleEnabled, isPlaying, togglePlayRequest, enableSmartShuffle, disableShuffle } from '$lib/stores/player';
   import { SongRow } from '$lib/components/media';
-  import { formatClockDuration } from '$lib/utils';
+  import { formatClockDuration, shuffleArray, sumDuration } from '$lib/utils';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -14,7 +13,7 @@
     DropdownMenuSeparator,
   } from '$lib/components/ui/dropdown-menu';
   import { libraryRefresh } from '$lib/stores/ui-state';
-  import { isTauri } from '$lib/tauri';
+  import { DesktopCache } from '$lib/hooks/use-desktop-cache.svelte';
 
   let loading = $state(false);
   let error = $state('');
@@ -26,9 +25,7 @@
   let songs = $derived(allStarredSongs.filter(s => $starredSongIds.has(s.id)));
   const favoritesHref = '/favorites';
   const favoritesIsActive = $derived($playingFrom.href === favoritesHref);
-  const favoriteSongCount = $derived(songs.length);
-  let cachedSongIds = $state<Set<string>>(new Set());
-  const desktopPlayback = isTauri();
+  const cache = new DesktopCache();
 
   let favoritesLoadVersion = 0;
 
@@ -40,19 +37,7 @@
       .then((s) => {
         if (loadVersion !== favoritesLoadVersion) return;
         allStarredSongs = s;
-        if (!desktopPlayback) {
-          cachedSongIds = new Set();
-        } else {
-          desktopPlaybackCachedIds(s)
-            .then((ids) => {
-              if (loadVersion !== favoritesLoadVersion) return;
-              cachedSongIds = new Set(ids);
-            })
-            .catch(() => {
-              if (loadVersion !== favoritesLoadVersion) return;
-              cachedSongIds = new Set();
-            });
-        }
+        void cache.load(s, loadVersion, () => favoritesLoadVersion);
         // If the layout hasn't populated starredSongIds yet (initial direct load),
         // seed it from our result so songs is derived correctly right away.
         if ($starredSongIds.size === 0 && s.length > 0) {
@@ -75,49 +60,17 @@
     loadFavorites();
   });
 
-  onMount(() => {
-    if (!desktopPlayback) return;
 
-    function handleDesktopCacheUpdated(event: Event) {
-      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
-      if (!songId) return;
-      cachedSongIds = new Set([...cachedSongIds, songId]);
-    }
-
-    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    return () => {
-      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    };
-  });
-
-  function formatDuration(seconds: number): string {
-    return formatClockDuration(seconds);
-  }
-
-  function totalDuration(): number {
-    return songs.reduce((acc, s) => acc + (s.duration ?? 0), 0);
-  }
 
   function playSong(index: number) {
-    const song = songs[index];
-    if (!song) return;
-    focusTrack.set({
-      title: song.title,
-      artist: song.artist,
-      imageUrl: song.coverArtUrl,
-      source: 'library',
-      album: song.album
-    });
-    playQueue(songs, index);
-    playingFrom.set({ type: 'favorites', name: 'Liked Songs', href: favoritesHref });
+    if (!songs[index]) return;
+    startQueue(songs, index, { type: 'favorites', name: 'Liked Songs', href: favoritesHref });
   }
 
   function playAll() {
     if (!songs.length) return;
-    const list = ($shuffleEnabled || $smartShuffleMode) ? [...songs].sort(() => Math.random() - 0.5) : songs;
-    focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'library', album: list[0].album });
-    playQueue(list, 0);
-    playingFrom.set({ type: 'favorites', name: 'Liked Songs', href: favoritesHref });
+    const list = ($shuffleEnabled || $smartShuffleMode) ? shuffleArray(songs) : songs;
+    startQueue(list, 0, { type: 'favorites', name: 'Liked Songs', href: favoritesHref });
   }
 
 </script>
@@ -140,9 +93,9 @@
   <div class="flex flex-col justify-end gap-2">
     <p class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Playlist</p>
     <h2 class="app-section-title text-3xl font-bold tracking-tight">Liked Songs</h2>
-    {#if favoriteSongCount}
+    {#if songs.length}
       <p class="text-sm text-muted-foreground">
-        {favoriteSongCount} songs · {formatDuration(totalDuration())}
+        {favoriteSongCount} songs · {formatClockDuration(sumDuration(songs))}
       </p>
     {/if}
     <div class="flex items-center gap-3 mt-1">
@@ -180,7 +133,7 @@
           {/snippet}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="min-w-44">
-          <DropdownMenuItem onclick={() => { smartShuffleMode.set(false); enableShuffle(); }} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
+          <DropdownMenuItem onclick={activateShuffle} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
             <Shuffle class="size-4 shrink-0" />
             Shuffle
             {#if $shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
@@ -229,7 +182,7 @@
           {index}
           showAlbum
           onplay={() => playSong(index)}
-          cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+          cached={cache.enabled ? cache.ids.has(song.id) : null}
           staggerIndex={index}
         />
       {/each}

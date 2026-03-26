@@ -2,8 +2,9 @@
   import { goto } from '$app/navigation';
   import { Play, Pause, Loader } from '@lucide/svelte';
   import { searchSongs } from '$lib/servers';
-  import { focusTrack, playQueue, playingFrom, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { startQueue, playingFrom, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { activeServerType } from '$lib/stores/ui-state';
+  import { initials } from '$lib/utils';
   import { toast } from 'svelte-sonner';
 
   let {
@@ -19,10 +20,6 @@
   const artistHref = $derived(`/artist/${encodeURIComponent(name)}`);
   const isActive = $derived($playingFrom.href === artistHref);
 
-  function initials(n: string) {
-    return n.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
-
   async function play(event: MouseEvent) {
     event.stopPropagation();
     if (isActive) {
@@ -34,12 +31,11 @@
       const songs = await searchSongs(name, 50);
       const isOctoFiesta = $activeServerType === 'octo_fiesta';
       const playable = isOctoFiesta ? songs : songs.filter((s) => !s.id.startsWith('ext-'));
-      const artistSongs = playable.filter((s) => s.artist?.toLowerCase().includes(name.toLowerCase()));
+      const nameLower = name.toLowerCase();
+      const artistSongs = playable.filter((s) => s.artist?.toLowerCase().includes(nameLower));
       const list = artistSongs.length ? artistSongs : playable;
       if (!list.length) { toast.warning('No locally available tracks for this artist'); return; }
-      focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'library', album: list[0].album });
-      playingFrom.set({ type: 'artist', name, href: artistHref });
-      playQueue(list, 0);
+      startQueue(list, 0, { type: 'artist', name, href: artistHref });
     } finally {
       loading = false;
     }

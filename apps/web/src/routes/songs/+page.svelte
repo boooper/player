@@ -1,12 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Play, Music2, Search, X } from '@lucide/svelte';
 
-  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, desktopPlaybackCachedIds, searchSongs, type Song } from '$lib/servers';
-  import { focusTrack, playQueue, playingFrom } from '$lib/stores/player';
+  import { searchSongs, type Song } from '$lib/servers';
+  import { startQueue } from '$lib/stores/player';
   import { SongRow } from '$lib/components/media';
   import { libraryRefresh } from '$lib/stores/ui-state';
-  import { isTauri } from '$lib/tauri';
+  import { DesktopCache } from '$lib/hooks/use-desktop-cache.svelte';
 
   // All songs loaded from the library on mount.
   let allSongs = $state<Song[]>([]);
@@ -14,38 +13,26 @@
   let loading = $state(false);
   let error = $state('');
   let songsLoadVersion = 0;
-  let cachedSongIds = $state<Set<string>>(new Set());
-  const desktopPlayback = isTauri();
+  const cache = new DesktopCache();
 
   // Client-side filter when a query is present.
-  const songs = $derived(
-    query.trim()
-      ? allSongs.filter((s) => {
-          const q = query.toLowerCase();
-          return (
-            s.title.toLowerCase().includes(q) ||
-            s.artist.toLowerCase().includes(q) ||
-            s.album.toLowerCase().includes(q)
-          );
-        })
-      : allSongs
-  );
+  const songs = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allSongs;
+    return allSongs.filter((s) =>
+      s.title.toLowerCase().includes(q) ||
+      s.artist.toLowerCase().includes(q) ||
+      s.album.toLowerCase().includes(q)
+    );
+  });
 
   function clearSearch() {
     query = '';
   }
 
   function playSong(index: number) {
-    const song = songs[index];
-    if (!song) return;
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playQueue(songs, index);
-    playingFrom.set({ type: 'search', name: 'All Songs', href: '/songs' });
-  }
-
-  function playAll() {
-    if (!songs.length) return;
-    playSong(0);
+    if (!songs[index]) return;
+    startQueue(songs, index, { type: 'search', name: 'All Songs', href: '/songs' });
   }
 
   function loadSongs() {
@@ -57,19 +44,7 @@
       .then((s) => {
         if (loadVersion !== songsLoadVersion) return;
         allSongs = s;
-        if (!desktopPlayback) {
-          cachedSongIds = new Set();
-          return;
-        }
-        desktopPlaybackCachedIds(s)
-          .then((ids) => {
-            if (loadVersion !== songsLoadVersion) return;
-            cachedSongIds = new Set(ids);
-          })
-          .catch(() => {
-            if (loadVersion !== songsLoadVersion) return;
-            cachedSongIds = new Set();
-          });
+        void cache.load(s, loadVersion, () => songsLoadVersion);
       })
       .catch((err) => {
         if (loadVersion !== songsLoadVersion) return;
@@ -87,20 +62,6 @@
     loadSongs();
   });
 
-  onMount(() => {
-    if (!desktopPlayback) return;
-
-    function handleDesktopCacheUpdated(event: Event) {
-      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
-      if (!songId) return;
-      cachedSongIds = new Set([...cachedSongIds, songId]);
-    }
-
-    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    return () => {
-      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    };
-  });
 
 </script>
 
@@ -122,7 +83,7 @@
     {#if songs.length > 0}
       <button
         class="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition hover:scale-105 hover:brightness-110 active:scale-95"
-        onclick={playAll}
+        onclick={() => playSong(0)}
         aria-label="Play all"
       >
         <Play class="size-5 translate-x-0.5 text-muted-foreground" fill="currentColor" />
@@ -173,7 +134,7 @@
             {index}
             showAlbum
             onplay={() => playSong(index)}
-            cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+            cached={cache.enabled ? cache.ids.has(song.id) : null}
             staggerIndex={index}
           />
         {/each}

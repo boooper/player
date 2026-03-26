@@ -5,6 +5,33 @@ export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs));
 }
 
+export function initials(name: string): string {
+	return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
+}
+
+export function normalizeString(value: string): string {
+	return value.trim().toLowerCase();
+}
+
+export function withTimeout<T>(promise: Promise<T>, ms: number, label = ''): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timeout = window.setTimeout(() => reject(new Error(`${label} timed out.`)), ms);
+		promise.then(
+			(value) => { window.clearTimeout(timeout); resolve(value); },
+			(reason) => { window.clearTimeout(timeout); reject(reason); }
+		);
+	});
+}
+
+export function shuffleArray<T>(items: T[]): T[] {
+	const next = [...items];
+	for (let i = next.length - 1; i > 0; i--) {
+		const j = Math.floor(Math.random() * (i + 1));
+		[next[i], next[j]] = [next[j], next[i]];
+	}
+	return next;
+}
+
 export function formatClockDuration(seconds: number | null | undefined): string {
 	if (!Number.isFinite(seconds) || !seconds || seconds <= 0) return "0:00";
 	const safe = Math.max(0, Math.floor(seconds));
@@ -17,6 +44,43 @@ export function formatClockDuration(seconds: number | null | undefined): string 
 	}
 
 	return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+/** Sum of all song durations in seconds. */
+export function sumDuration(songs: { duration?: number | null }[]): number {
+	return songs.reduce((acc, s) => acc + (s.duration ?? 0), 0);
+}
+
+/** Promise that resolves after `ms` milliseconds. */
+export function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Human-readable listener count: "1.2M monthly listeners", "450K monthly listeners". */
+export function formatListenerCount(listeners: number): string {
+	return listeners >= 1_000_000
+		? `${(listeners / 1_000_000).toFixed(1)}M monthly listeners`
+		: `${(listeners / 1_000).toFixed(0)}K monthly listeners`;
+}
+
+/** Returns a new array with duplicates removed, based on the given key function. */
+export function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {
+	const seen = new Set<string>();
+	return items.filter((item) => {
+		const k = key(item);
+		if (seen.has(k)) return false;
+		seen.add(k);
+		return true;
+	});
+}
+
+/** Human-readable duration: "1 hr 30 min", "45 min". Returns empty string for invalid input. */
+export function formatDurationHuman(totalSeconds: number | null | undefined): string {
+	if (!totalSeconds || !isFinite(totalSeconds) || totalSeconds <= 0) return '';
+	const h = Math.floor(totalSeconds / 3600);
+	const m = Math.floor((totalSeconds % 3600) / 60);
+	if (h > 0) return `${h} hr ${m} min`;
+	return `${m} min`;
 }
 
 /** Creates an isolated TTL promise-cache. Entries are deduplicated and evicted on error. */

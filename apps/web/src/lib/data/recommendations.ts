@@ -7,7 +7,7 @@ import {
   getRecommendationProviderSetting,
 } from '$lib/stores/backend-settings';
 import type { RecommendationSource, UnifiedRecommendation } from './types';
-import { ttlCache } from '$lib/utils';
+import { ttlCache, normalizeString as norm } from '$lib/utils';
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
@@ -29,10 +29,7 @@ function getProvider(): RecommendationSource {
   return v === 'listenbrainz' ? 'listenbrainz' : 'lastfm';
 }
 
-function getLfmKey(): string { return getLastFmApiKey(); }
-function hasLfm(): boolean { return Boolean(getLfmKey()); }
-
-function norm(value: string): string { return value.trim().toLowerCase(); }
+function hasLfm(): boolean { return Boolean(getLastFmApiKey()); }
 
 function recKey(artist: string, title: string): string {
   return `${norm(artist)}::${norm(title)}`;
@@ -42,11 +39,15 @@ function matchSong(candidates: LibrarySong[], artist: string, title: string): Li
   const key = recKey(artist, title);
   const exact = candidates.find((s) => recKey(s.artist, s.title) === key);
   if (exact) return exact;
-  const byArtist = candidates.filter((s) => norm(s.artist) === norm(artist));
+  const normArtist = norm(artist);
+  const normTitle = norm(title);
+  const byArtist = candidates.filter((s) => norm(s.artist) === normArtist);
   return (
     byArtist.find(
-      (s) =>
-        norm(s.title).includes(norm(title)) || norm(title).includes(norm(s.title))
+      (s) => {
+        const st = norm(s.title);
+        return st.includes(normTitle) || normTitle.includes(st);
+      }
     ) ?? null
   );
 }
@@ -72,7 +73,7 @@ export async function getRecommendations(params: {
     });
   }
   if (!hasLfm()) return [];
-  return (await fetchLastFmRecommendations({ ...params })).map((r) => ({
+  return (await fetchLastFmRecommendations(params)).map((r) => ({
     ...r,
     source: 'lastfm' as const,
   }));

@@ -12,14 +12,13 @@ import {
   markSmartShuffleTracks
 } from '$lib/stores/player';
 import {
-  fetchSimilarSongs,
   fetchArtistAlbums,
   fetchAlbumSongs,
   type Song
 } from '$lib/servers';
-import { fetchLikedArtists, lfmUserTaste } from '$lib/servers';
-import { getUpNextSongs } from '$lib/discovery';
+import { getEnrichedSongRecommendations } from '$lib/discovery';
 import { primarySongArtist } from '$lib/song-artists';
+import { shuffleArray } from '$lib/utils';
 import { toast } from 'svelte-sonner';
 
 type SongLike = Song & {
@@ -32,7 +31,6 @@ type SongLike = Song & {
 
 type PlayerShuffleControllerOptions = {
   getCurrentTrack: () => SongLike | null;
-  getLastFmApiKey: () => string | null | undefined;
 };
 
 const shuffleEnabledRef = fromStore(shuffleEnabled);
@@ -52,15 +50,6 @@ const SMART_SHUFFLE_MAX_SPACING = 3;
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function shuffleItems<T>(items: T[]): T[] {
-  const next = [...items];
-  for (let i = next.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [next[i], next[j]] = [next[j], next[i]];
-  }
-  return next;
 }
 
 export function createPlayerShuffleController(options: PlayerShuffleControllerOptions) {
@@ -103,14 +92,9 @@ export function createPlayerShuffleController(options: PlayerShuffleControllerOp
 
       if (!allSongs.length) throw new Error('No songs found');
 
-      for (let i = allSongs.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [allSongs[i], allSongs[j]] = [allSongs[j], allSongs[i]];
-      }
-
       smartShuffleMode.set(false);
       shuffleEnabled.set(true);
-      playQueue(allSongs, 0);
+      playQueue(shuffleArray(allSongs), 0);
       toast.success(`Shuffling ${artist}`, { id: toastId });
     } catch {
       toast.error('Failed to load artist songs', { id: toastId });
@@ -128,14 +112,9 @@ export function createPlayerShuffleController(options: PlayerShuffleControllerOp
       const songs = await fetchAlbumSongs(currentTrack.albumId);
       if (!songs.length) throw new Error('No songs found');
 
-      for (let i = songs.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [songs[i], songs[j]] = [songs[j], songs[i]];
-      }
-
       smartShuffleMode.set(false);
       shuffleEnabled.set(true);
-      playQueue(songs, 0);
+      playQueue(shuffleArray(songs), 0);
       toast.success(`Shuffling ${albumName}`, { id: toastId });
     } catch {
       toast.error('Failed to load album songs', { id: toastId });
@@ -146,7 +125,6 @@ export function createPlayerShuffleController(options: PlayerShuffleControllerOp
     const items = queueRef.current;
     const idx = currentIndexRef.current;
     const track = items[idx];
-    const lastFmApiKey = options.getLastFmApiKey();
 
     if (!smartShuffleModeRef.current) {
       smartShufflePlayCount = 0;
@@ -176,19 +154,14 @@ export function createPlayerShuffleController(options: PlayerShuffleControllerOp
 
     const fetchLimit = randomInt(SMART_SHUFFLE_MIN_FETCH, SMART_SHUFFLE_MAX_FETCH);
 
-    const doFetch: Promise<SongLike[]> = lastFmApiKey
-      ? Promise.all([
-          fetchLikedArtists().then((stored) => stored.map((a) => a.name)).catch((): string[] => []),
-          lfmUserTaste().catch((): string[] => [])
-        ]).then(([liked, taste]) => {
-          const merged = [...new Set([...liked, ...taste])];
-          return getUpNextSongs({ artist, title, likedArtists: merged, limit: fetchLimit }) as Promise<SongLike[]>;
-        })
-      : fetchSimilarSongs(id, fetchLimit) as Promise<SongLike[]>;
+    const doFetch: Promise<SongLike[]> = getEnrichedSongRecommendations({
+      seed: { id, artist, title },
+      limit: fetchLimit,
+    }) as Promise<SongLike[]>;
 
     doFetch
       .then((songs) => {
-        const freshPool = shuffleItems(songs.filter((s) => !existingIds.has(s.id)));
+        const freshPool = shuffleArray(songs.filter((s) => !existingIds.has(s.id)));
         const fresh = freshPool.slice(
           0,
           randomInt(1, Math.min(SMART_SHUFFLE_MAX_INSERT, freshPool.length))
@@ -205,13 +178,13 @@ export function createPlayerShuffleController(options: PlayerShuffleControllerOp
             next.length
           );
 
-          fresh.forEach((song) => {
+          for (const song of fresh) {
             next.splice(insertAt, 0, song);
             insertAt = Math.min(
               insertAt + randomInt(SMART_SHUFFLE_MIN_SPACING, SMART_SHUFFLE_MAX_SPACING),
               next.length
             );
-          });
+          }
 
           return next;
         });

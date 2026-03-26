@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Play, Pause, Shuffle, Sparkles, Mic2 } from '@lucide/svelte';
   import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext, CarouselSeeAll } from '$lib/components/ui/carousel';
 
@@ -7,8 +6,6 @@
   let showAllFans = $state(false);
 
   import {
-    DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT,
-    desktopPlaybackCachedIds,
     fetchArtistAlbums,
     fetchAlbumSongs,
     searchSongs,
@@ -21,7 +18,7 @@
     type DiscoveryArtistInfo as ArtistInfo,
     type DiscoverySong as LastFmSong
   } from '$lib/discovery';
-  import { focusTrack, playQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest, queueLoading, queue, currentIndex } from '$lib/stores/player';
+  import { startQueue, playingFrom, shuffleEnabled, addRecentlyPlayed, smartShuffleMode, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest, queueLoading, queue, currentIndex } from '$lib/stores/player';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { toast } from 'svelte-sonner';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -30,8 +27,8 @@
   import ExternalSourceBadge from '$lib/components/ExternalSourceBadge.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import { mergeAlbums, mergeAlbumSongs, type MergedAlbum } from '$lib/media-merge';
-  import { formatClockDuration } from '$lib/utils';
-  import { isTauri } from '$lib/tauri';
+  import { formatClockDuration, initials, withTimeout, shuffleArray } from '$lib/utils';
+  import { DesktopCache } from '$lib/hooks/use-desktop-cache.svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -51,7 +48,7 @@
   let albums = $state<Album[]>([])
   let mergedAlbums = $state<MergedAlbum[]>([]);
   let showAllTracks = $state(false);
-  let cachedSongIds = $state<Set<string>>(new Set());
+  const cache = new DesktopCache();
 
   let albumSongs = $state<Record<string, Song[]>>({});
   let albumLoading = $state<Record<string, boolean>>({});
@@ -61,26 +58,6 @@
 const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
   const artistIsActive = $derived($playingFrom.href === artistHref);
   const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
-  const desktopPlayback = isTauri();
-
-  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error(`${label} timed out.`));
-      }, ms);
-
-      promise.then(
-        (value) => {
-          window.clearTimeout(timeout);
-          resolve(value);
-        },
-        (reason) => {
-          window.clearTimeout(timeout);
-          reject(reason);
-        }
-      );
-    });
-  }
 
   async function loadArtist(name: string) {
     const loadVersion = ++artistLoadVersion;
@@ -111,11 +88,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
         throw new Error('Failed to load artist.');
       }
 
-      if (desktopPlayback) {
-        desktopPlaybackCachedIds(subsonicSongs)
-          .then((ids) => { if (loadVersion === artistLoadVersion) cachedSongIds = new Set(ids); })
-          .catch(() => { if (loadVersion === artistLoadVersion) cachedSongIds = new Set(); });
-      }
+      void cache.load(subsonicSongs, loadVersion, () => artistLoadVersion);
     } catch (err) {
       if (loadVersion !== artistLoadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load artist.';
@@ -141,51 +114,33 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
     loadArtist(data.name);
   });
 
-  onMount(() => {
-    if (!desktopPlayback) return;
 
-    function handleDesktopCacheUpdated(event: Event) {
-      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
-      if (!songId) return;
-      cachedSongIds = new Set([...cachedSongIds, songId]);
-    }
-
-    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    return () => {
-      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    };
-  });
-
-  function findSubsonicMatch(title: string): Song | null {
-    const needle = title.toLowerCase();
-    return subsonicSongs.find((s) => s.title.toLowerCase() === needle) ?? null;
-  }
+  // O(1) title lookup — rebuilt only when subsonicSongs changes.
+  const subsonicByTitle = $derived(
+    new Map(subsonicSongs.map((s) => [s.title.toLowerCase(), s]))
+  );
 
   const playableTopTracks = $derived(
-    topTracks
-      .map((t) => ({ lfm: t, sub: findSubsonicMatch(t.title) }))
-      .filter((r) => r.sub !== null) as Array<{ lfm: LastFmSong; sub: Song }>
+    topTracks.flatMap((t) => {
+      const sub = subsonicByTitle.get(t.title.toLowerCase());
+      return sub ? [{ lfm: t, sub }] : [];
+    })
   );
+
+  const playableTopSongs = $derived(playableTopTracks.map((r) => r.sub));
 
   const visibleTopTracks = $derived(
     showAllTracks ? playableTopTracks : playableTopTracks.slice(0, 5)
   );
 
   function playTopTrack(index: number) {
-    const list = playableTopTracks.map((r) => r.sub!);
-    const song = list[index];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playQueue(list, index);
-    playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
+    startQueue(playableTopSongs, index, { type: 'artist', name: data.name, href: artistHref });
   }
 
   function playAllTopTracks() {
-    const list = playableTopTracks.map((r) => r.sub!);
-    if (!list.length) return;
-    const ordered = ($shuffleEnabled || $smartShuffleMode) ? [...list].sort(() => Math.random() - 0.5) : list;
-    focusTrack.set({ title: ordered[0].title, artist: ordered[0].artist, imageUrl: ordered[0].coverArtUrl, source: 'library', album: ordered[0].album });
-    playQueue(ordered, 0);
-    playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
+    if (!playableTopSongs.length) return;
+    const ordered = ($shuffleEnabled || $smartShuffleMode) ? shuffleArray(playableTopSongs) : playableTopSongs;
+    startQueue(ordered, 0, { type: 'artist', name: data.name, href: artistHref });
   }
 
   async function ensureMergedAlbumSongs(album: MergedAlbum): Promise<Song[]> {
@@ -215,11 +170,9 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
     queueLoading.set(true);
     const songs = await ensureMergedAlbumSongs(album).finally(() => queueLoading.set(false));
     if (!songs?.length) return;
-    const song = songs[startIndex];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playQueue(songs, startIndex);
-    addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
-    playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
+    const href = `/album/${encodeURIComponent(album.id)}`;
+    startQueue(songs, startIndex, { type: 'album', name: album.name, href });
+    addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href, type: 'album' });
   }
 
   // Shuffle dropdown
@@ -265,12 +218,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
           allSongResults.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
         );
         if (!allSongs.length) throw new Error('No songs found');
-        for (let i = allSongs.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [allSongs[i], allSongs[j]] = [allSongs[j], allSongs[i]];
-        }
-        playQueue(allSongs, 0);
-        playingFrom.set({ type: 'artist', name: data.name, href: `/artist/${encodeURIComponent(data.name)}` });
+        startQueue(shuffleArray(allSongs), 0, { type: 'artist', name: data.name, href: artistHref });
         toast.success(`Shuffling all ${data.name} songs`, { id: toastId });
       } catch {
         toast.error('Failed to load artist songs', { id: toastId });
@@ -288,13 +236,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
     return `${n} listeners`;
   }
 
-  function fmt(seconds: number): string {
-    return formatClockDuration(seconds);
-  }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 </script>
 
 <!-- Hero -->
@@ -482,7 +424,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
               <div class="flex items-center gap-2">
                 <p class="whitespace-normal break-words text-sm font-medium leading-tight {isCurrentTrack ? 'text-primary' : ''}">{sub.title}</p>
                 <SongTechBadge
-                  cached={desktopPlayback ? cachedSongIds.has(sub.id) : null}
+                  cached={cache.enabled ? cache.ids.has(sub.id) : null}
                   audioFormat={sub.audioFormat}
                   bitrateKbps={sub.bitrateKbps}
                   compact
@@ -492,7 +434,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
                 <p class="text-xs text-muted-foreground">{lfm.listeners.toLocaleString()} plays</p>
               {/if}
             </div>
-            <span class="text-xs tabular-nums text-muted-foreground">{fmt(sub.duration)}</span>
+            <span class="text-xs tabular-nums text-muted-foreground">{formatClockDuration(sub.duration)}</span>
           </button>
         </SongContextMenu>
       {/each}

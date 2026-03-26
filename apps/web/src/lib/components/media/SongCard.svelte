@@ -3,6 +3,7 @@
   import type { Song } from '$lib/servers';
   import { queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
+  import { initials } from '$lib/utils';
 
   let {
     song,
@@ -22,9 +23,6 @@
     }
   }
 
-  function initials(name: string) {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 </script>
 
 <SongContextMenu {song} {onplay}>

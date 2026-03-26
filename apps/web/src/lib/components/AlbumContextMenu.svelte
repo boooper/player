@@ -4,10 +4,10 @@
   import { toast } from 'svelte-sonner';
   import { goto } from '$app/navigation';
   import * as ContextMenu from '$lib/components/ui/context-menu';
-  import { appendToQueue, playQueue, playingFrom, focusTrack, addRecentlyPlayed, queue, currentIndex, subsonicPlaylists, queueLoading } from '$lib/stores/player';
+  import { appendToQueue, startQueue, addRecentlyPlayed, playNextInQueueBatch, subsonicPlaylists, queueLoading } from '$lib/stores/player';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
-  import { get } from 'svelte/store';
   import { createPlaylist, fetchAlbumSongs, fetchPlaylists, materializeSong, searchSongs, type Album } from '$lib/servers';
+  import { normalizeString as normalize, delay } from '$lib/utils';
 
   let { album, onplay, children, triggerClass }: {
     album: Album;
@@ -29,25 +29,14 @@
     queueLoading.set(false);
     if (!songs.length) { toast.warning('Album has no tracks'); return; }
 
+    const albumHref = `/album/${encodeURIComponent(album.id)}`;
+    const albumFrom = { type: 'album' as const, name: album.name, href: albumHref };
     if (mode === 'now') {
-      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
-      playQueue(songs, 0);
-      playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
-      addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
+      startQueue(songs, 0, albumFrom);
+      addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: albumHref, type: 'album' });
     } else if (mode === 'next') {
-      if (!get(queue).length) {
-        focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
-        playQueue(songs, 0);
-        playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
-      } else {
-        const idx = get(currentIndex);
-        queue.update((current) => {
-          const next = [...current];
-          next.splice(idx + 1, 0, ...songs);
-          return next;
-        });
-        toast.success('Playing next', { description: album.name });
-      }
+      playNextInQueueBatch(songs, albumFrom);
+      toast.success('Playing next', { description: album.name });
     } else {
       appendToQueue(songs);
       toast.success('Added to queue', { description: `${songs.length} tracks from ${album.name}` });
@@ -121,7 +110,7 @@
   }
 
   async function findMaterializedSong(song: Awaited<ReturnType<typeof fetchAlbumSongs>>[number]) {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    for (let attempt = 0; attempt < 6; attempt++) {
       const candidates = await searchSongs(`${song.artist} ${song.title}`, 10).catch(() => []);
       const exact = candidates.find((candidate) =>
         !candidate.id.startsWith('ext-') &&
@@ -142,13 +131,6 @@
     return null;
   }
 
-  function normalize(value: string) {
-    return value.trim().toLowerCase();
-  }
-
-  function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 </script>
 
 <ContextMenu.Root>

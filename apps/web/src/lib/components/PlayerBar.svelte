@@ -9,7 +9,7 @@
   } from '$lib/stores/player';
   import { starSong, unstarSong, desktopPlaybackPause, type CastDeviceInfo } from '$lib/servers';
   import { normalizeEqBands } from '$lib/audio/equalizer';
-  import { formatClockDuration } from '$lib/utils';
+  import { formatClockDuration, initials } from '$lib/utils';
   import { toast } from 'svelte-sonner';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
   import { Button, Slider } from '$lib/components/ui';
@@ -100,7 +100,6 @@
 
   const shuffleController = createPlayerShuffleController({
     getCurrentTrack: () => currentTrack,
-    getLastFmApiKey: () => lastFmApiKey
   });
 
   createPlayerScrobbleController({
@@ -193,10 +192,6 @@
     }
   }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2)
-      .map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 </script>
 
 <footer class="player-bar liquid-glass shrink-0 border-t border-white/[0.08] px-4 py-3 {isBuffering || $queueLoading ? 'player-bar-loading' : ''}">

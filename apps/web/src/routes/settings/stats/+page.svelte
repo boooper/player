@@ -4,6 +4,7 @@
   import { getListeningProfile, type ListeningProfile, type SongStat, type ArtistStat, type GenreStat } from '$lib/servers/play-history';
   import { playNextInQueue, appendToQueue } from '$lib/stores/player';
   import { searchSongs, type Song } from '$lib/servers';
+  import { initials } from '$lib/utils';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import { goto } from '$app/navigation';
 
@@ -46,9 +47,6 @@
     return 'bg-rose-500';
   }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 
   // ── Song lookup for context menu play action ────────────────────────────────
   async function playSong(stat: SongStat) {
@@ -147,6 +145,8 @@
       {:else}
         <div class="space-y-1">
           {#each profile.topSongs as stat, i (stat.songId)}
+            {@const skip = skipRate(stat)}
+            {@const completion = completionPct(stat)}
             <SongContextMenu
               song={{ id: stat.songId, title: stat.title, artist: stat.artist, album: stat.album ?? '', albumId: '', coverArtUrl: '', coverArt: null, streamUrl: '', duration: 0 }}
               onplay={() => playSong(stat)}
@@ -191,11 +191,11 @@
                 <!-- Skip rate + completion bar -->
                 <div class="hidden md:block w-28 shrink-0 space-y-1">
                   <div class="flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span class="flex items-center gap-1"><SkipForward class="size-3" />{skipRate(stat)}% skip</span>
-                    <span class="flex items-center gap-1"><CheckCircle class="size-3" />{completionPct(stat)}%</span>
+                    <span class="flex items-center gap-1"><SkipForward class="size-3" />{skip}% skip</span>
+                    <span class="flex items-center gap-1"><CheckCircle class="size-3" />{completion}%</span>
                   </div>
                   <div class="h-1 w-full overflow-hidden rounded-full bg-muted">
-                    <div class="h-full rounded-full bg-primary/60 transition-all" style="width:{completionPct(stat)}%"></div>
+                    <div class="h-full rounded-full bg-primary/60 transition-all" style="width:{completion}%"></div>
                   </div>
                 </div>
               </div>
@@ -211,6 +211,8 @@
       {:else}
         <div class="space-y-1">
           {#each profile.topArtists as stat, i (stat.artist)}
+            {@const skip = skipRate(stat)}
+            {@const completion = completionPct(stat)}
             <button
               class="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent"
               onclick={() => goto(`/artist/${encodeURIComponent(stat.artist)}`)}
@@ -231,14 +233,14 @@
               <!-- Completion / skip bar -->
               <div class="hidden sm:block w-36 shrink-0 space-y-1">
                 <div class="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span>{completionPct(stat)}% avg completion</span>
+                  <span>{completion}% avg completion</span>
                   <span class="flex items-center gap-0.5">
-                    <span class="inline-block size-1.5 rounded-full {skipColor(skipRate(stat))}"></span>
-                    {skipRate(stat)}% skip
+                    <span class="inline-block size-1.5 rounded-full {skipColor(skip)}"></span>
+                    {skip}% skip
                   </span>
                 </div>
                 <div class="h-1 w-full overflow-hidden rounded-full bg-muted">
-                  <div class="h-full rounded-full bg-primary/60 transition-all" style="width:{completionPct(stat)}%"></div>
+                  <div class="h-full rounded-full bg-primary/60 transition-all" style="width:{completion}%"></div>
                 </div>
               </div>
             </button>

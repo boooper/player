@@ -1,12 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, desktopPlaybackCachedIds, fetchPlaylistDetail, type Song } from '$lib/servers';
+  import { fetchPlaylistDetail, type Song } from '$lib/servers';
   import { Play, Pause, Shuffle, Sparkles } from '@lucide/svelte';
-  import { focusTrack, playQueue, playingFrom, smartShuffleMode, shuffleEnabled, enableShuffle, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { startQueue, playingFrom, activateShuffle, smartShuffleMode, shuffleEnabled, enableSmartShuffle, disableShuffle, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { SongRow } from '$lib/components/media';
-  import { formatClockDuration } from '$lib/utils';
+  import { formatClockDuration, initials, shuffleArray, sumDuration } from '$lib/utils';
   import { libraryRefresh } from '$lib/stores/ui-state';
-  import { isTauri } from '$lib/tauri';
+  import { DesktopCache } from '$lib/hooks/use-desktop-cache.svelte';
   import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -23,11 +22,10 @@
   let coverArtUrl = $state('');
   let songCount = $state(0);
   let songs = $state<Song[]>([]);
-  let cachedSongIds = $state<Set<string>>(new Set());
+  const cache = new DesktopCache();
   let playlistLoadVersion = 0;
   const playlistHref = $derived(`/playlist/${encodeURIComponent(data.id)}`);
   const playlistIsActive = $derived($playingFrom.href === playlistHref);
-  const desktopPlayback = isTauri();
 
   $effect(() => {
     const id = data.id;
@@ -42,7 +40,7 @@
     coverArtUrl = '';
     songCount = 0;
     songs = [];
-    cachedSongIds = new Set();
+    cache.reset();
 
     fetchPlaylistDetail(id)
       .then((detail) => {
@@ -51,19 +49,7 @@
         coverArtUrl = detail.playlist.coverArtUrl;
         songCount = detail.playlist.songCount;
         songs = detail.songs;
-        if (!desktopPlayback) {
-          cachedSongIds = new Set();
-        } else {
-          desktopPlaybackCachedIds(detail.songs)
-            .then((ids) => {
-              if (loadVersion !== playlistLoadVersion) return;
-              cachedSongIds = new Set(ids);
-            })
-            .catch(() => {
-              if (loadVersion !== playlistLoadVersion) return;
-              cachedSongIds = new Set();
-            });
-        }
+        void cache.load(detail.songs, loadVersion, () => playlistLoadVersion);
       })
       .catch((err) => {
         if (loadVersion !== playlistLoadVersion) return;
@@ -75,47 +61,18 @@
       });
   });
 
-  onMount(() => {
-    if (!desktopPlayback) return;
 
-    function handleDesktopCacheUpdated(event: Event) {
-      const songId = (event as CustomEvent<{ songId?: string }>).detail?.songId;
-      if (!songId) return;
-      cachedSongIds = new Set([...cachedSongIds, songId]);
-    }
 
-    window.addEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    return () => {
-      window.removeEventListener(DESKTOP_PLAYBACK_CACHE_UPDATED_EVENT, handleDesktopCacheUpdated);
-    };
-  });
-
-  function formatDuration(seconds: number): string {
-    return formatClockDuration(seconds);
-  }
-
-  function totalDuration(): number {
-    return songs.reduce((acc, s) => acc + (s.duration ?? 0), 0);
-  }
-
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('');
-  }
 
   function playSong(index: number) {
-    const song = songs[index];
-    if (!song) return;
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playingFrom.set({ type: 'playlist', name: playlistName, href: `/playlist/${encodeURIComponent(data.id)}` });
-    playQueue(songs, index);
+    if (!songs[index]) return;
+    startQueue(songs, index, { type: 'playlist', name: playlistName, href: playlistHref });
   }
 
   function playAll() {
     if (!songs.length) return;
-    const list = ($shuffleEnabled || $smartShuffleMode) ? [...songs].sort(() => Math.random() - 0.5) : songs;
-    focusTrack.set({ title: list[0].title, artist: list[0].artist, imageUrl: list[0].coverArtUrl, source: 'library', album: list[0].album });
-    playingFrom.set({ type: 'playlist', name: playlistName, href: `/playlist/${encodeURIComponent(data.id)}` });
-    playQueue(list, 0);
+    const list = ($shuffleEnabled || $smartShuffleMode) ? shuffleArray(songs) : songs;
+    startQueue(list, 0, { type: 'playlist', name: playlistName, href: playlistHref });
   }
 </script>
 
@@ -142,7 +99,7 @@
       <h2 class="app-section-title text-3xl font-bold tracking-tight">{playlistName || '…'}</h2>
       {#if songs.length}
         <p class="text-sm text-muted-foreground">
-          {songCount} songs · {formatDuration(totalDuration())}
+          {songCount} songs · {formatClockDuration(sumDuration(songs))}
         </p>
       {/if}
       <div class="flex items-center gap-3 mt-1">
@@ -178,7 +135,7 @@
             {/snippet}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" class="min-w-44">
-            <DropdownMenuItem onclick={() => { smartShuffleMode.set(false); enableShuffle(); }} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
+            <DropdownMenuItem onclick={activateShuffle} class="gap-3 {$shuffleEnabled && !$smartShuffleMode ? 'text-primary' : ''}">
               <Shuffle class="size-4 shrink-0" />
               Shuffle
               {#if $shuffleEnabled && !$smartShuffleMode}<span class="ml-auto size-1.5 rounded-full bg-primary"></span>{/if}
@@ -240,7 +197,7 @@
           {index}
           showAlbum
           onplay={() => playSong(index)}
-          cached={desktopPlayback ? cachedSongIds.has(song.id) : null}
+          cached={cache.enabled ? cache.ids.has(song.id) : null}
           staggerIndex={index}
         />
       {/each}

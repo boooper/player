@@ -15,6 +15,11 @@ export {
   clearRecommendationCaches,
 } from '$lib/data/recommendations';
 
+export {
+  getEnrichedSongRecommendations, getPersonalisedArtists, clearSongRecommendationCache,
+  type SongSeed,
+} from '$lib/data/song-recommendations';
+
 // Type aliases for backward compatibility
 export type { UnifiedArtist as DiscoveryArtist } from '$lib/data/types';
 export type { UnifiedSong as DiscoverySong } from '$lib/data/types';

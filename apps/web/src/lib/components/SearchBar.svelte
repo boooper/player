@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
   import { goto } from '$app/navigation';
   import { Search, Clock, X, Music, User, ArrowRight } from '@lucide/svelte';
   import { Input } from '$lib/components/ui';
   import { searchSongs, type Song } from '$lib/servers';
   import { getArtistArtworkMap } from '$lib/discovery';
   import { readUiJson, writeUiJson } from '$lib/ui-storage';
+  import { initials, uniqueBy } from '$lib/utils';
 
   let {
     onPlaySong,
@@ -108,11 +108,7 @@
       try {
         const songs = await searchSongs(q, 8);
         dropdownSongs = songs.slice(0, 5);
-        const seen = new SvelteSet<string>();
-        dropdownArtists = songs
-          .map((s) => s.artist)
-          .filter((a) => { if (seen.has(a)) return false; seen.add(a); return true; })
-          .slice(0, 4);
+        dropdownArtists = uniqueBy(songs, (s) => s.artist).map((s) => s.artist).slice(0, 4);
         fetchPhotos(dropdownArtists);
       } catch {
         dropdownSongs = [];
@@ -142,9 +138,6 @@
     goto(`/search?q=${encodeURIComponent(query)}`);
   }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 
   onMount(() => {
     void loadRecentSearches();

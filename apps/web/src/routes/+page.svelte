@@ -13,23 +13,26 @@
   import {
     fetchAlbumList,
     fetchAlbumSongs,
+    fetchArtistAlbums,
     fetchLikedArtists,
     type Album,
     type Song,
   } from '$lib/servers';
   import { AlbumCard, ArtistCard, SongRow } from '$lib/components/media';
+  import AlbumCarouselSection from '$lib/components/AlbumCarouselSection.svelte';
   import { getListeningProfile, type ArtistStat } from '$lib/servers/play-history';
+  import { getPersonalisedArtists } from '$lib/data';
   import {
     addRecentlyPlayed,
+    startQueue,
     currentIndex,
-    focusTrack,
     isPlaying,
     playingFrom,
-    playQueue,
     queue,
     queueLoading,
     togglePlayRequest,
   } from '$lib/stores/player';
+  import { initials } from '$lib/utils';
   import { libraryRefresh } from '$lib/stores/ui-state';
 
   let loading = $state(true);
@@ -48,14 +51,17 @@
   let expandedSection = $state<string | null>(null);
 
   function uniqueAlbums(albums: Album[]) {
-    return albums.filter((album, index, list) => list.findIndex((item) => item.id === album.id) === index);
+    const seen = new Set<string>();
+    return albums.filter((a) => !seen.has(a.id) && !!seen.add(a.id));
   }
 
-  function artistScore(name: string) {
+  // Precomputed O(1) lookup structures — rebuilt only when source data changes.
+  const likedSet = $derived(new Set(likedArtists.map((a) => a.trim().toLowerCase())));
+  const topArtistPlayCounts = $derived(new Map(topArtists.map((a) => [a.artist.trim().toLowerCase(), a.playCount])));
+
+  function artistScore(name: string): number {
     const key = name.trim().toLowerCase();
-    const liked = likedArtists.some((artist) => artist.trim().toLowerCase() === key) ? 4 : 0;
-    const history = topArtists.find((artist) => artist.artist.trim().toLowerCase() === key)?.playCount ?? 0;
-    return liked + history;
+    return (likedSet.has(key) ? 4 : 0) + (topArtistPlayCounts.get(key) ?? 0);
   }
 
   const spotlightAlbum = $derived.by(() => {
@@ -63,69 +69,33 @@
     return rankedNewest[0] ?? recentAlbums[0] ?? randomAlbums[0] ?? null;
   });
 
-  const recentlyPlayedAlbums = $derived.by(() => {
-    const pool = recentAlbums.length ? recentAlbums : randomAlbums;
-    return uniqueAlbums(pool).slice(0, 10);
-  });
-
   const allRecentlyPlayedAlbums = $derived.by(() => {
     const pool = recentAlbums.length ? recentAlbums : randomAlbums;
     return uniqueAlbums(pool);
   });
-
-  const favoriteAlbums = $derived.by(() => {
-    return uniqueAlbums([...newestAlbums, ...randomAlbums])
+  // "For You Mixes" — albums where the artist has any taste relationship (liked or played).
+  // Sorted strongest-first so most relevant albums lead.
+  const allFavoriteAlbums = $derived.by(() =>
+    uniqueAlbums(newestAlbums.concat(randomAlbums))
+      .filter((album) => artistScore(album.artist) > 0 && album.id !== spotlightAlbum?.id)
       .sort((a, b) => artistScore(b.artist) - artistScore(a.artist))
+  );
+  // "Fresh Finds" — albums where artistScore is 0: no liked/played relationship yet.
+  // This is genuine discovery; enrichment only adds taste-relevant albums to randomAlbums
+  // so zero-score albums are always truly unfamiliar artists.
+  const allFreshFindsAlbums = $derived.by(() =>
+    uniqueAlbums(randomAlbums.concat(newestAlbums))
+      .filter((album) => artistScore(album.artist) === 0 && album.id !== spotlightAlbum?.id)
+  );
+  const allLateNightAlbums = $derived.by(() =>
+    uniqueAlbums(recentAlbums.concat(randomAlbums, newestAlbums))
       .filter((album) => album.id !== spotlightAlbum?.id)
-      .slice(0, 12);
-  });
-
-  const allFavoriteAlbums = $derived.by(() => {
-    return uniqueAlbums([...newestAlbums, ...randomAlbums])
-      .sort((a, b) => artistScore(b.artist) - artistScore(a.artist))
-      .filter((album) => album.id !== spotlightAlbum?.id);
-  });
-
-  const freshFindsAlbums = $derived.by(() => {
-    return uniqueAlbums([...randomAlbums, ...newestAlbums])
-      .filter((album) => !favoriteAlbums.some((item) => item.id === album.id))
-      .slice(0, 12);
-  });
-
-  const allFreshFindsAlbums = $derived.by(() => {
-    return uniqueAlbums([...randomAlbums, ...newestAlbums])
-      .filter((album) => !favoriteAlbums.some((item) => item.id === album.id));
-  });
-
-  const lateNightAlbums = $derived.by(() => {
-    return uniqueAlbums([...recentAlbums, ...randomAlbums, ...newestAlbums])
-      .filter((album) => album.id !== spotlightAlbum?.id)
-      .slice(3, 15);
-  });
-
-  const allLateNightAlbums = $derived.by(() => {
-    return uniqueAlbums([...recentAlbums, ...randomAlbums, ...newestAlbums])
-      .filter((album) => album.id !== spotlightAlbum?.id);
-  });
-
-  const artistHighlights = $derived.by(() => {
-    return topArtists
+  );
+  const allArtistHighlights = $derived.by(() =>
+    topArtists
       .filter((artist) => artist.artist.trim().length > 0)
-      .slice(0, 12)
-      .map((artist) => ({
-        name: artist.artist,
-        image: artist.coverArtUrl ?? '',
-      }));
-  });
-
-  const allArtistHighlights = $derived.by(() => {
-    return topArtists
-      .filter((artist) => artist.artist.trim().length > 0)
-      .map((artist) => ({
-        name: artist.artist,
-        image: artist.coverArtUrl ?? '',
-      }));
-  });
+      .map((artist) => ({ name: artist.artist, image: artist.coverArtUrl ?? '' }))
+  );
 
   const spotlightHref = $derived(
     spotlightAlbum ? `/album/${encodeURIComponent(spotlightAlbum.id)}` : ''
@@ -154,11 +124,76 @@
       randomAlbums = random;
       recentAlbums = recent;
       topArtists = profile.topArtists;
+      loading = false;
+
+      // Phase 2 — enrich "For You Mixes" with albums from liked + top-played artists.
+      // Runs in the background after the page is already rendered.
+      const artistNames = [
+        ...liked.map((a) => a.name),
+        ...profile.topArtists.slice(0, 6).map((a) => a.artist),
+      ];
+      // Dedupe by lowercase key, preserve first occurrence (liked artists take priority).
+      const dedupedArtists = [
+        ...new Map(artistNames.map((a) => [a.trim().toLowerCase(), a])).values(),
+      ].slice(0, 10);
+
+      if (dedupedArtists.length) {
+        const artistAlbumResults = await Promise.allSettled(
+          dedupedArtists.map((artist) => fetchArtistAlbums(artist, 6).catch(() => [] as Album[]))
+        );
+
+        if (version !== loadVersion) return;
+
+        const artistAlbums = artistAlbumResults.flatMap((r) =>
+          r.status === 'fulfilled' ? r.value : []
+        );
+        if (artistAlbums.length) {
+          // Prepend so they bubble to the top after artistScore sorting.
+          randomAlbums = uniqueAlbums([...artistAlbums, ...random]);
+        }
+      }
+
+      // Phase 3 — discover similar artists via enriched recs seeded from top songs.
+      // These are artists the user may not have played directly but whose music is
+      // similar to what they already love — feeds "Releases for You" & all carousels.
+      const topSongSeeds = profile.topSongs.slice(0, 3).map((s) => ({
+        id: s.songId,
+        title: s.title,
+        artist: s.artist,
+      }));
+
+      if (topSongSeeds.length) {
+        const similarArtists = await getPersonalisedArtists({
+          topSongs: topSongSeeds,
+          limit: 12,
+        }).catch(() => [] as string[]);
+
+        if (version !== loadVersion) return;
+
+        if (similarArtists.length) {
+          // Only fetch albums for artists not already covered by Phase 2.
+          const phase2Keys = new Set(dedupedArtists.map((a) => a.trim().toLowerCase()));
+          const newArtists = similarArtists
+            .filter((a) => !phase2Keys.has(a.trim().toLowerCase()))
+            .slice(0, 8);
+
+          const similarAlbumResults = await Promise.allSettled(
+            newArtists.map((artist) => fetchArtistAlbums(artist, 4).catch(() => [] as Album[]))
+          );
+
+          if (version !== loadVersion) return;
+
+          const similarAlbums = similarAlbumResults.flatMap((r) =>
+            r.status === 'fulfilled' ? r.value : []
+          );
+          if (similarAlbums.length) {
+            randomAlbums = uniqueAlbums([...randomAlbums, ...similarAlbums]);
+          }
+        }
+      }
     } catch (err) {
       if (version !== loadVersion) return;
       error = err instanceof Error ? err.message : 'Failed to load your home feed.';
-    } finally {
-      if (version !== loadVersion) return;
       loading = false;
     }
   }
@@ -191,7 +226,7 @@
 
   async function playAlbum(album: Album) {
     if (spotlightIsActive && spotlightAlbum?.id === album.id) {
-      togglePlayRequest.update((value) => value + 1);
+      togglePlayRequest.update((n) => n + 1);
       return;
     }
 
@@ -205,15 +240,7 @@
 
       if (!songs.length) return;
 
-      focusTrack.set({
-        title: songs[0].title,
-        artist: songs[0].artist,
-        imageUrl: songs[0].coverArtUrl,
-        source: 'library',
-        album: songs[0].album,
-      });
-      playQueue(songs, 0);
-      playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
+      startQueue(songs, 0, { type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
       addRecentlyPlayed({
         id: album.id,
         name: album.name,
@@ -233,15 +260,7 @@
     const songs = spotlightSongs.length ? spotlightSongs : await fetchAlbumSongs(spotlightAlbum.id);
     if (!songs.length) return;
 
-    focusTrack.set({
-      title: song.title,
-      artist: song.artist,
-      imageUrl: song.coverArtUrl,
-      source: 'library',
-      album: song.album,
-    });
-    playQueue(songs, index);
-    playingFrom.set({ type: 'album', name: spotlightAlbum.name, href: `/album/${encodeURIComponent(spotlightAlbum.id)}` });
+    startQueue(songs, index, { type: 'album', name: spotlightAlbum.name, href: `/album/${encodeURIComponent(spotlightAlbum.id)}` });
     addRecentlyPlayed({
       id: spotlightAlbum.id,
       name: spotlightAlbum.name,
@@ -251,14 +270,6 @@
     });
   }
 
-  function coverFallback(name: string) {
-    return name
-      .split(' ')
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() ?? '')
-      .join('');
-  }
 
   $effect(() => {
     const refresh = $libraryRefresh;
@@ -311,7 +322,7 @@
               />
             {:else}
               <div class="flex aspect-square w-full items-center justify-center rounded-[28px] bg-white/6 text-5xl font-semibold text-white/45">
-                {coverFallback(spotlightAlbum.name)}
+                {initials(spotlightAlbum.name)}
               </div>
             {/if}
           </button>
@@ -353,52 +364,14 @@
     {/if}
   </section>
 
-  <section class="page-section">
-    <div class="mb-5 flex items-center justify-between">
-      <h2 class="text-[1.6rem] font-semibold tracking-[-0.03em] text-foreground">Recently Played</h2>
-      {#if expandedSection === 'recent'}
-        <button
-          class="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-          onclick={() => expandedSection = null}
-        >Show Less</button>
-      {/if}
-    </div>
-
-    {#if loading}
-      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-        {#each Array(5) as _, index (index)}
-          <div class="space-y-3">
-            <div class="aspect-square animate-pulse rounded-[24px] bg-white/6"></div>
-            <div class="h-4 w-3/4 animate-pulse rounded-full bg-white/6"></div>
-            <div class="h-3 w-1/2 animate-pulse rounded-full bg-white/5"></div>
-          </div>
-        {/each}
-      </div>
-    {:else if expandedSection === 'recent'}
-      <div class="section-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-        {#each allRecentlyPlayedAlbums as album (album.id)}
-          <AlbumCard {album} />
-        {/each}
-      </div>
-    {:else}
-      <div class="section-enter">
-        <Carousel opts={{ align: 'start', dragFree: true }}>
-          <CarouselContent>
-            {#each recentlyPlayedAlbums as album (album.id)}
-              <CarouselItem class="basis-[36%] sm:basis-[24%] lg:basis-[18%] xl:basis-[14%]">
-                <AlbumCard {album} />
-              </CarouselItem>
-            {/each}
-          </CarouselContent>
-          <CarouselPrevious class="carousel-nav" />
-          <CarouselNext class="carousel-nav" />
-          {#if !loading && allRecentlyPlayedAlbums.length > recentlyPlayedAlbums.length}
-            <CarouselSeeAll onclick={() => expandedSection = 'recent'} />
-          {/if}
-        </Carousel>
-      </div>
-    {/if}
-  </section>
+  <AlbumCarouselSection
+    title="Recently Played"
+    allItems={allRecentlyPlayedAlbums}
+    expanded={expandedSection === 'recent'}
+    {loading}
+    onExpand={() => expandedSection = 'recent'}
+    onCollapse={() => expandedSection = null}
+  />
 
   {#if !loading}
     <section class="page-section">
@@ -422,7 +395,7 @@
         <div class="section-enter">
           <Carousel opts={{ align: 'start', dragFree: true }}>
             <CarouselContent>
-              {#each artistHighlights as artist (artist.name)}
+              {#each allArtistHighlights as artist (artist.name)}
                 <CarouselItem class="basis-[90px] sm:basis-[100px]">
                   <ArtistCard name={artist.name} image={artist.image} />
                 </CarouselItem>
@@ -430,7 +403,7 @@
             </CarouselContent>
             <CarouselPrevious class="carousel-nav" />
             <CarouselNext class="carousel-nav" />
-            {#if allArtistHighlights.length > artistHighlights.length}
+            {#if allArtistHighlights.length > 12}
               <CarouselSeeAll onclick={() => expandedSection = 'artists'} />
             {/if}
           </Carousel>
@@ -438,116 +411,29 @@
       {/if}
     </section>
 
-    <section class="page-section">
-      <div class="mb-5 flex items-center justify-between">
-        <h2 class="text-[1.6rem] font-semibold tracking-[-0.03em] text-foreground">For You Mixes</h2>
-        {#if expandedSection === 'favorites'}
-          <button
-            class="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onclick={() => expandedSection = null}
-          >Show Less</button>
-        {/if}
-      </div>
+    <AlbumCarouselSection
+      title="For You Mixes"
+      allItems={allFavoriteAlbums}
+      expanded={expandedSection === 'favorites'}
+      onExpand={() => expandedSection = 'favorites'}
+      onCollapse={() => expandedSection = null}
+    />
 
-      {#if expandedSection === 'favorites'}
-        <div class="section-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {#each allFavoriteAlbums as album (album.id)}
-            <AlbumCard {album} />
-          {/each}
-        </div>
-      {:else}
-        <div class="section-enter">
-          <Carousel opts={{ align: 'start', dragFree: true }}>
-            <CarouselContent>
-              {#each favoriteAlbums as album (album.id)}
-                <CarouselItem class="basis-[36%] sm:basis-[24%] lg:basis-[18%] xl:basis-[14%]">
-                  <AlbumCard {album} />
-                </CarouselItem>
-              {/each}
-            </CarouselContent>
-            <CarouselPrevious class="carousel-nav" />
-            <CarouselNext class="carousel-nav" />
-            {#if allFavoriteAlbums.length > favoriteAlbums.length}
-              <CarouselSeeAll onclick={() => expandedSection = 'favorites'} />
-            {/if}
-          </Carousel>
-        </div>
-      {/if}
-    </section>
+    <AlbumCarouselSection
+      title="Fresh Finds"
+      allItems={allFreshFindsAlbums}
+      expanded={expandedSection === 'fresh'}
+      onExpand={() => expandedSection = 'fresh'}
+      onCollapse={() => expandedSection = null}
+    />
 
-    <section class="page-section">
-      <div class="mb-5 flex items-center justify-between">
-        <h2 class="text-[1.6rem] font-semibold tracking-[-0.03em] text-foreground">Fresh Finds</h2>
-        {#if expandedSection === 'fresh'}
-          <button
-            class="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onclick={() => expandedSection = null}
-          >Show Less</button>
-        {/if}
-      </div>
-
-      {#if expandedSection === 'fresh'}
-        <div class="section-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {#each allFreshFindsAlbums as album (album.id)}
-            <AlbumCard {album} />
-          {/each}
-        </div>
-      {:else}
-        <div class="section-enter">
-          <Carousel opts={{ align: 'start', dragFree: true }}>
-            <CarouselContent>
-              {#each freshFindsAlbums as album (album.id)}
-                <CarouselItem class="basis-[36%] sm:basis-[24%] lg:basis-[18%] xl:basis-[14%]">
-                  <AlbumCard {album} />
-                </CarouselItem>
-              {/each}
-            </CarouselContent>
-            <CarouselPrevious class="carousel-nav" />
-            <CarouselNext class="carousel-nav" />
-            {#if allFreshFindsAlbums.length > freshFindsAlbums.length}
-              <CarouselSeeAll onclick={() => expandedSection = 'fresh'} />
-            {/if}
-          </Carousel>
-        </div>
-      {/if}
-    </section>
-
-    <section class="page-section">
-      <div class="mb-5 flex items-center justify-between">
-        <h2 class="text-[1.6rem] font-semibold tracking-[-0.03em] text-foreground">Late Night Rotation</h2>
-        {#if expandedSection === 'latenight'}
-          <button
-            class="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            onclick={() => expandedSection = null}
-          >Show Less</button>
-        {/if}
-      </div>
-
-      {#if expandedSection === 'latenight'}
-        <div class="section-enter grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {#each allLateNightAlbums as album (album.id)}
-            <AlbumCard {album} />
-          {/each}
-        </div>
-      {:else}
-        <div class="section-enter">
-          <Carousel opts={{ align: 'start', dragFree: true }}>
-            <CarouselContent>
-              {#each lateNightAlbums as album (album.id)}
-                <CarouselItem class="basis-[36%] sm:basis-[24%] lg:basis-[18%] xl:basis-[14%]">
-                  <AlbumCard {album} />
-                </CarouselItem>
-              {/each}
-            </CarouselContent>
-            <CarouselPrevious class="carousel-nav" />
-            <CarouselNext class="carousel-nav" />
-            {#if allLateNightAlbums.length > lateNightAlbums.length}
-              <CarouselSeeAll onclick={() => expandedSection = 'latenight'} />
-            {/if}
-          </Carousel>
-        </div>
-      {/if}
-    </section>
+    <AlbumCarouselSection
+      title="Late Night Rotation"
+      allItems={allLateNightAlbums}
+      expanded={expandedSection === 'latenight'}
+      onExpand={() => expandedSection = 'latenight'}
+      onCollapse={() => expandedSection = null}
+    />
   {/if}
 </div>
 

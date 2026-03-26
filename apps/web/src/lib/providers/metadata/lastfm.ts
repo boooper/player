@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { normalizeString as normalize } from '$lib/utils';
 
 export type LastFmTrackRecommendation = {
   id: string;
@@ -42,10 +43,6 @@ const PLACEHOLDER_IMAGE_MARKERS = [
   'default_artist',
   '/noimage/'
 ];
-
-function normalize(value: string): string {
-  return value.trim().toLowerCase();
-}
 
 function trackKey(artist: string, title: string): string {
   return `${normalize(artist)}::${normalize(title)}`;
@@ -101,15 +98,12 @@ export async function fetchLastFmRecommendations({
   const genreTracks = Array.isArray((genrePayload as any)?.tracks?.track) ? (genrePayload as any).tracks.track : [];
   const genreRank = new Map<string, number>();
 
-  for (let index = 0; index < genreTracks.length; index += 1) {
-    const track = genreTracks[index];
+  for (const [index, track] of genreTracks.entries()) {
     const title = String(track?.name || '').trim();
     const artist = String(track?.artist?.name || track?.artist || '').trim();
     if (!title || !artist) continue;
     const key = trackKey(artist, title);
-    if (!genreRank.has(key)) {
-      genreRank.set(key, index + 1);
-    }
+    if (!genreRank.has(key)) genreRank.set(key, index + 1);
   }
 
   const seen = new Set([trackKey(seedArtist, seedSongTitle)]);
@@ -156,7 +150,7 @@ export async function fetchTopArtists({
   const payload = await invoke<any>('lfm_chart_top_artists', { limit });
   const list = Array.isArray(payload?.artists?.artist) ? payload.artists.artist : [];
 
-  const artists = list
+  return list
     .map((artist: any) => ({
       id: `top-${encodeURIComponent(String(artist?.name || ''))}`,
       name: String(artist?.name || '').trim(),
@@ -166,8 +160,6 @@ export async function fetchTopArtists({
       source: 'top' as const
     }))
     .filter((artist: LastFmArtist) => Boolean(artist.name));
-
-  return artists;
 }
 
 export async function searchArtists({
@@ -184,7 +176,7 @@ export async function searchArtists({
   const raw = payload?.results?.artistmatches?.artist;
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
 
-  const artists = list
+  return list
     .map((artist: any) => ({
       id: `search-${encodeURIComponent(String(artist?.name || ''))}`,
       name: String(artist?.name || '').trim(),
@@ -194,8 +186,6 @@ export async function searchArtists({
       source: 'search' as const
     }))
     .filter((artist: LastFmArtist) => Boolean(artist.name));
-
-  return artists;
 }
 
 export async function fetchTopSongs({
@@ -206,7 +196,7 @@ export async function fetchTopSongs({
   const payload = await invoke<any>('lfm_chart_top_tracks', { limit });
   const list = Array.isArray(payload?.tracks?.track) ? payload.tracks.track : [];
 
-  const mapped = list
+  return list
     .map((track: any) => ({
       id: `top-track-${encodeURIComponent(`${track?.artist?.name || ''}-${track?.name || ''}`)}`,
       title: String(track?.name || '').trim(),
@@ -217,8 +207,6 @@ export async function fetchTopSongs({
       source: 'top' as const
     }))
     .filter((song: LastFmSong) => Boolean(song.title && song.artist));
-
-  return mapped;
 }
 
 export async function searchSongs({
@@ -366,22 +354,22 @@ export async function fetchArtistTopTracks({
   const payload = await invoke<any>('lfm_artist_top_tracks', { artist, limit });
   const tracks = Array.isArray(payload?.toptracks?.track) ? payload.toptracks.track : [];
   const seen = new Set<string>();
-  return tracks
-    .map((track: any) => {
-      const title = String(track?.name ?? '').trim();
-      const artistName = String(track?.artist?.name ?? artist).trim();
-      const id = `lfm-top-${artistName}-${title}`;
-      if (seen.has(id)) return null;
-      seen.add(id);
-      return {
-        id,
-        title,
-        artist: artistName,
-        imageUrl: pickBestImage(track?.image),
-        listeners: Number(track?.listeners ?? 0),
-        url: String(track?.url ?? ''),
-        source: 'top' as const
-      };
-    })
-    .filter(Boolean) as LastFmSong[];
+  const results: LastFmSong[] = [];
+  for (const track of tracks) {
+    const title = String(track?.name ?? '').trim();
+    const artistName = String(track?.artist?.name ?? artist).trim();
+    const id = `lfm-top-${artistName}-${title}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    results.push({
+      id,
+      title,
+      artist: artistName,
+      imageUrl: pickBestImage(track?.image),
+      listeners: Number(track?.listeners ?? 0),
+      url: String(track?.url ?? ''),
+      source: 'top' as const
+    });
+  }
+  return results;
 }

@@ -8,6 +8,7 @@
   import NowPlayingPanel from '$lib/components/NowPlayingPanel.svelte';
   import SearchBar from '$lib/components/SearchBar.svelte';
   import { getArtistArtworkMap } from '$lib/discovery';
+  import { withTimeout } from '$lib/utils';
   import { openUrl, isTauri, initTauriWindow, startDragging, minimizeWindow, toggleMaximizeWindow, closeWindow, getOsPlatform, watchMaximized } from '$lib/tauri';
   import { initDrpc } from '$lib/drpc';
   import {
@@ -26,10 +27,9 @@
   } from '$lib/servers';
   import {
     currentIndex,
-    focusTrack,
+    startQueue,
     hydratePlayerUiState,
     isPlaying,
-    playQueue,
     queue,
     shouldAutoplay,
     subsonicPlaylists,
@@ -93,15 +93,16 @@
 
   type LrcLine = { time: number; text: string };
   function parseLrc(lrc: string): LrcLine[] {
-    return lrc
-      .split('\n')
-      .map((line) => {
-        const m = line.match(/^\[(\d{2}):(\d{2})[.:]?(\d{2,3})?\](.*)/);
-        if (!m) return null;
-        const time = parseInt(m[1]) * 60 + parseInt(m[2]) + (m[3] ? parseInt(m[3].padEnd(3, '0')) / 1000 : 0);
-        return { time, text: m[4].trim() };
-      })
-      .filter((l): l is LrcLine => l !== null && l.text.length > 0);
+    const result: LrcLine[] = [];
+    for (const line of lrc.split('\n')) {
+      const m = line.match(/^\[(\d{2}):(\d{2})[.:]?(\d{2,3})?\](.*)/);
+      if (!m) continue;
+      const text = m[4].trim();
+      if (!text.length) continue;
+      const time = parseInt(m[1]) * 60 + parseInt(m[2]) + (m[3] ? parseInt(m[3].padEnd(3, '0')) / 1000 : 0);
+      result.push({ time, text });
+    }
+    return result;
   }
 
   const parsedLyrics = $derived(lyricsData?.syncedLyrics ? parseLrc(lyricsData.syncedLyrics) : []);
@@ -209,13 +210,6 @@
     }
   });
 
-  function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-    return Promise.race([
-      p,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
-    ]);
-  }
-
   async function reloadLibraryData() {
     loading = true;
     error = '';
@@ -268,12 +262,11 @@
     try {
       const songs = await fetchPlaylistSongs(playlistId);
       if (!songs.length) return;
-      playQueue(songs, 0);
-      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
       const pl = $subsonicPlaylists.find((p) => p.id === playlistId);
       if (pl) {
-        addRecentlyPlayed({ id: pl.id, name: pl.name, coverArtUrl: pl.coverArtUrl, href: `/playlist/${encodeURIComponent(pl.id)}`, type: 'playlist' });
-        playingFrom.set({ type: 'playlist', name: pl.name, href: `/playlist/${encodeURIComponent(pl.id)}` });
+        const href = `/playlist/${encodeURIComponent(pl.id)}`;
+        startQueue(songs, 0, { type: 'playlist', name: pl.name, href });
+        addRecentlyPlayed({ id: pl.id, name: pl.name, coverArtUrl: pl.coverArtUrl, href, type: 'playlist' });
       }
       shouldAutoplay.set(true);
     } catch {}
@@ -290,9 +283,7 @@
   }
 
   function playSongFromDropdown(song: Song) {
-    playQueue([song], 0);
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playingFrom.set({ type: 'artist', name: song.artist, href: `/artist/${encodeURIComponent(song.artist)}` });
+    startQueue([song], 0, { type: 'artist', name: song.artist, href: `/artist/${encodeURIComponent(song.artist)}` });
     shouldAutoplay.set(true);
   }
 

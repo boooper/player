@@ -8,6 +8,7 @@
   import { createPlaylist, fetchPlaylists, type Song } from '$lib/servers';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
   import PlaylistContextMenu from '$lib/components/PlaylistContextMenu.svelte';
+  import { initials } from '$lib/utils';
   import ArtistContextMenu from '$lib/components/ArtistContextMenu.svelte';
 
   let {
@@ -26,7 +27,6 @@
     compact?: boolean;
   } = $props();
 
-  const starredSongCount = $derived($starredSongIds.size);
   const favoritesIsActive = $derived(page.url.pathname === '/favorites');
   const favoritesIsPlaying = $derived($playingFrom.href === '/favorites' && $isPlaying);
   const homeIsActive = $derived(page.url.pathname === '/');
@@ -52,9 +52,6 @@
     createDialogOpen = true;
   }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 
   const collectionLinks = [
     {
@@ -171,7 +168,7 @@
       </div>
       <div class="min-w-0 flex-1 group-data-[compact=true]/library:hidden group-data-[collapsible=icon]:hidden">
         <p class="truncate text-[13px] font-medium leading-tight {favoritesIsActive ? 'text-primary' : 'text-foreground'}">Liked Songs</p>
-        <p class="mt-0.5 truncate text-[11px] text-muted-foreground">Playlist • {starredSongCount} songs</p>
+        <p class="mt-0.5 truncate text-[11px] text-muted-foreground">Playlist • {$starredSongIds.size} songs</p>
       </div>
     </a>
   </li>

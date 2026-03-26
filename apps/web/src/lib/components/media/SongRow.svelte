@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Play, Pause } from '@lucide/svelte';
+  import { goto } from '$app/navigation';
   import type { Song } from '$lib/servers';
   import { queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import { initials, formatClockDuration } from '$lib/utils';
 
   let {
     song,
@@ -34,14 +36,6 @@
     }
   }
 
-  function initials(name: string) {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
-
-  function formatDuration(s: number) {
-    const m = Math.floor(s / 60);
-    return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
-  }
 </script>
 
 <SongContextMenu {song} {onplay} {onremove}>
@@ -92,11 +86,20 @@
 
     <!-- Album (optional) -->
     {#if showAlbum}
-      <span class="truncate text-xs text-muted-foreground/60">{song.album}</span>
+      {#if song.albumId}
+        <span
+          role="link" tabindex="0"
+          class="truncate text-xs text-muted-foreground/60 cursor-pointer hover:text-foreground hover:underline transition-colors"
+          onclick={(e) => { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); }}
+          onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); } }}
+        >{song.album}</span>
+      {:else}
+        <span class="truncate text-xs text-muted-foreground/60">{song.album}</span>
+      {/if}
     {/if}
 
     <!-- Duration -->
-    <span class="text-right text-xs tabular-nums text-muted-foreground/60">{formatDuration(song.duration ?? 0)}</span>
+    <span class="text-right text-xs tabular-nums text-muted-foreground/60">{formatClockDuration(song.duration ?? 0)}</span>
   </button>
 </SongContextMenu>
 

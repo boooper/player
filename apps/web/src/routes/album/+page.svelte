@@ -2,7 +2,7 @@
   import { Play, Disc3, RefreshCw } from '@lucide/svelte';
 
   import { fetchAlbumList, fetchAlbumSongs, type Album } from '$lib/servers';
-  import { focusTrack, playQueue, playingFrom, addRecentlyPlayed, queueLoading } from '$lib/stores/player';
+  import { startQueue, addRecentlyPlayed, queueLoading } from '$lib/stores/player';
   import AlbumContextMenu from '$lib/components/AlbumContextMenu.svelte';
   import { libraryRefresh } from '$lib/stores/ui-state';
 
@@ -45,10 +45,9 @@
     try {
       const songs = await fetchAlbumSongs(album.id);
       if (!songs.length) return;
-      focusTrack.set({ title: songs[0].title, artist: songs[0].artist, imageUrl: songs[0].coverArtUrl, source: 'library', album: songs[0].album });
-      playQueue(songs, 0);
-      playingFrom.set({ type: 'album', name: album.name, href: `/album/${encodeURIComponent(album.id)}` });
-      addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href: `/album/${encodeURIComponent(album.id)}`, type: 'album' });
+      const href = `/album/${encodeURIComponent(album.id)}`;
+      startQueue(songs, 0, { type: 'album', name: album.name, href });
+      addRecentlyPlayed({ id: album.id, name: album.name, coverArtUrl: album.coverArtUrl, href, type: 'album' });
     } catch {
     } finally {
       albumLoadingId = null;
@@ -57,10 +56,6 @@
   }
 
   function switchTab(tab: TabType) {
-    if (tab === activeTab && !loading) {
-      loadAlbums(tab);
-      return;
-    }
     activeTab = tab;
     loadAlbums(tab);
   }

@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 
 import type { Song, Playlist } from '$lib/servers';
 import { readUiJson, writeUiJson } from '$lib/ui-storage';
+import { shuffleArray } from '$lib/utils';
 
 export const queue = writable<Song[]>([]);
 export const currentIndex = writable(0);
@@ -14,26 +15,21 @@ export const shuffleEnabled = writable(false);
 export const repeatMode = writable<'off' | 'all' | 'one'>('off');
 export const smartShuffleTrackIds = writable<Set<string>>(new Set());
 
-function shuffleList<T>(items: T[]): T[] {
-  const next = [...items];
-  for (let i = next.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [next[i], next[j]] = [next[j], next[i]];
-  }
-  return next;
-}
-
 function shuffleUpcomingQueue(): void {
   const items = get(queue);
   const idx = get(currentIndex);
   const upcoming = items.slice(idx + 1);
   if (upcoming.length <= 1) return;
-  queue.set([...items.slice(0, idx + 1), ...shuffleList(upcoming)]);
+  queue.set([...items.slice(0, idx + 1), ...shuffleArray(upcoming)]);
 }
 
 function syncSmartShuffleTrackIds(items: Song[]): void {
   const itemIds = new Set(items.map((song) => song.id));
-  smartShuffleTrackIds.update((ids) => new Set([...ids].filter((id) => itemIds.has(id))));
+  smartShuffleTrackIds.update((ids) => {
+    const next = new Set<string>();
+    for (const id of ids) if (itemIds.has(id)) next.add(id);
+    return next;
+  });
 }
 
 export const focusTrack = writable<{
@@ -44,14 +40,16 @@ export const focusTrack = writable<{
   album?: string;
 } | null>(null);
 
-export function setFocusTrack(track: {
-  title: string;
-  artist: string;
-  imageUrl: string;
-  source: 'lastfm' | 'library';
-  album?: string;
-} | null): void {
-  focusTrack.set(track);
+/**
+ * Set the now-playing context and start playback in one call.
+ * Equivalent to calling focusTrack.set + playQueue + playingFrom.set.
+ */
+export function startQueue(songs: Song[], index: number, from: PlayingFrom): void {
+  if (!songs.length) return;
+  const song = songs[Math.min(index, songs.length - 1)];
+  focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
+  playQueue(songs, index);
+  playingFrom.set(from);
 }
 
 export function playQueue(items: Song[], startIndex = 0): void {
@@ -118,7 +116,11 @@ export function disableShuffle(): void {
 
 export function markSmartShuffleTracks(items: Song[]): void {
   if (!items.length) return;
-  smartShuffleTrackIds.update((ids) => new Set([...ids, ...items.map((song) => song.id)]));
+  smartShuffleTrackIds.update((ids) => {
+    const next = new Set(ids);
+    for (const song of items) next.add(song.id);
+    return next;
+  });
 }
 
 export function toggleShuffle(): void {
@@ -273,9 +275,7 @@ function flushPersistPlaybackSession(): void {
 function schedulePersistPlaybackSession(): void {
   if (!hasHydratedPlayerUiState) return;
   clearTimeout(persistPlaybackSessionTimer);
-  persistPlaybackSessionTimer = window.setTimeout(() => {
-    flushPersistPlaybackSession();
-  }, 350);
+  persistPlaybackSessionTimer = window.setTimeout(flushPersistPlaybackSession, 350);
 }
 
 function installPlaybackSessionPersistence(): void {
@@ -333,25 +333,9 @@ showQueue.subscribe((open) => {
   void writeUiJson(SHOW_QUEUE_KEY, open);
 });
 
-queue.subscribe(() => {
-  schedulePersistPlaybackSession();
-});
-
-currentIndex.subscribe(() => {
-  schedulePersistPlaybackSession();
-});
-
-currentTime.subscribe(() => {
-  schedulePersistPlaybackSession();
-});
-
-playingFrom.subscribe(() => {
-  schedulePersistPlaybackSession();
-});
-
-focusTrack.subscribe(() => {
-  schedulePersistPlaybackSession();
-});
+for (const store of [queue, currentIndex, currentTime, playingFrom, focusTrack] as Array<{ subscribe(cb: (v: unknown) => void): () => void }>) {
+  store.subscribe(() => schedulePersistPlaybackSession());
+}
 
 export function playNextInQueue(song: Song): void {
   const items = get(queue);
@@ -367,10 +351,29 @@ export function playNextInQueue(song: Song): void {
   });
 }
 
+export function playNextInQueueBatch(songs: Song[], from?: PlayingFrom): void {
+  if (!songs.length) return;
+  if (!get(queue).length) {
+    startQueue(songs, 0, from ?? { type: null, name: '', href: '' });
+    return;
+  }
+  const idx = get(currentIndex);
+  queue.update((current) => {
+    const next = [...current];
+    next.splice(idx + 1, 0, ...songs);
+    return next;
+  });
+}
+
+export function activateShuffle(): void {
+  smartShuffleMode.set(false);
+  enableShuffle();
+}
+
 export function appendToQueue(items: Song[]): void {
   if (!items.length) return;
   queue.update((current) => {
-    const next = [...current, ...items];
+    const next = current.concat(items);
     syncSmartShuffleTrackIds(next);
     return next;
   });

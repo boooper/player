@@ -1,9 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { UnifiedRecommendation as TrackRecommendation } from '$lib/data/types';
-
-function normalize(value: string): string {
-	return value.trim().toLowerCase();
-}
+import { normalizeString as normalize } from '$lib/utils';
 
 /**
  * Fetch personalised track recommendations from ListenBrainz.

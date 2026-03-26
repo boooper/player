@@ -3,7 +3,8 @@
   import { Clock, X, Play } from '@lucide/svelte';
 
   import { searchBundle, type SearchBundlePayload, type Song } from '$lib/servers';
-  import { focusTrack, playQueue, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
+  import { initials } from '$lib/utils';
+  import { startQueue, focusTrack, queue, currentIndex, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { SongRow, SongCard, AlbumCard, ArtistCard } from '$lib/components/media';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
   import SongTechBadge from '$lib/components/SongTechBadge.svelte';
@@ -47,9 +48,6 @@
     await loadSearch(query);
   }
 
-  function initials(name: string) {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 
   async function loadSearch(queryText: string) {
     if (!queryText.trim()) return;
@@ -95,25 +93,22 @@
   });
 
   function playSong(index: number) {
-    playQueue(results.songs, index);
-    focusTrack.set({ title: results.songs[index].title, artist: results.songs[index].artist, imageUrl: results.songs[index].coverArtUrl, source: 'library', album: results.songs[index].album });
+    startQueue(results.songs, index, { type: 'search', name: 'Search Results', href: `/search?q=${encodeURIComponent(query)}` });
   }
 
   function playRecommendation(index: number) {
     if (!results.recommendations.length) return;
-    const song = results.recommendations[index];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playQueue(results.recommendations, index);
+    startQueue(results.recommendations, index, { type: 'search', name: 'Search Results', href: `/search?q=${encodeURIComponent(query)}` });
   }
 
   const topResult = $derived(results.songs[0] ?? null);
   const songRows = $derived(results.songs.slice(0, 5));
   const isTopActive = $derived($queue[$currentIndex]?.id === topResult?.id);
 
-  const artists = $derived(() => {
+  const artists = $derived.by(() => {
     const seen = new Set<string>();
     const list: { name: string; image: string }[] = [];
-    for (const song of [...results.songs, ...results.recommendations]) {
+    for (const song of results.songs.concat(results.recommendations)) {
       if (!seen.has(song.artist)) {
         seen.add(song.artist);
         list.push({ name: song.artist, image: song.coverArtUrl });
@@ -230,12 +225,12 @@
   {/if}
 
   <!-- Artists carousel -->
-  {#if artists().length > 0}
+  {#if artists.length > 0}
     <div class="mb-8">
       <p class="section-label">Artists</p>
       <Carousel opts={{ align: 'start', dragFree: true }}>
         <CarouselContent>
-          {#each artists() as artist (artist.name)}
+          {#each artists as artist (artist.name)}
             <CarouselItem class="basis-[90px]">
               <ArtistCard name={artist.name} image={artist.image} />
             </CarouselItem>

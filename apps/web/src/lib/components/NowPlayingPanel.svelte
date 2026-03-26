@@ -13,9 +13,10 @@
     currentIndex,
     shouldAutoplay,
     showQueue,
-    playQueue,
+    startQueue,
     removeFromQueue,
     reorderQueue,
+
     smartShuffleTrackIds,
   } from '$lib/stores/player';
   import SongContextMenu from '$lib/components/SongContextMenu.svelte';
@@ -27,7 +28,7 @@
   import { getArtistInfo, type DiscoveryArtistInfo as ArtistInfo } from '$lib/discovery';
   import { primarySongArtist } from '$lib/song-artists';
   import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
-  import { formatClockDuration } from '$lib/utils';
+  import { formatClockDuration, formatListenerCount, initials } from '$lib/utils';
 
   let { open }: { open: boolean } = $props();
 
@@ -101,6 +102,15 @@
   let creditsExpanded = $state(false);
   let creditsAlbum = $state<{ year?: number; genre?: string } | null>(null);
 
+  const panelArtistBio = $derived(panelArtistInfo?.bio ? panelArtistInfo.bio.replace(/<[^>]*>/g, '').trim() : '');
+
+  const playingFromLabel = $derived(
+    $playingFrom.type === 'favorites' ? 'Playing from' :
+    $playingFrom.type === 'playlist' ? 'Playing from playlist' :
+    $playingFrom.type === 'artist' ? 'Playing from artist' :
+    'Playing from album'
+  );
+
   let _panelSongId = '';
   let _panelArtist = '';
 
@@ -154,9 +164,6 @@
     focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
   }
 
-  function initials(name: string): string {
-    return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
-  }
 </script>
 
 <aside class="flex h-full w-full shrink-0 flex-col overflow-hidden border-l border-white/[0.06]" style="background: transparent;">
@@ -164,7 +171,7 @@
     {#if $playingFrom.type}
       <div class="flex min-w-0 flex-1 flex-col">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {$playingFrom.type === 'favorites' ? 'Playing from' : $playingFrom.type === 'playlist' ? 'Playing from playlist' : $playingFrom.type === 'artist' ? 'Playing from artist' : 'Playing from album'}
+          {playingFromLabel}
         </span>
         <a href={$playingFrom.href} class="truncate text-sm font-semibold hover:underline leading-snug">{$playingFrom.name}</a>
       </div>
@@ -200,7 +207,7 @@
               class="absolute inset-0 flex flex-col justify-end rounded-lg bg-gradient-to-t from-black/80 via-black/20 to-transparent p-3 opacity-0 transition-opacity duration-200 group-hover/art:opacity-100"
             >
               <span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                {$playingFrom.type === 'favorites' ? 'Playing from' : $playingFrom.type === 'playlist' ? 'Playing from playlist' : $playingFrom.type === 'artist' ? 'Playing from artist' : 'Playing from album'}
+                {playingFromLabel}
               </span>
               <span class="truncate text-sm font-bold text-foreground">{$playingFrom.name}</span>
             </a>
@@ -245,24 +252,16 @@
         {:else}
           <div class="space-y-1">
             {#each (relatedExpanded ? relatedSongs : relatedSongs.slice(0, 1)) as song (song.id)}
+              {@const relatedArtist = primarySongArtist(song.artist)}
+              {@const relatedArtistHref = `/artist/${encodeURIComponent(relatedArtist)}`}
               <SongContextMenu
                 {song}
-                onplay={() => {
-                  playQueue([song], 0);
-                  focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-                  playingFrom.set({ type: 'artist', name: primarySongArtist(song.artist), href: `/artist/${encodeURIComponent(primarySongArtist(song.artist))}` });
-                  shouldAutoplay.set(true);
-                }}
+                onplay={() => startQueue([song], 0, { type: 'artist', name: relatedArtist, href: relatedArtistHref })}
                 triggerClass="block w-full"
               >
                 <button
                   class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-accent"
-                  onclick={() => {
-                    playQueue([song], 0);
-                    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-                    playingFrom.set({ type: 'artist', name: primarySongArtist(song.artist), href: `/artist/${encodeURIComponent(primarySongArtist(song.artist))}` });
-                    shouldAutoplay.set(true);
-                  }}
+                  onclick={() => startQueue([song], 0, { type: 'artist', name: relatedArtist, href: relatedArtistHref })}
                 >
                   {#if song.coverArtUrl}
                     <img class="size-9 rounded object-cover shrink-0" src={song.coverArtUrl} alt={song.title} loading="lazy" />
@@ -305,15 +304,10 @@
             {/if}
             <p class="mb-0.5 text-sm font-semibold group-hover/about:underline">{panelArtistInfo.name}</p>
             {#if panelArtistInfo.listeners}
-              <p class="mb-2 text-xs text-muted-foreground">
-                {panelArtistInfo.listeners >= 1_000_000
-                  ? `${(panelArtistInfo.listeners / 1_000_000).toFixed(1)}M monthly listeners`
-                  : `${(panelArtistInfo.listeners / 1_000).toFixed(0)}K monthly listeners`}
-              </p>
+              <p class="mb-2 text-xs text-muted-foreground">{formatListenerCount(panelArtistInfo.listeners)}</p>
             {/if}
-            {#if panelArtistInfo.bio}
-              {@const bioText = panelArtistInfo.bio.replace(/<[^>]*>/g, '').trim()}
-              <p class="line-clamp-3 text-xs leading-relaxed text-muted-foreground">{bioText}</p>
+            {#if panelArtistBio}
+              <p class="line-clamp-3 text-xs leading-relaxed text-muted-foreground">{panelArtistBio}</p>
               <p class="mt-1 text-xs font-medium text-foreground/60 group-hover/about:text-foreground transition-colors">Read more…</p>
             {/if}
           </button>
@@ -336,11 +330,7 @@
                 <div class="absolute bottom-0 left-0 p-6">
                   <Dialog.Title class="text-2xl font-bold">{panelArtistInfo.name}</Dialog.Title>
                   {#if panelArtistInfo.listeners}
-                    <p class="text-sm text-muted-foreground">
-                      {panelArtistInfo.listeners >= 1_000_000
-                        ? `${(panelArtistInfo.listeners / 1_000_000).toFixed(1)}M monthly listeners`
-                        : `${(panelArtistInfo.listeners / 1_000).toFixed(0)}K monthly listeners`}
-                    </p>
+                    <p class="text-sm text-muted-foreground">{formatListenerCount(panelArtistInfo.listeners)}</p>
                   {/if}
                 </div>
                 <Dialog.Close class="absolute right-4 top-4 grid size-8 place-items-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors">
@@ -352,11 +342,7 @@
                 <div>
                   <Dialog.Title class="text-xl font-bold">{panelArtistInfo.name}</Dialog.Title>
                   {#if panelArtistInfo.listeners}
-                    <p class="text-sm text-muted-foreground">
-                      {panelArtistInfo.listeners >= 1_000_000
-                        ? `${(panelArtistInfo.listeners / 1_000_000).toFixed(1)}M monthly listeners`
-                        : `${(panelArtistInfo.listeners / 1_000).toFixed(0)}K monthly listeners`}
-                    </p>
+                    <p class="text-sm text-muted-foreground">{formatListenerCount(panelArtistInfo.listeners)}</p>
                   {/if}
                 </div>
                 <Dialog.Close class="grid size-8 place-items-center rounded-full hover:bg-accent transition-colors">
@@ -372,8 +358,8 @@
                   {/each}
                 </div>
               {/if}
-              {#if panelArtistInfo.bio}
-                <p class="text-sm leading-relaxed text-muted-foreground">{panelArtistInfo.bio.replace(/<[^>]*>/g, '').trim()}</p>
+              {#if panelArtistBio}
+                <p class="text-sm leading-relaxed text-muted-foreground">{panelArtistBio}</p>
               {/if}
             </div>
             <div class="border-t border-white/[0.06] px-6 py-4">

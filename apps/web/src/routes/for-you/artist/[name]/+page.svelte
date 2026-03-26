@@ -1,6 +1,5 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { goto } from '$app/navigation';
   import { Play, Pause, Save, RefreshCw } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
 
@@ -8,14 +7,10 @@
   import { fetchLikedArtists, searchSongs, createPlaylist } from '$lib/servers';
   import { getListeningProfile } from '$lib/servers/play-history';
   import { getUpNextSongs } from '$lib/discovery';
-  import {
-    playQueue, focusTrack, playingFrom,
-    isPlaying, togglePlayRequest, queue, currentIndex
-  } from '$lib/stores/player';
+  import { startQueue, playingFrom, isPlaying, togglePlayRequest } from '$lib/stores/player';
   import { requestLibraryRefresh } from '$lib/stores/ui-state';
-  import { formatClockDuration } from '$lib/utils';
-  import SongContextMenu from '$lib/components/SongContextMenu.svelte';
-  import SongArtistLinks from '$lib/components/SongArtistLinks.svelte';
+  import { formatClockDuration, normalizeString, sumDuration } from '$lib/utils';
+  import { SongRow } from '$lib/components/media';
 
   const artist = $derived(decodeURIComponent(page.params.name));
   const HREF = $derived(`/for-you/artist/${page.params.name}`);
@@ -27,13 +22,7 @@
   let loadVersion = 0;
 
   const active = $derived($playingFrom.href === HREF);
-  const currentTrackId = $derived($queue[$currentIndex]?.id ?? '');
-
-  function norm(s: string) { return s.trim().toLowerCase(); }
-
-  function totalDuration(): string {
-    return formatClockDuration(songs.reduce((acc, s) => acc + (s.duration ?? 0), 0));
-  }
+  const totalDuration = $derived(formatClockDuration(sumDuration(songs)));
 
   async function load() {
     const ver = ++loadVersion;
@@ -48,7 +37,8 @@
       if (ver !== loadVersion) return;
 
       const likedArtists = likedArtistEntries.map((e) => e.name);
-      const artistSeed = profile.topSongs.find((s) => norm(s.artist) === norm(artist));
+      const normArtist = normalizeString(artist);
+      const artistSeed = profile.topSongs.find((s) => normalizeString(s.artist) === normArtist);
 
       let result: Song[];
       if (artistSeed) {
@@ -60,7 +50,7 @@
         });
       } else {
         const hits = await searchSongs(artist, 40);
-        result = hits.filter((s) => norm(s.artist) === norm(artist)).slice(0, 20);
+        result = hits.filter((s) => normalizeString(s.artist) === normArtist).slice(0, 20);
       }
 
       if (ver !== loadVersion) return;
@@ -74,18 +64,11 @@
   }
 
   function playAll() {
-    if (!songs.length) return;
-    const first = songs[0];
-    focusTrack.set({ title: first.title, artist: first.artist, imageUrl: first.coverArtUrl, source: 'library', album: first.album });
-    playingFrom.set({ type: 'playlist', name: `${artist} Mix`, href: HREF });
-    playQueue(songs, 0);
+    startQueue(songs, 0, { type: 'playlist', name: `${artist} Mix`, href: HREF });
   }
 
   function playSong(index: number) {
-    const song = songs[index];
-    focusTrack.set({ title: song.title, artist: song.artist, imageUrl: song.coverArtUrl, source: 'library', album: song.album });
-    playingFrom.set({ type: 'playlist', name: `${artist} Mix`, href: HREF });
-    playQueue(songs, index);
+    startQueue(songs, index, { type: 'playlist', name: `${artist} Mix`, href: HREF });
   }
 
   async function save() {
@@ -135,7 +118,7 @@
     <h2 class="app-section-title text-3xl font-bold tracking-tight">{artist} Mix</h2>
     <p class="text-sm text-muted-foreground">Songs from and inspired by {artist}</p>
     {#if !loading && songs.length > 0}
-      <p class="text-sm text-muted-foreground">{songs.length} songs · {totalDuration()}</p>
+      <p class="text-sm text-muted-foreground">{songs.length} songs · {totalDuration}</p>
     {/if}
     <div class="mt-1 flex items-center gap-3">
       <button
@@ -164,7 +147,7 @@
       </button>
 
       <button
-        onclick={() => load()}
+        onclick={load}
         disabled={loading}
         class="app-round-button grid size-10 place-items-center rounded-full transition disabled:opacity-40"
         aria-label="Refresh"
@@ -186,67 +169,18 @@
 {#if songs.length}
   <div class="page-section mt-2">
     <div
-      class="grid items-center gap-4 border-b border-border/40 px-4 pb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/50"
-      style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
+      class="grid items-center gap-3 border-b border-border/40 px-3 pb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground/50"
+      style="grid-template-columns: 2rem 2.5rem 1fr 1fr 4rem"
     >
       <span class="text-center">#</span>
+      <span></span>
       <span>Title</span>
       <span class="hidden md:block">Album</span>
       <span class="text-right">Duration</span>
     </div>
-
     <div class="mt-1 space-y-0.5">
       {#each songs as song, index (song.id)}
-        {@const isCurrentTrack = song.id === currentTrackId && active}
-        <SongContextMenu {song} onplay={() => playSong(index)}>
-          <button
-            class="stagger-row group grid w-full items-center gap-4 rounded-md px-4 py-2.5 text-left transition-colors duration-150 hover:bg-border/20 {isCurrentTrack ? 'bg-primary/5' : ''}"
-            style="grid-template-columns: 2.5rem 1fr 1fr 4rem"
-            style:--stagger-index={index}
-            onclick={() => isCurrentTrack ? togglePlayRequest.update((n) => n + 1) : playSong(index)}
-          >
-            <span class="relative mx-auto flex h-7 w-7 shrink-0 items-center justify-center">
-              {#if isCurrentTrack}
-                <span class="flex items-end gap-[2px] transition-all duration-150 group-hover:scale-50 group-hover:opacity-0">
-                  <span class="w-[3px] origin-bottom rounded-[1px] bg-primary" style="height:12px;animation:equalizer 0.8s ease-in-out infinite 0s;animation-play-state:{$isPlaying?'running':'paused'}"></span>
-                  <span class="w-[3px] origin-bottom rounded-[1px] bg-primary" style="height:8px;animation:equalizer 0.8s ease-in-out infinite 0.25s;animation-play-state:{$isPlaying?'running':'paused'}"></span>
-                  <span class="w-[3px] origin-bottom rounded-[1px] bg-primary" style="height:12px;animation:equalizer 0.8s ease-in-out infinite 0.5s;animation-play-state:{$isPlaying?'running':'paused'}"></span>
-                </span>
-                <span class="absolute inset-0 flex scale-50 items-center justify-center text-primary opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
-                  {#if $isPlaying}<Pause class="size-4" fill="currentColor" />{:else}<Play class="size-4" fill="currentColor" />{/if}
-                </span>
-              {:else}
-                <span class="absolute inset-0 flex items-center justify-center text-sm tabular-nums text-muted-foreground transition-all duration-150 group-hover:scale-50 group-hover:opacity-0">{index + 1}</span>
-                <span class="absolute inset-0 flex scale-50 items-center justify-center opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100">
-                  <Play class="size-4" fill="currentColor" />
-                </span>
-              {/if}
-            </span>
-
-            <div class="flex min-w-0 items-center gap-3">
-              {#if song.coverArtUrl}
-                <img class="size-10 shrink-0 rounded-md object-cover shadow-md" src={song.coverArtUrl} alt={song.title} loading="lazy" />
-              {:else}
-                <div class="grid size-10 shrink-0 place-items-center rounded-md bg-gradient-to-br from-slate-500 to-slate-700 text-xs font-bold shadow-md">
-                  {song.title.slice(0, 2).toUpperCase()}
-                </div>
-              {/if}
-              <div class="min-w-0">
-                <p class="whitespace-normal break-words text-sm font-medium leading-tight transition-colors duration-150 group-hover:text-foreground {isCurrentTrack ? 'text-primary' : ''}">{song.title}</p>
-                <SongArtistLinks artist={song.artist} class="truncate text-xs text-muted-foreground" linkClass="hover:underline hover:text-foreground transition-colors duration-150" />
-              </div>
-            </div>
-
-            <span
-              role="link" tabindex="0"
-              class="hidden truncate text-sm text-muted-foreground transition-colors duration-150 hover:text-foreground hover:underline md:block cursor-pointer"
-              onclick={(e) => { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); }}
-              onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); goto(`/album/${encodeURIComponent(song.albumId)}`); } }}
-            >{song.album}</span>
-
-            <span class="text-right text-xs tabular-nums text-muted-foreground">{formatClockDuration(song.duration ?? 0)}</span>
-          </button>
-        </SongContextMenu>
+        <SongRow {song} {index} showAlbum onplay={() => playSong(index)} staggerIndex={index} />
       {/each}
     </div>
   </div>
