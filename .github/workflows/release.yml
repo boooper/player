@@ -51,6 +51,7 @@ jobs:
         run: bun install
 
       - name: Inject updater pubkey into release config
+        shell: bash
         run: |
           jq --arg pubkey "$TAURI_UPDATER_PUBKEY" \
             '.plugins.updater.pubkey = $pubkey' \
