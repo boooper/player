@@ -15,12 +15,13 @@ permissions:
   contents: write
 
 jobs:
-  # ── 1. Calculate version and push the git tag ──────────────────────────────
+  # ── 1. Calculate version, push tag, and create the draft release ────────────
   prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.calc.outputs.version }}
       tag: ${{ steps.calc.outputs.tag }}
+      release_id: ${{ steps.create_release.outputs.release_id }}
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,23 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag"         >> "$GITHUB_OUTPUT"
 
-  # ── 2. Build all platforms ─────────────────────────────────────────────────
+      - name: create draft release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.calc.outputs.tag }}
+          VERSION: ${{ steps.calc.outputs.version }}
+        run: |
+          release_id=$(gh api repos/$GITHUB_REPOSITORY/releases \
+            --method POST \
+            -f tag_name="$TAG" \
+            -f name="$TAG" \
+            -f body="Madrify $VERSION" \
+            -F draft=true \
+            --jq '.id')
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
+  # ── 2. Build all platforms and upload to the draft release ──────────────────
   build:
     needs: prepare
     strategy:
@@ -135,7 +152,7 @@ jobs:
           PY
 
       - name: build and upload
-        uses: tauri-apps/tauri-action@v0
+        uses: dxiongya/tauri-action-custom-repo@v0.0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -143,10 +160,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: bunx tauri
-          tagName: ${{ needs.prepare.outputs.tag }}
-          releaseName: ${{ needs.prepare.outputs.tag }}
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.prepare.outputs.release_id }}
           args: >-
             --config src-tauri/tauri.build.conf.json
             --config src-tauri/tauri.release.generated.conf.json

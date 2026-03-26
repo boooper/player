@@ -199,13 +199,14 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
         // state now that the load has confirmed success.
         isPlaying.set(autoplay);
       })
-      .catch(() => {
+      .catch((error) => {
         crossfadeInFlight = false;
         loadedTrackId = null;
         loadPending = false;
         options.setIsBuffering(false);
         isPlaying.set(false);
-        toast.error('Desktop playback failed to load the track');
+        const msg = typeof error === 'string' ? error : (error instanceof Error ? error.message : null);
+        toast.error(msg ?? 'Desktop playback failed to load the track');
       });
   });
 

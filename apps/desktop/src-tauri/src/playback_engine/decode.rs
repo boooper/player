@@ -16,17 +16,23 @@ use symphonia::{
 pub fn decode_audio(
     bytes: Vec<u8>,
     content_type: &str,
+    audio_format: &str,
     target_channels: u16,
     target_sample_rate: u32,
 ) -> Result<(Vec<f32>, u16, u32), String> {
     let mut hint = Hint::new();
-    if let Some(extension) = content_type
+    let mime_ext = content_type
         .split('/')
         .nth(1)
         .map(|value| value.split(';').next().unwrap_or_default().trim())
-        .filter(|value| !value.is_empty())
-    {
-        hint.with_extension(extension);
+        .unwrap_or_default();
+    let ext_hint = if !mime_ext.is_empty() {
+        mime_ext
+    } else {
+        audio_format.trim()
+    };
+    if !ext_hint.is_empty() {
+        hint.with_extension(ext_hint);
     }
 
     let media_source = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
