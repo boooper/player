@@ -3,7 +3,6 @@ name: publish
 on:
   push:
     branches:
-      - main
       - release
   workflow_dispatch:
 
@@ -11,67 +10,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-
 jobs:
-  # ── 1. Calculate version, push tag, and create the draft release ────────────
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.calc.outputs.version }}
-      tag: ${{ steps.calc.outputs.tag }}
-      release_id: ${{ steps.create_release.outputs.release_id }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: calculate version and push tag
-        id: calc
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          latest=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
-          if [[ -n "$latest" ]]; then
-            base="${latest#v}"
-          else
-            base=$(python3 -c "import json; print(json.load(open('apps/desktop/package.json'))['version'])")
-          fi
-
-          IFS='.' read -r major minor patch <<< "$base"
-          version="${major}.${minor}.$((patch + 1))"
-          tag="v${version}"
-
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$tag" -m "$tag"
-          git push origin "$tag"
-
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
-
-      - name: create draft release
-        id: create_release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.calc.outputs.tag }}
-          VERSION: ${{ steps.calc.outputs.version }}
-        run: |
-          release_id=$(gh api repos/$GITHUB_REPOSITORY/releases \
-            --method POST \
-            -f tag_name="$TAG" \
-            -f name="$TAG" \
-            -f body="Madrify $VERSION" \
-            -F draft=true \
-            --jq '.id')
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-
-  # ── 2. Build all platforms and upload to the draft release ──────────────────
   build:
-    needs: prepare
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -112,30 +54,6 @@ jobs:
 
       - run: bun install
 
-      - name: stamp version
-        shell: bash
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          python3 - <<'PY'
-          import json, os, re
-          from pathlib import Path
-
-          v = os.environ["VERSION"]
-
-          for f in ["apps/desktop/package.json", "apps/desktop/src-tauri/tauri.conf.json"]:
-              p = Path(f)
-              d = json.loads(p.read_text())
-              d["version"] = v
-              p.write_text(json.dumps(d, indent=2) + "\n")
-
-          p = Path("apps/desktop/src-tauri/Cargo.toml")
-          text, n = re.subn(r'^version = ".*?"$', f'version = "{v}"', p.read_text(), count=1, flags=re.MULTILINE)
-          if n != 1:
-              raise SystemExit("Cargo.toml version not patched")
-          p.write_text(text)
-          PY
-
       - name: write updater pubkey into config
         shell: bash
         env:
@@ -151,8 +69,7 @@ jobs:
           dst.write_text(json.dumps(d, indent=2) + "\n")
           PY
 
-      - name: build and upload
-        uses: dxiongya/tauri-action-custom-repo@v0.0.5
+      - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -160,32 +77,44 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: bunx tauri
-          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: v__VERSION__
+          releaseName: v__VERSION__
+          releaseDraft: true
+          prerelease: false
           args: >-
             --config src-tauri/tauri.build.conf.json
             --config src-tauri/tauri.release.generated.conf.json
             --target ${{ matrix.target }}
 
-  # ── 3. Generate latest.json and publish ────────────────────────────────────
+  # ── Generate latest.json and publish the draft ──────────────────────────────
   publish:
-    needs: [prepare, build]
+    needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: get version
+        id: ver
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version"    >> "$GITHUB_OUTPUT"
+
       - name: download artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.prepare.outputs.tag }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           mkdir dist
           gh release download "$TAG" --dir dist
 
       - name: generate latest.json
         env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -233,7 +162,7 @@ jobs:
       - name: upload latest.json and publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.prepare.outputs.tag }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           gh release upload "$TAG" latest.json --clobber
           gh release edit "$TAG" --draft=false
