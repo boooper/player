@@ -1,4 +1,7 @@
 {
+  "build": {
+    "beforeBuildCommand": "bun run --cwd ../web build"
+  },
   "bundle": {
     "createUpdaterArtifacts": true
   },
