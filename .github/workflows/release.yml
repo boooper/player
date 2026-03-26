@@ -11,7 +11,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── 1. Create the draft release ─────────────────────────────────────────────
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+      version: ${{ steps.get-version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: get version
+        id: get-version
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: create release
+        id: create-release
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.get-version.outputs.version }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${process.env.VERSION}`,
+              name: `v${process.env.VERSION}`,
+              body: `Madrify ${process.env.VERSION}`,
+              draft: true,
+              prerelease: false
+            })
+            return data.id
+
+  # ── 2. Build all platforms ───────────────────────────────────────────────────
   build:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -77,44 +115,33 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: bunx tauri
-          tagName: v__VERSION__
-          releaseName: v__VERSION__
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: >-
             --config src-tauri/tauri.build.conf.json
             --config src-tauri/tauri.release.generated.conf.json
             --target ${{ matrix.target }}
 
-  # ── Generate latest.json and publish the draft ──────────────────────────────
+  # ── 3. Generate latest.json and publish ─────────────────────────────────────
   publish:
-    needs: build
-    runs-on: ubuntu-latest
+    needs: [create-release, build]
     permissions:
       contents: write
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: get version
-        id: ver
-        run: |
-          version=$(python3 -c "import json; print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version"    >> "$GITHUB_OUTPUT"
-
       - name: download artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ needs.create-release.outputs.version }}
         run: |
           mkdir dist
-          gh release download "$TAG" --dir dist
+          gh release download "v$VERSION" --dir dist
 
       - name: generate latest.json
         env:
-          VERSION: ${{ steps.ver.outputs.version }}
-          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ needs.create-release.outputs.version }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -122,7 +149,7 @@ jobs:
           from pathlib import Path
 
           version  = os.environ["VERSION"]
-          tag      = os.environ["TAG"]
+          tag      = f"v{version}"
           base_url = f"https://github.com/boooper/player/releases/download/{tag}"
           dist     = Path("dist")
 
@@ -160,9 +187,29 @@ jobs:
           PY
 
       - name: upload latest.json and publish release
+        uses: actions/github-script@v7
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.ver.outputs.tag }}
-        run: |
-          gh release upload "$TAG" latest.json --clobber
-          gh release edit "$TAG" --draft=false
+          VERSION: ${{ needs.create-release.outputs.version }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('fs')
+            const tag = `v${process.env.VERSION}`
+
+            // Upload latest.json
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.RELEASE_ID,
+              name: 'latest.json',
+              data: fs.readFileSync('latest.json')
+            })
+
+            // Publish the release
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.RELEASE_ID,
+              draft: false
+            })
