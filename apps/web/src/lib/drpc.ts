@@ -59,14 +59,16 @@ async function syncActivity(
     !url.includes('localhost') &&
     !url.includes('127.0.0.1');
 
-  // Prefer artist artwork (likely Last.fm public URL) over cover art (often local).
-  const artistImageUrl = await getArtistArtwork(song.artist).catch(() => '');
+  // Only fetch artist artwork if cover art isn't available.
+  const artistImageUrl = isPublicUrl(song.coverArtUrl)
+    ? ''
+    : await getArtistArtwork(song.artist).catch(() => '');
   // Bail if cleanup ran while we were fetching artwork.
   if (isAborted()) return;
 
   const largeImage =
-    isPublicUrl(artistImageUrl) ? artistImageUrl :
     isPublicUrl(song.coverArtUrl) ? song.coverArtUrl :
+    isPublicUrl(artistImageUrl) ? artistImageUrl :
     'appicon';
 
   const assets = new Assets()
