@@ -44,10 +44,20 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libasound2-dev
 
       - name: Install frontend dependencies
         run: bun install
+
+      - name: Inject updater pubkey into release config
+        run: |
+          jq --arg pubkey "$TAURI_UPDATER_PUBKEY" \
+            '.plugins.updater.pubkey = $pubkey' \
+            apps/desktop/src-tauri/tauri.release.conf.json > tmp.json && \
+            mv tmp.json apps/desktop/src-tauri/tauri.release.conf.json
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
@@ -55,8 +65,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         with:
           projectPath: apps/desktop
+          tauriScript: bunx tauri
           tagName: ${{ github.ref_name }}
           releaseName: Madrify ${{ github.ref_name }}
           releaseBody: |
