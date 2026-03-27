@@ -62,4 +62,4 @@ unicode-normalization = "0.1"
 if-addrs = "0.13"
 rust_cast = { version = "0.21.0", features = ["thread_safe"] }
 rustls = { version = "0.23", features = ["ring"] }
-tauri-plugin-process = "2.3.1"
+tauri-plugin-process = "2"

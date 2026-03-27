@@ -14,7 +14,14 @@
     "core:window:allow-start-dragging",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://**" }, { "url": "http://**" }]
+      "allow": [
+        {
+          "url": "https://**"
+        },
+        {
+          "url": "http://**"
+        }
+      ]
     },
     "drpc:default",
     "drpc:allow-clear-activity",
@@ -26,6 +33,7 @@
     "autostart:default",
     "os:default",
     "cache:default",
-    "positioner:default"
+    "positioner:default",
+    "process:default"
   ]
 }
