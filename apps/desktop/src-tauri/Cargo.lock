@@ -3066,7 +3066,7 @@ dependencies = [
  "lastfm-client",
  "lofty",
  "log",
- "md5",
+ "md5 0.8.0",
  "musixmatch-inofficial",
  "opensubsonic",
  "prost",
@@ -3174,6 +3174,12 @@ name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
+
+[[package]]
+name = "md5"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
 
 [[package]]
 name = "memchr"
@@ -4989,7 +4995,7 @@ version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c46a75fb6409a528f7e0d8e99826684f88461d1b0d0edeec60d82e3f554dad5"
 dependencies = [
- "md5",
+ "md5 0.7.0",
  "serde",
  "serde_json",
  "ureq",
