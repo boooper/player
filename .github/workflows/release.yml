@@ -96,7 +96,7 @@ jobs:
           jq --arg v "$VERSION" '.version = $v' \
             src-tauri/tauri.conf.json > tmp.json && \
             mv tmp.json src-tauri/tauri.conf.json
-          perl -i -pe 'BEGIN { $n=0 } s/^version = "[^"]*"/version = "'"$VERSION'""/ if !$n++' \
+          perl -i -pe 'BEGIN { $n=0 } s/^version = "[^"]*"/version = "'"$VERSION"'"/ if !$n++' \
             src-tauri/Cargo.toml
 
       - name: Inject updater pubkey into release config
