@@ -41,7 +41,7 @@ futures = "0.3"
 url = "2"
 md5 = "0.8"
 rand = "0.8"
-prost = "0.13"
+prost = "0.14"
 tokio-native-tls = "0.3"
 
 biquad = "0.5"
