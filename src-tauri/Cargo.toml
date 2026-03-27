@@ -61,6 +61,6 @@ rust_cast = { version = "0.21.0", features = ["thread_safe"] }
 if-addrs = "0.13"
 rustls = { version = "0.23", features = ["ring"] }
 # These crates use reqwest with native-tls (no rustls feature) — desktop-only
-lastfm-client = "2.1.0"
+lastfm-client = "3.5.0"
 rustfm-scrobble = "1.1.1"
 genius_lyrics = "1.0.4"
