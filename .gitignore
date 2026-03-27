@@ -8,3 +8,5 @@ apps/desktop/src-tauri/target/
 
 *.log
 bun-debug.log*
+/.claude
+*DS_Store
