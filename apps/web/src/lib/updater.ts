@@ -1,4 +1,5 @@
 import { check } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { isTauri } from '$lib/tauri';
 
 export type AppUpdateInfo = {
@@ -30,5 +31,6 @@ export async function installAppUpdate(): Promise<AppUpdateInfo | null> {
   if (!update) return null;
 
   await update.downloadAndInstall();
+  await relaunch();
   return normalizeUpdate(update);
 }

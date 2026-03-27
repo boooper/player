@@ -79,6 +79,7 @@ pub fn run() {
             app.handle().plugin(tauri_plugin_positioner::init())?;
             app.handle().plugin(tauri_plugin_store::Builder::default().build())?;
             app.handle().plugin(tauri_plugin_drpc::init())?;
+            app.handle().plugin(tauri_plugin_process::init())?;
             if let Some(pubkey) = updater_pubkey {
                 app.handle().plugin(
                     tauri_plugin_updater::Builder::new()

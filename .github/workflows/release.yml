@@ -46,6 +46,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${{ needs.tag.outputs.new_tag }}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
+          else
+            NOTES=$(git log --pretty=format:"- %s" "HEAD~10..HEAD")
+          fi
+          {
+            echo 'notes<<NOTES_EOF'
+            echo "$NOTES"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -103,8 +121,7 @@ jobs:
           tauriScript: bunx tauri
           tagName: ${{ needs.tag.outputs.new_tag }}
           releaseName: Madrify ${{ needs.tag.outputs.new_tag }}
-          releaseBody: |
-            See the assets below to download and install this version.
+          releaseBody: ${{ steps.changelog.outputs.notes }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json

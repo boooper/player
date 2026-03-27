@@ -37,7 +37,7 @@
         toast.success('You are already on the latest version');
         return;
       }
-      toast.success(`Update ${installed.version} installed. Restart Madrify to finish applying it.`);
+      toast.success(`Update ${installed.version} installed. Relaunching...`);
       updateInfo = null;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to install update');
@@ -98,53 +98,63 @@
       </div>
       <p class="mt-0.5 text-xs text-muted-foreground">Check for signed desktop releases and install them in-app.</p>
     </div>
-    <div class="flex items-center justify-between gap-4 px-5 py-5">
-      <div class="min-w-0">
-        <p class="text-sm font-medium">
-          {#if updateInfo}
-            Update {updateInfo.version} available
-          {:else}
-            Check for updates
-          {/if}
-        </p>
-        <p class="text-xs text-muted-foreground">
-          {#if updaterUnavailable}
-            Updater is not configured in this build.
-          {:else if updateInfo}
-            {updateInfo.body || `A newer version is available than ${updateInfo.currentVersion}.`}
-          {:else}
-            Looks for the latest Madrify release from GitHub Releases.
-          {/if}
-        </p>
+    <div class="px-5 py-5">
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <p class="text-sm font-medium">
+            {#if updateInfo}
+              Update {updateInfo.version} available
+            {:else}
+              Check for updates
+            {/if}
+          </p>
+          <p class="text-xs text-muted-foreground">
+            {#if updaterUnavailable}
+              Updater is not configured in this build.
+            {:else if !updateInfo}
+              Looks for the latest Madrify release from GitHub Releases.
+            {/if}
+          </p>
+        </div>
+        {#if updateInfo}
+          <button
+            class="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
+            onclick={handleInstallUpdate}
+            disabled={updateInstalling || updateChecking}
+          >
+            {#if updateInstalling}
+              <Loader2 class="size-4 animate-spin" />
+              Installing...
+            {:else}
+              <Download class="size-4" />
+              Install {updateInfo.version}
+            {/if}
+          </button>
+        {:else}
+          <button
+            class="flex shrink-0 items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium transition hover:bg-border/20 disabled:opacity-60"
+            onclick={handleCheckForUpdates}
+            disabled={updateChecking || updateInstalling}
+          >
+            {#if updateChecking}
+              <Loader2 class="size-4 animate-spin" />
+              Checking...
+            {:else}
+              <Download class="size-4" />
+              Check now
+            {/if}
+          </button>
+        {/if}
       </div>
-      {#if updateInfo}
-        <button
-          class="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
-          onclick={handleInstallUpdate}
-          disabled={updateInstalling || updateChecking}
-        >
-          {#if updateInstalling}
-            <Loader2 class="size-4 animate-spin" />
-            Installing...
-          {:else}
-            <Download class="size-4" />
-            Install {updateInfo.version}
-          {/if}
-        </button>
-      {:else}
-        <button
-          class="flex shrink-0 items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium transition hover:bg-border/20 disabled:opacity-60"
-          onclick={handleCheckForUpdates}
-          disabled={updateChecking || updateInstalling}
-        >
-          {#if updateChecking}
-            <Loader2 class="size-4 animate-spin" />
-            Checking...
-          {:else}
-            <Download class="size-4" />
-            Check now
-          {/if}
-        </button>
+      {#if updateInfo?.body}
+        <div class="mt-3 max-h-36 overflow-y-auto rounded-lg bg-muted/50 px-3 py-2.5">
+          <p class="mb-1 text-xs font-medium text-muted-foreground">What's new</p>
+          <ul class="space-y-0.5">
+            {#each updateInfo.body.split('\n').filter(l => l.trim()) as line}
+              <li class="text-xs text-foreground/80">{line.replace(/^-\s*/, '• ')}</li>
+            {/each}
+          </ul>
+        </div>
       {/if}
     </div>
   </section>

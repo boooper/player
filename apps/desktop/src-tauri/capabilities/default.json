@@ -21,6 +21,7 @@
     "drpc:allow-destroy-thread",
     "store:default",
     "updater:default",
+    "process:allow-relaunch",
     "autostart:default",
     "os:default",
     "cache:default",
