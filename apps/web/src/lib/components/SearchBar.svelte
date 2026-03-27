@@ -135,6 +135,7 @@
     const query = value.trim();
     if (!query) return;
     saveRecentSearch(query);
+    value = '';
     goto(`/search?q=${encodeURIComponent(query)}`);
   }
 
@@ -145,20 +146,20 @@
 </script>
 
 <div
-  class="search-shell relative w-full max-w-lg"
+  class="search-shell relative w-full max-w-xs"
   class:is-active={searchFocused || dropdownOpen}
   class:is-idle={!searchFocused && !dropdownOpen}
 >
   <form onsubmit={onSubmit}>
-    <div class="search-backdrop absolute inset-0 rounded-[18px]" aria-hidden="true"></div>
-    <span class="search-icon-wrap pointer-events-none absolute left-4 top-1/2 -translate-y-1/2">
-      <Search class="size-4 {searchFocused ? 'text-primary/90' : 'text-muted-foreground'}" />
+    <div class="search-backdrop absolute inset-0 rounded-full" aria-hidden="true"></div>
+    <span class="search-icon-wrap pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
+      <Search class="size-3.5 {searchFocused ? 'text-primary/90' : 'text-muted-foreground'}" />
     </span>
     <div class="search-input-wrap">
       <Input
         bind:ref={inputEl}
         bind:value
-        class="relative h-11 rounded-[18px] border-white/8 bg-transparent pl-11 pr-4 text-sm text-foreground placeholder:text-muted-foreground/55 shadow-none backdrop-blur-0 focus-visible:border-primary/35 focus-visible:bg-transparent focus-visible:ring-0 focus-visible:shadow-none"
+        class="relative h-8 rounded-full border-white/8 bg-transparent pl-9 pr-4 text-xs text-foreground placeholder:text-muted-foreground/55 shadow-none backdrop-blur-0 focus-visible:border-primary/35 focus-visible:bg-transparent focus-visible:ring-0 focus-visible:shadow-none"
         placeholder="What do you want to play?"
         oninput={onInput}
         onfocus={() => { cancelClose(); void openSearchDropdown(); }}
@@ -364,6 +365,7 @@
   .search-shell.is-active .search-backdrop {
     border-color: rgb(255 255 255 / 0.1);
     background: rgb(24 24 32 / 0.98);
+    border-radius: 9999px;
   }
 
   .search-shell.is-active .search-icon-wrap {
