@@ -1,0 +1,1 @@
+import{t as e}from"../chunks/CFUuDlJP.js";import{r as t}from"../chunks/BIZsC-Xv.js";function n(e,n){throw new t(e,n.toString())}var r=e({load:()=>i});function i(){throw n(307,`/settings/servers`)}export{r as universal};

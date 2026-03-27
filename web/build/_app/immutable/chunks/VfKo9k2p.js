@@ -1,0 +1,1 @@
+import{ht as e,ot as t,y as n}from"./BVeMEo-6.js";function r(r){let i,a=t(e=>{let t=!1,n=r.subscribe(n=>{i=n,t&&e()});return t=!0,n});function o(){return n()?(a(),i):e(r)}return`set`in r?{get current(){return o()},set current(e){r.set(e)}}:{get current(){return o()}}}export{r as t};

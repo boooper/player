@@ -14,6 +14,16 @@ export declare const RECOMMENDATION_PROVIDERS: {
 export type RecommendationProvider =
   (typeof RECOMMENDATION_PROVIDERS)[keyof typeof RECOMMENDATION_PROVIDERS];
 
+export declare const LYRICS_PROVIDERS: {
+  readonly MUSIXMATCH: 'musixmatch';
+};
+
+export type LyricsProvider =
+  (typeof LYRICS_PROVIDERS)[keyof typeof LYRICS_PROVIDERS];
+
+
+
+
 export declare const METADATA_PROVIDERS: {
   readonly BOTH: 'both';
   readonly LASTFM: 'lastfm';

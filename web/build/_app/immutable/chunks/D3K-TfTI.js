@@ -1,0 +1,1 @@
+import{D as e,d as t}from"./BVeMEo-6.js";import"./Cls-VfCd.js";function n(n){e(()=>t(()=>n()))}export{n as t};

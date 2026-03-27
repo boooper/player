@@ -1,0 +1,1 @@
+function e(e){return e?.startsWith(`ext-`)&&e.slice(4,e.indexOf(`-`,4))||null}function t(t){let n=e(t);return n?{squidwtf:`SquidWTF`,qobuz:`Qobuz`,deezer:`Deezer`}[n]??n.charAt(0).toUpperCase()+n.slice(1):null}export{t};

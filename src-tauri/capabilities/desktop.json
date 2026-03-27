@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Permissions for desktop-only features (Windows, macOS, Linux)",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "drpc:default",
+    "drpc:allow-clear-activity",
+    "drpc:allow-destroy-thread",
+    "updater:default",
+    "autostart:default",
+    "positioner:default",
+    "process:default"
+  ]
+}

@@ -2,20 +2,19 @@
   "name": "@player/shared",
   "private": true,
   "version": "0.1.0",
-  "type": "module",
   "types": "./src/index.d.ts",
+  "files": [
+    "src/*.d.ts"
+  ],
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
-      "default": "./src/index.js"
+      "types": "./src/index.d.ts"
     },
     "./contracts": {
-      "types": "./src/contracts.d.ts",
-      "default": "./src/contracts.js"
+      "types": "./src/contracts.d.ts"
     },
     "./media": {
-      "types": "./src/media.d.ts",
-      "default": "./src/media.js"
+      "types": "./src/media.d.ts"
     }
   }
 }

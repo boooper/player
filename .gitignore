@@ -4,7 +4,7 @@ node_modules/
 apps/web/.svelte-kit/
 apps/web/build/
 
-apps/desktop/src-tauri/target/
+/src-tauri/target/
 
 *.log
 bun-debug.log*

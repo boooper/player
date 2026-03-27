@@ -1,0 +1,282 @@
+@import "tailwindcss";
+
+@import "tw-animate-css";
+
+@keyframes equalizer {
+  0%, 100% { transform: scaleY(0.35); }
+  50%       { transform: scaleY(1);    }
+}
+
+@custom-variant dark (&:is(.dark *));
+
+html, body {
+  height: 100svh;
+  overflow: hidden;
+}
+
+:root {
+  --radius: 0.65rem;
+  --background: #000000; /* deep app background (Apple Music dark) */
+  --foreground: #e6e7ea;
+  --card: #0f1115;
+  --card-foreground: #e6e7ea;
+  --popover: #111217;
+  --popover-foreground: #e6e7ea;
+  --primary: #ff2d55; /* Apple Music accent (pink) */
+  --primary-foreground: #ffffff;
+  --secondary: #15171b;
+  --secondary-foreground: #d7d8db;
+  --muted: #121318;
+  --muted-foreground: #9aa0a6;
+  --primary: #bf5af2;
+  --primary-foreground: #ffffff;
+  --destructive: #ff5c5c;
+  --border: rgba(255,255,255,0.04);
+  --input: rgba(255,255,255,0.06);
+  --ring: rgba(255,45,85,0.18);
+  --chart-1: #ffd2e0;
+  --chart-2: #ff9bb3;
+  --chart-3: #d7b0ff;
+  --chart-4: #b893ff;
+  --chart-5: #8fb6ff;
+  --sidebar: #0b0b10;
+  --sidebar-foreground: #e6e7ea;
+  --sidebar-primary: #ff2d55;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1d1e20;
+  --sidebar-accent-foreground: #d7d8db;
+  --sidebar-border: rgba(255,255,255,0.04);
+  --sidebar-ring: rgba(255,45,85,0.18);
+}
+
+.dark {
+  --background: #0b0b10;
+  --foreground: #e6e7ea;
+  --card: #0f1115;
+  --card-foreground: #e6e7ea;
+  --popover: #111217;
+  --popover-foreground: #e6e7ea;
+  --primary: #ff2d55;
+  --primary-foreground: #ffffff;
+  --secondary: #15171b;
+  --secondary-foreground: #d7d8db;
+  --muted: #121318;
+  --muted-foreground: #9aa0a6;
+  --primary-foreground: #ffffff;
+  --destructive: #ff5c5c;
+  --border: rgba(255,255,255,0.06);
+  --input: rgba(255,255,255,0.08);
+  --ring: rgba(255,45,85,0.22);
+  --chart-1: #ffd2e0;
+  --chart-2: #ff9bb3;
+  --chart-3: #d7b0ff;
+  --chart-4: #b893ff;
+  --chart-5: #8fb6ff;
+  --sidebar: #0b0b10;
+  --sidebar-foreground: #e6e7ea;
+  --sidebar-primary: #ff2d55;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #15171b;
+  --sidebar-accent-foreground: #d7d8db;
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-ring: rgba(255,45,85,0.22);
+}
+
+
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--primary);
+  --color-accent-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html, body {
+    @apply text-foreground;
+    background-color: var(--background);
+  }
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.14);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.24);
+}
+
+/* ── Text selection ──────────────────────────────────────────────────────── */
+::selection {
+  background: rgb(255 255 255 / 0.18);
+  color: rgb(255 255 255 / 0.98);
+}
+
+/* ── Custom titlebar drag region — prevent text selection while dragging ─── */
+header[onmousedown] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Safe area insets (iOS notch / Android status+nav bar) ───────────── */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, #0b0b0f 0%, #09090c 100%);
+}
+
+.liquid-glass,
+.liquid-glass-panel,
+.app-glass,
+.app-shell-surface,
+.app-card,
+.app-card-soft {
+  background: color-mix(in srgb, var(--card) 94%, black 6%);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.app-shell-rail,
+.app-shell-main,
+.app-shell-footer {
+  background: transparent;
+}
+
+.liquid-glass-item {
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.liquid-glass-item[data-highlighted] {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--foreground);
+}
+
+.liquid-glass-item[data-highlighted] svg {
+  color: currentColor;
+}
+
+.app-hover,
+.app-round-button,
+.page-hero,
+.page-section,
+.stagger-item,
+.stagger-row {
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.app-hover:hover,
+.stagger-item:hover,
+.stagger-row:hover {
+  background: rgb(255 255 255 / 0.025);
+}
+
+.app-round-button {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+}
+
+.app-round-button:hover {
+  background: color-mix(in srgb, var(--secondary) 86%, white 14%);
+}
+
+.app-section-title {
+  letter-spacing: -0.02em;
+}
+
+.app-subtle-text {
+  color: rgb(255 255 255 / 0.58);
+}
+
+a,
+button,
+[role="button"],
+[role="tab"],
+[role="option"] {
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.skeleton {
+  background: rgb(255 255 255 / 0.05);
+  border-radius: 0.5rem;
+}
+
+.glow-pulse {
+  animation: none;
+}
+
+@keyframes now-playing-bar {
+  from { transform: scaleY(0.3); }
+  to   { transform: scaleY(1); }
+}
+
+@keyframes lyric-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes lyric-header-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  a,
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="option"] {
+    transition: none;
+  }
+}
