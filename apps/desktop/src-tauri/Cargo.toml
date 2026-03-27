@@ -39,7 +39,7 @@ reqwest = { version = "0.13", default-features = false, features = ["form", "jso
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 futures = "0.3"
 url = "2"
-md5 = "0.7"
+md5 = "0.8"
 rand = "0.8"
 prost = "0.13"
 tokio-native-tls = "0.3"
