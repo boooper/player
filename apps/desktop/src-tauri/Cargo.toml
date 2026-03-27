@@ -31,7 +31,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 tauri-plugin-cache = "0.1.6"
 tauri-plugin-positioner = "2"
 tauri-plugin-http = "2.5.7"
