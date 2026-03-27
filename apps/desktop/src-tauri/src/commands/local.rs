@@ -451,7 +451,7 @@ pub async fn album_list(profile: &ActiveProfile, kind: &str, count: u32) -> Resu
     match kind {
         "random" => {
             use rand::seq::SliceRandom;
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             albums.shuffle(&mut rng);
         }
         _ => {

@@ -8,7 +8,7 @@ use crate::commands::media::{Album, AlbumDetail, AlbumFull, Playlist, PlaylistDe
 use crate::commands::profiles::ActiveProfile;
 use crate::commands::settings;
 use crate::AppState;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 use roxmltree::{Document, Node};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -142,8 +142,8 @@ fn get_or_create_client_id(db: &rusqlite::Connection) -> Result<String, String> 
         }
     }
 
-    let client_id: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
+    let client_id: String = rand::rng()
+        .sample_iter(Alphanumeric)
         .take(32)
         .map(char::from)
         .collect();

@@ -30,7 +30,7 @@ impl PlaybackHandle {
         let stream_config: StreamConfig = supported_config.clone().into();
         let state = Arc::new(Mutex::new(PlaybackState::new(
             stream_config.channels,
-            stream_config.sample_rate.0,
+            stream_config.sample_rate,
         )?));
         let error_callback = |error| eprintln!("Desktop playback stream error: {error}");
 
