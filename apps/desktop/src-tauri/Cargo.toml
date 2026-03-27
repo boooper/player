@@ -44,7 +44,7 @@ rand = "0.9"
 prost = "0.14"
 tokio-native-tls = "0.3"
 
-biquad = "0.5"
+biquad = "0.6"
 cpal = "0.17"
 symphonia = { version = "0.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 walkdir = "2"
