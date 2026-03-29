@@ -26,6 +26,12 @@
       "csp": "default-src 'self'; connect-src 'self' http://localhost:5173 https: http://*:*; img-src 'self' data: https: http://localhost:* http://*:*; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzNUM2NkE0MkExRTEwOEMKUldTTUVCNHFwR1pjZzJ0Z2VrQTMrVGU2WTI1L0xrZ0h6cXNiR3FLOWY0ZmRXb09zbjA5Qm5NMTMK",
+      "endpoints": ["https://github.com/boooper/player/releases/latest/download/latest.json"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
