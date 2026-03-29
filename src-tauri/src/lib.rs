@@ -145,6 +145,10 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_drpc::init())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
+                if let Some(window) = app.get_webview_window("main") {
+                    window.show()?;
+                }
             }
 
             Ok(())

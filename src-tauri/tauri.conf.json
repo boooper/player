@@ -19,7 +19,10 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "titleBarStyle": "Overlay"
+        "titleBarStyle": "Overlay",
+        "shadow": true,
+        "center": true,
+        "visible": false
       }
     ],
     "security": {
@@ -34,16 +37,26 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "dmg", "appimage"],
+    "publisher": "Madrify",
+    "shortDescription": "A music player",
+    "longDescription": "Madrify is a modern music player for media servers.",
+    "category": "Music",
+    "copyright": "© 2026 Madrify",
     "android": {
       "minSdkVersion": 26
     },
     "icon": [
-     "icons/32x32.png",
+      "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Volume2, VolumeX } from '@lucide/svelte';
+  import { Volume, Volume1, Volume2, VolumeX } from '@lucide/svelte';
   import { Slider } from '$lib/components/ui';
   import { Tooltip, TooltipTrigger, TooltipContent } from '$lib/components/ui/tooltip';
   import { volume } from '$lib/stores/player';
@@ -30,6 +30,7 @@
   );
 
   const isMuted = $derived(effectiveVolume <= 0.01);
+  const volumePct = $derived(effectiveVolume * 100);
 
   $effect(() => {
     controller.syncFromExternalVolume(effectiveVolume);
@@ -84,7 +85,7 @@
     <TooltipTrigger>
       {#snippet child({ props })}
         <button {...props} type="button" onclick={() => controller.toggleMute(effectiveVolume)} aria-label={isMuted ? 'Unmute' : 'Mute'} class="player-volume-button">
-          {#if isMuted}<VolumeX class="size-[18px]" />{:else}<Volume2 class="size-[18px]" />{/if}
+          {#if isMuted}<VolumeX class="size-[18px]" />{:else if volumePct < 33}<Volume class="size-[18px]" />{:else if volumePct < 66}<Volume1 class="size-[18px]" />{:else}<Volume2 class="size-[18px]" />{/if}
         </button>
       {/snippet}
     </TooltipTrigger>

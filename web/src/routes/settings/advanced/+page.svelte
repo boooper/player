@@ -22,7 +22,7 @@
       }
     } catch (error) {
       updaterUnavailable = true;
-      toast.error(error instanceof Error ? error.message : 'Updater is unavailable in this build');
+      toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       updateChecking = false;
     }

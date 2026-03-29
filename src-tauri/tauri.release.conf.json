@@ -2,6 +2,11 @@
   "build": {
     "beforeBuildCommand": "bun run --cwd web build"
   },
+  "app": {
+    "security": {
+      "devtools": false
+    }
+  },
   "bundle": {
     "createUpdaterArtifacts": true
   },
