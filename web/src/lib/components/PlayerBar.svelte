@@ -9,7 +9,7 @@
     nextTrack, prevTrack, queue, repeatMode, shouldAutoplay,
     cycleRepeatMode, showLyrics, seekRequest, togglePlayRequest,
     starredSongIds, smartShuffleTrackIds, showQueue, queueLoading,
-    shuffleEnabled,
+    shuffleEnabled, startQueue, playingFrom,
   } from '$lib/stores/player';
   import { starSong, unstarSong, desktopPlaybackPause, type CastDeviceInfo } from '$lib/servers';
   import { normalizeEqBands } from '$lib/audio/equalizer';
@@ -36,6 +36,44 @@
   // ── Mobile state ──────────────────────────────────────────────────────────
   const isMobile = new IsMobile();
   let fullPlayerOpen = $state(false);
+  let mobileQueueOpen = $state(false);
+
+  // Swipe handling for mini player (prev/next)
+  let miniSwipeTouchStartX = 0;
+  let miniSwipeTouchStartY = 0;
+  function onMiniTouchStart(e: TouchEvent) {
+    miniSwipeTouchStartX = e.touches[0].clientX;
+    miniSwipeTouchStartY = e.touches[0].clientY;
+  }
+  function onMiniTouchEnd(e: TouchEvent) {
+    const dx = e.changedTouches[0].clientX - miniSwipeTouchStartX;
+    const dy = e.changedTouches[0].clientY - miniSwipeTouchStartY;
+    if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < 50) return;
+    if (dx < 0) nextTrack(); else prevTrack();
+  }
+
+  // Swipe-down to close full player
+  let fullPlayerTouchStartY = 0;
+  let fullPlayerDragY = $state(0);
+  let fullPlayerDragging = $state(false);
+  function onFullPlayerTouchStart(e: TouchEvent) {
+    // Only drag from the artwork/info area, not interactive controls
+    fullPlayerTouchStartY = e.touches[0].clientY;
+    fullPlayerDragging = true;
+    fullPlayerDragY = 0;
+  }
+  function onFullPlayerTouchMove(e: TouchEvent) {
+    if (!fullPlayerDragging) return;
+    const dy = e.touches[0].clientY - fullPlayerTouchStartY;
+    if (dy > 0) fullPlayerDragY = dy;
+  }
+  function onFullPlayerTouchEnd() {
+    if (fullPlayerDragY > 100) {
+      fullPlayerOpen = false;
+    }
+    fullPlayerDragging = false;
+    fullPlayerDragY = 0;
+  }
 
   // ── UI state ──────────────────────────────────────────────────────────────
   let castActive = $state(false);
@@ -207,7 +245,13 @@
 
 {#if currentTrack}
   <!-- Mini player bar — fixed above bottom nav -->
-  <div class="fixed left-2 right-2 z-30 flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-card/[0.97] px-3 py-2.5 shadow-2xl backdrop-blur-xl" style="bottom: calc(var(--sab) + 3.75rem); -webkit-backdrop-filter:blur(24px)">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="fixed left-2 right-2 z-30 flex items-center gap-3 rounded-2xl border border-white/[0.08] bg-card/[0.97] px-3 py-2.5 shadow-2xl backdrop-blur-xl"
+    style="bottom: calc(var(--sab) + 3.75rem); -webkit-backdrop-filter:blur(24px)"
+    ontouchstart={onMiniTouchStart}
+    ontouchend={onMiniTouchEnd}
+  >
     <button
       class="flex min-w-0 flex-1 items-center gap-3 text-left"
       onclick={() => { fullPlayerOpen = true; }}
@@ -252,7 +296,11 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex flex-col"
+    style="transform: translateY({fullPlayerDragY}px); transition: {fullPlayerDragging ? 'none' : 'transform 0.3s ease'};"
     transition:fly={{ y: 900, duration: 340, easing: cubicOut }}
+    ontouchstart={onFullPlayerTouchStart}
+    ontouchmove={onFullPlayerTouchMove}
+    ontouchend={onFullPlayerTouchEnd}
   >
     <div class="absolute inset-0 bg-[#0b0b10]">
       {#if currentTrack?.coverArtUrl}
@@ -334,10 +382,85 @@
           <MicVocal class="size-5" />
           <span class="text-[11px] font-medium">Lyrics</span>
         </button>
-        <button onclick={() => { showQueue.update(v => !v); fullPlayerOpen = false; }} class="flex flex-col items-center gap-1.5 rounded-2xl px-5 py-2 text-white/45 active:bg-white/10">
+        <button onclick={() => { mobileQueueOpen = true; fullPlayerOpen = false; }} class="flex flex-col items-center gap-1.5 rounded-2xl px-5 py-2 text-white/45 active:bg-white/10">
           <ListMusic class="size-5" />
           <span class="text-[11px] font-medium">Queue</span>
         </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Mobile queue overlay -->
+{#if mobileQueueOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="fixed inset-0 z-50 flex flex-col"
+    transition:fly={{ y: 900, duration: 300, easing: cubicOut }}
+  >
+    <div class="absolute inset-0 bg-[#0b0b10]/95 backdrop-blur-2xl"></div>
+    <div class="relative flex h-full flex-col" style="padding-top: max(var(--sat), 0.75rem); padding-bottom: max(var(--sab), 0.75rem)">
+
+      <!-- Header -->
+      <div class="flex shrink-0 items-center justify-between px-5 py-4">
+        <button
+          onclick={() => { mobileQueueOpen = false; }}
+          class="flex size-10 items-center justify-center rounded-full text-white/70 active:bg-white/10"
+          aria-label="Close queue"
+        >
+          <ChevronDown class="size-6" />
+        </button>
+        <p class="text-xs font-semibold uppercase tracking-widest text-white/50">Queue</p>
+        <div class="size-10"></div>
+      </div>
+
+      <!-- Now playing -->
+      {#if currentTrack}
+        <div class="shrink-0 border-b border-white/[0.07] px-5 pb-4">
+          <p class="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/35">Now Playing</p>
+          <div class="flex items-center gap-3 rounded-2xl bg-white/[0.06] p-3">
+            {#if currentTrack.coverArtUrl}
+              <img class="size-12 shrink-0 rounded-xl object-cover shadow-md" src={currentTrack.coverArtUrl} alt={currentTrack.title} />
+            {:else}
+              <div class="grid size-12 shrink-0 place-items-center rounded-xl bg-white/10 text-xs font-bold text-white/50">{initials(currentTrack.title)}</div>
+            {/if}
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-white">{currentTrack.title}</p>
+              <p class="truncate text-xs text-white/55">{currentTrack.artist}</p>
+            </div>
+            <div class="ml-auto flex size-8 shrink-0 items-center justify-center">
+              <svg class="size-4 fill-primary text-primary" viewBox="0 0 24 24"><rect x="2" y="6" width="4" height="12" rx="1"/><rect x="9" y="3" width="4" height="18" rx="1"/><rect x="16" y="8" width="4" height="8" rx="1"/></svg>
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Upcoming tracks -->
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {#if $queue.slice($currentIndex + 1).length === 0}
+          <p class="py-8 text-center text-sm text-white/30">No upcoming tracks</p>
+        {:else}
+          <p class="mb-3 text-[10px] font-semibold uppercase tracking-widest text-white/35">Up Next</p>
+          {#each $queue.slice($currentIndex + 1) as song, i (song.id + i)}
+            <button
+              class="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left active:bg-white/10"
+              onclick={() => {
+                startQueue($queue, $currentIndex + 1 + i, { type: $playingFrom.type, name: $playingFrom.name, href: $playingFrom.href });
+                mobileQueueOpen = false;
+              }}
+            >
+              {#if song.coverArtUrl}
+                <img class="size-10 shrink-0 rounded-lg object-cover opacity-80" src={song.coverArtUrl} alt={song.title} />
+              {:else}
+                <div class="grid size-10 shrink-0 place-items-center rounded-lg bg-white/10 text-xs font-bold text-white/40">{initials(song.title)}</div>
+              {/if}
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-white/85">{song.title}</p>
+                <p class="truncate text-xs text-white/40">{song.artist}</p>
+              </div>
+            </button>
+          {/each}
+        {/if}
       </div>
     </div>
   </div>

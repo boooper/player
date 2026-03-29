@@ -55,9 +55,15 @@ rust {
     rootDirRel = "../../../"
 }
 
+val rustlsVersion = if (gradle.extra.has("rustlsPlatformVerifierVersion")) {
+    gradle.extra.get("rustlsPlatformVerifierVersion") as? String
+} else null
+
 dependencies {
     // Required by rustls-platform-verifier — Android AAR bundled locally in the Rust crate (not on Maven Central)
-    implementation("rustls:rustls-platform-verifier:latest.release")
+    if (rustlsVersion != null) {
+        implementation("rustls:rustls-platform-verifier:$rustlsVersion@aar")
+    }
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

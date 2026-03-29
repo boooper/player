@@ -2,6 +2,8 @@ mod db;
 mod commands;
 mod lyrics;
 mod playback_engine;
+#[cfg(target_os = "android")]
+mod android_media;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -37,7 +39,7 @@ pub extern "C" fn JNI_OnLoad(
     _res: *mut std::ffi::c_void,
 ) -> jni::sys::jint {
     let mut env = vm.get_env().expect("Cannot get JNI env during init");
-    // Retrieve the application context to pass to the platform verifier.
+    // Retrieve the application context.
     let context = env
         .call_static_method(
             "android/app/ActivityThread",
@@ -48,6 +50,24 @@ pub extern "C" fn JNI_OnLoad(
         .expect("Failed to get current application")
         .l()
         .expect("Expected JObject from currentApplication");
+
+    // Store a global ref to the context and the JVM for the media bridge.
+    let ctx_global = env.new_global_ref(&context)
+        .expect("Cannot create global ref for Android context");
+    let vm_for_media = env.get_java_vm()
+        .expect("Cannot get JavaVM for media bridge");
+
+    // Cache MediaPlaybackService class NOW while on the JVM main thread.
+    // FindClass only resolves app classes from the thread that loaded the app;
+    // on attached Rust threads it would fail silently.
+    let service_class = env
+        .find_class("com/madrify/player/MediaPlaybackService")
+        .expect("Cannot find MediaPlaybackService class");
+    let service_class_global = env.new_global_ref(&service_class)
+        .expect("Cannot create global ref for MediaPlaybackService");
+
+    android_media::init(vm_for_media, ctx_global, service_class_global);
+
     rustls_platform_verifier::android::init_hosted(&mut env, context)
         .expect("Failed to init rustls-platform-verifier");
     jni::JNIVersion::V6.into()
@@ -77,6 +97,9 @@ pub fn run() {
 
     builder
         .setup(move |app| {
+            #[cfg(target_os = "android")]
+            android_media::set_app_handle(app.handle().clone());
+
             // Initialise SQLite database in app data directory
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;

@@ -32,6 +32,12 @@ pub async fn playback_load(
     autoplay: Option<bool>,
     crossfade_ms: Option<u32>,
 ) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    let android_meta = (
+        song.title.clone(), song.artist.clone(), song.album.clone(),
+        song.cover_art_url.clone(), song.duration,
+    );
+
     let preloaded = playback_handle(&state)?.take_preloaded(&song.id)?;
     let payload = if let Some(preloaded) = preloaded {
         preloaded
@@ -40,10 +46,20 @@ pub async fn playback_load(
     };
 
     let autoplay = autoplay.unwrap_or(false);
-    match crossfade_ms.filter(|&ms| ms > 0) {
+    let result = match crossfade_ms.filter(|&ms| ms > 0) {
         Some(ms) => playback_handle(&state)?.load_with_crossfade(payload, autoplay, ms),
         None => playback_handle(&state)?.load(payload, autoplay),
+    };
+
+    #[cfg(target_os = "android")]
+    if result.is_ok() {
+        let (title, artist, album, cover_url, duration) = android_meta;
+        crate::android_media::update_track(
+            &title, &artist, &album, &cover_url, duration, autoplay, 0.0,
+        );
     }
+
+    result
 }
 
 #[tauri::command]
@@ -58,17 +74,40 @@ pub async fn playback_preload(state: State<'_, AppState>, song: Song) -> Result<
 
 #[tauri::command]
 pub fn playback_play(state: State<'_, AppState>) -> Result<(), String> {
-    playback_handle(&state)?.play()
+    let result = playback_handle(&state)?.play();
+    #[cfg(target_os = "android")]
+    if result.is_ok() {
+        let pos = playback_handle(&state).ok()
+            .and_then(|ph| ph.status().ok())
+            .map(|s| s.position)
+            .unwrap_or(0.0);
+        crate::android_media::update_playback_state(true, pos);
+    }
+    result
 }
 
 #[tauri::command]
 pub fn playback_pause(state: State<'_, AppState>) -> Result<(), String> {
-    playback_handle(&state)?.pause()
+    let result = playback_handle(&state)?.pause();
+    #[cfg(target_os = "android")]
+    if result.is_ok() {
+        let pos = playback_handle(&state).ok()
+            .and_then(|ph| ph.status().ok())
+            .map(|s| s.position)
+            .unwrap_or(0.0);
+        crate::android_media::update_playback_state(false, pos);
+    }
+    result
 }
 
 #[tauri::command]
 pub fn playback_stop(state: State<'_, AppState>) -> Result<(), String> {
-    playback_handle(&state)?.stop()
+    let result = playback_handle(&state)?.stop();
+    #[cfg(target_os = "android")]
+    if result.is_ok() {
+        crate::android_media::stop();
+    }
+    result
 }
 
 #[tauri::command]

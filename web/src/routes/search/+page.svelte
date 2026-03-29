@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { Clock, X, Play } from '@lucide/svelte';
+  import { Clock, X, Play, Search } from '@lucide/svelte';
 
   import { searchBundle, type SearchBundlePayload, type Song } from '$lib/servers';
   import { initials } from '$lib/utils';
@@ -14,14 +14,17 @@
   import { readUiJson, writeUiJson } from '$lib/ui-storage';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { libraryRefresh } from '$lib/stores/ui-state';
+  import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 
   let { data } = $props<{ data: { q: string } }>();
 
+  const isMobile = new IsMobile();
   const query = $derived((data.q ?? '').trim());
   let loading = $state(false);
   let error = $state('');
   let results = $state<SearchBundlePayload>({ songs: [], albums: [], recommendations: [] });
   let lastExecutedQuery = '';
+  let mobileInputValue = $state('');
 
   const RECENT_KEY = 'madrify_recent_searches';
   const LEGACY_RECENT_KEY = 'naviarr_recent_searches';
@@ -37,6 +40,16 @@
     void writeUiJson(RECENT_KEY, updated, [LEGACY_RECENT_KEY]);
   }
   $effect(() => { loadRecentSearches(); });
+
+  // Sync mobile input with current query
+  $effect(() => { mobileInputValue = query; });
+
+  function submitMobileSearch(e: Event) {
+    e.preventDefault();
+    const q = mobileInputValue.trim();
+    if (!q) return;
+    void goto(`/search?q=${encodeURIComponent(q)}`);
+  }
 
   async function runQuerySearch() {
     const refresh = $libraryRefresh;
@@ -118,6 +131,24 @@
   });
 </script>
 
+<!-- ── Mobile search input ───────────────────────────────────────────────── -->
+{#if isMobile.current}
+  <form onsubmit={submitMobileSearch} class="mb-5">
+    <div class="relative flex items-center">
+      <Search class="pointer-events-none absolute left-3.5 size-4 text-muted-foreground/60" />
+      <input
+        type="search"
+        placeholder="Artists, songs, albums…"
+        bind:value={mobileInputValue}
+        class="w-full rounded-2xl border border-border/50 bg-card/80 py-3 pl-10 pr-4 text-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-0"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+    </div>
+  </form>
+{/if}
+
 <!-- ── No query ─────────────────────────────────────────────────────── -->
 {#if !query}
   {#if recentSearches.length > 0}
@@ -146,7 +177,7 @@
       </div>
     </div>
   {:else}
-    <p class="text-sm text-muted-foreground">Enter a query in the top bar to search.</p>
+    <p class="text-sm text-muted-foreground">{isMobile.current ? 'Search for your favorite music above.' : 'Enter a query in the top bar to search.'}</p>
   {/if}
 
 <!-- ── Has query ──────────────────────────────────────────────────────── -->
@@ -159,7 +190,7 @@
 
   <!-- Top result + Songs -->
   {#if loading || results.songs.length > 0}
-    <div class="mb-8 grid gap-5" style="grid-template-columns: 220px 1fr">
+    <div class="mb-8 grid gap-5 results-grid">
 
       <!-- Top Result -->
       <div>
@@ -300,6 +331,16 @@
     background: color-mix(in srgb, var(--color-muted) 8%, transparent);
   }
 
+  /* Responsive grid: side-by-side on desktop, stacked on mobile */
+  .results-grid {
+    grid-template-columns: 220px 1fr;
+  }
+  @media (max-width: 767px) {
+    .results-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   /* Top result */
   .top-result-card {
     position: relative;
@@ -325,5 +366,10 @@
   .top-result-active .play-fab {
     opacity: 1;
     transform: translateY(0);
+  }
+  @media (max-width: 767px) {
+    .top-result-card {
+      min-height: unset;
+    }
   }
 </style>

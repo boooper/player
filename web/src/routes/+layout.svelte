@@ -172,10 +172,11 @@
     if (path.startsWith('/for-you')) return 'For You';
     if (path.startsWith('/playlist')) return 'Playlist';
     if (path.startsWith('/settings')) return 'Settings';
+    if (path.startsWith('/library')) return 'Library';
     return 'Madrify';
   });
   const isMobileLibraryRoute = $derived(
-    ['/songs', '/album', '/artist', '/favorites', '/playlist', '/for-you'].some(p => $page.url.pathname.startsWith(p))
+    ['/songs', '/album', '/artist', '/favorites', '/playlist', '/for-you', '/library'].some(p => $page.url.pathname.startsWith(p))
   );
 
   async function bootstrapAppSettings() {
@@ -366,6 +367,7 @@
 
 {#if isMobile.current}
 <!-- ─── MOBILE LAYOUT ─────────────────────────────────────────────── -->
+<TooltipProvider>
 <div class="fixed inset-0 flex flex-col overflow-hidden bg-background">
 
   <!-- Mobile header: sits below OS status bar -->
@@ -480,7 +482,7 @@
       <SearchIcon class="size-[22px]" />
       <span class="text-[10px] font-medium">Search</span>
     </a>
-    <a href="/songs"
+    <a href="/library"
       class="flex h-14 flex-1 flex-col items-center justify-center gap-0.5 transition-colors {isMobileLibraryRoute ? 'text-primary' : 'text-muted-foreground'}"
     >
       <Library class="size-[22px]" />
@@ -495,6 +497,7 @@
   </nav>
 </div>
 <Toaster richColors />
+</TooltipProvider>
 
 {:else}
 <!-- ─── DESKTOP LAYOUT ─────────────────────────────────────────────── -->
