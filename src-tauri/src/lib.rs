@@ -76,9 +76,7 @@ pub extern "C" fn JNI_OnLoad(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(desktop)]
-    let updater_pubkey = dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzNUM2NkE0MkExRTEwOEMKUldTTUVCNHFwR1pjZzJ0Z2VrQTMrVGU2WTI1L0xrZ0h6cXNiR3FLOWY0ZmRXb09zbjA5Qm5NMTMK
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let updater_pubkey = Some("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzNUM2NkE0MkExRTEwOEMKUldTTUVCNHFwR1pjZzJ0Z2VrQTMrVGU2WTI1L0xrZ0h6cXNiR3FLOWY0ZmRXb09zbjA5Qm5NMTMK");
 
     let builder = tauri::Builder::default();
 
