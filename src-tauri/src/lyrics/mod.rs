@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 
 mod musixmatch;
-#[cfg(desktop)]
-mod genius;
+mod lrclib;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -124,7 +123,6 @@ pub async fn fetch_lyrics_inner(
     title: &str,
     album: &str,
     duration: f64,
-    #[cfg_attr(mobile, allow(unused_variables))]
     provider: Option<&str>,
 ) -> Result<Option<LyricsResult>, String> {
     let key = cache_key(artist, title, album, duration);
@@ -132,26 +130,17 @@ pub async fn fetch_lyrics_inner(
         return Ok(Some(cached));
     }
 
-    #[cfg(desktop)]
     let result = match provider {
-        Some("musixmatch") => musixmatch::fetch_from_musixmatch(artist, title, album, duration).await.map_err(|e| e.to_string())?,
-        Some("genius") => genius::fetch_from_genius(artist, title, album, duration).await,
+        Some("musixmatch") => musixmatch::fetch_from_musixmatch(&state.http, artist, title, album, duration).await?,
+        Some("lrclib") => lrclib::fetch_from_lrclib(&state.http, artist, title, album, duration).await,
         _ => {
-            // default: try musixmatch then fallback to genius
-            match musixmatch::fetch_from_musixmatch(artist, title, album, duration).await {
+            // default: try musixmatch then fallback to lrclib
+            match musixmatch::fetch_from_musixmatch(&state.http, artist, title, album, duration).await {
                 Ok(Some(r)) => Some(r),
-                Ok(None) | Err(_) => genius::fetch_from_genius(artist, title, album, duration).await,
+                Ok(None) | Err(_) => lrclib::fetch_from_lrclib(&state.http, artist, title, album, duration).await,
             }
         }
     };
-
-    // On mobile, genius_lyrics is not available (native-tls / no rustls support).
-    // Use musixmatch only; genius provider requests fall back to musixmatch.
-    #[cfg(mobile)]
-    let result = musixmatch::fetch_from_musixmatch(artist, title, album, duration)
-        .await
-        .ok()
-        .flatten();
 
     if let Some(result) = &result {
         write_cached_result(state, &key, result);

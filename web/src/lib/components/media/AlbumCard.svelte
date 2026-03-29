@@ -12,6 +12,7 @@
   let { album }: { album: Album } = $props();
 
   let loading = $state(false);
+  let imgFailed = $state(false);
 
   const albumHref = $derived(`/album/${encodeURIComponent(album.id)}`);
   const isActive = $derived($playingFrom.href === albumHref);
@@ -40,8 +41,8 @@
     <!-- Cover art with play overlay -->
     <div class="relative mb-3">
       <button class="block w-full" onclick={() => goto(albumHref)} aria-label="Open {album.name}">
-        {#if album.coverArtUrl}
-          <img class="aspect-square w-full rounded-lg object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+        {#if album.coverArtUrl && !imgFailed}
+          <img class="aspect-square w-full rounded-lg object-cover shadow-md" src={album.coverArtUrl} alt={album.name} onerror={() => imgFailed = true} />
         {:else}
           <div class="flex aspect-square w-full items-center justify-center rounded-lg bg-card text-xl font-bold text-muted-foreground ring-1 ring-border/6">
             {initials(album.name)}

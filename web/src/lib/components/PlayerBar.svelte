@@ -346,7 +346,7 @@
 {:else}
 <!-- ─── DESKTOP: existing player bar ──────────────────────────────────── -->
 <footer class="player-bar liquid-glass shrink-0 border-t border-white/[0.08] px-4 py-3 {isBuffering || $queueLoading ? 'player-bar-loading' : ''}">
-  <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: 1fr minmax(420px, 2fr) 1fr">
+  <div class="grid w-full items-center gap-3 md:grid-cols-3" style="grid-template-columns: minmax(0,1fr) minmax(220px,1.4fr) minmax(0,1fr)">
     <div class="player-track-info flex min-w-0 items-center gap-3">
       {#if currentTrack}
         <SongContextMenu song={currentTrack} triggerClass="contents">
@@ -365,9 +365,9 @@
           {/if}
         </button>
         <div class="player-track-meta min-w-0">
-          <div class="min-w-0 flex items-center gap-1.5">
+          <div class="flex min-w-0 items-center gap-1.5 overflow-hidden">
             <button
-              class="player-track-title block max-w-full whitespace-normal break-words text-left text-sm font-semibold leading-tight"
+              class="player-track-title min-w-0 flex-1 truncate text-left text-sm font-semibold leading-tight"
               onclick={() => currentTrack?.albumId && goto(`/album/${encodeURIComponent(currentTrack.albumId)}`)}
               title={currentTrack.album}
             >{currentTrack.title}</button>
@@ -502,7 +502,7 @@
       </div>
     </div>
 
-    <div class="player-actions flex items-center justify-end gap-2">
+    <div class="player-actions flex min-w-0 items-center justify-end gap-2">
       <PlayerCastMenu
         castActive={castActive}
         discovering={castController.discovering}

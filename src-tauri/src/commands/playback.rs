@@ -9,12 +9,12 @@ use super::media::Song;
 
 fn playback_handle<'a>(
     state: &'a State<'_, AppState>,
-) -> &'a crate::playback_engine::PlaybackHandle {
-    &state.playback
+) -> Result<&'a crate::playback_engine::PlaybackHandle, String> {
+    state.playback.as_ref().ok_or_else(|| "Audio engine not initialized".to_string())
 }
 
 fn is_song_cached(state: &State<'_, AppState>, song: &Song) -> Result<bool, String> {
-    if playback_handle(state).cached_track(&song.id)?.is_some() {
+    if playback_handle(state)?.cached_track(&song.id)?.is_some() {
         return Ok(true);
     }
 
@@ -32,7 +32,7 @@ pub async fn playback_load(
     autoplay: Option<bool>,
     crossfade_ms: Option<u32>,
 ) -> Result<(), String> {
-    let preloaded = playback_handle(&state).take_preloaded(&song.id)?;
+    let preloaded = playback_handle(&state)?.take_preloaded(&song.id)?;
     let payload = if let Some(preloaded) = preloaded {
         preloaded
     } else {
@@ -41,44 +41,44 @@ pub async fn playback_load(
 
     let autoplay = autoplay.unwrap_or(false);
     match crossfade_ms.filter(|&ms| ms > 0) {
-        Some(ms) => playback_handle(&state).load_with_crossfade(payload, autoplay, ms),
-        None => playback_handle(&state).load(payload, autoplay),
+        Some(ms) => playback_handle(&state)?.load_with_crossfade(payload, autoplay, ms),
+        None => playback_handle(&state)?.load(payload, autoplay),
     }
 }
 
 #[tauri::command]
 pub async fn playback_preload(state: State<'_, AppState>, song: Song) -> Result<(), String> {
-    if playback_handle(&state).cached_track(&song.id)?.is_some() {
+    if playback_handle(&state)?.cached_track(&song.id)?.is_some() {
         return Ok(());
     }
 
     let payload = load_track_payload(&state, song).await?;
-    playback_handle(&state).preload(payload)
+    playback_handle(&state)?.preload(payload)
 }
 
 #[tauri::command]
 pub fn playback_play(state: State<'_, AppState>) -> Result<(), String> {
-    playback_handle(&state).play()
+    playback_handle(&state)?.play()
 }
 
 #[tauri::command]
 pub fn playback_pause(state: State<'_, AppState>) -> Result<(), String> {
-    playback_handle(&state).pause()
+    playback_handle(&state)?.pause()
 }
 
 #[tauri::command]
 pub fn playback_stop(state: State<'_, AppState>) -> Result<(), String> {
-    playback_handle(&state).stop()
+    playback_handle(&state)?.stop()
 }
 
 #[tauri::command]
 pub fn playback_seek(state: State<'_, AppState>, position: f64) -> Result<(), String> {
-    playback_handle(&state).seek(position)
+    playback_handle(&state)?.seek(position)
 }
 
 #[tauri::command]
 pub fn playback_set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
-    playback_handle(&state).set_volume(volume)
+    playback_handle(&state)?.set_volume(volume)
 }
 
 #[tauri::command]
@@ -87,12 +87,12 @@ pub fn playback_set_eq(
     enabled: bool,
     bands: Vec<f32>,
 ) -> Result<(), String> {
-    playback_handle(&state).set_eq(enabled, normalize_eq_bands(&bands))
+    playback_handle(&state)?.set_eq(enabled, normalize_eq_bands(&bands))
 }
 
 #[tauri::command]
 pub fn playback_status(state: State<'_, AppState>) -> Result<PlaybackStatus, String> {
-    playback_handle(&state).status()
+    playback_handle(&state)?.status()
 }
 
 #[tauri::command]

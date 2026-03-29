@@ -14,6 +14,7 @@
   } = $props();
 
   const isActive = $derived($queue[$currentIndex]?.id === song.id);
+  let imgFailed = $state(false);
 
   function handleClick() {
     if (isActive) {
@@ -28,8 +29,8 @@
 <SongContextMenu {song} {onplay}>
   <button class="song-card group w-full rounded-xl p-3 text-left" class:song-card-active={isActive} onclick={handleClick}>
     <div class="relative mb-3">
-      {#if song.coverArtUrl}
-        <img class="aspect-square w-full rounded-lg object-cover shadow-md" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+      {#if song.coverArtUrl && !imgFailed}
+        <img class="aspect-square w-full rounded-lg object-cover shadow-md" src={song.coverArtUrl} alt={song.title} onerror={() => imgFailed = true} />
       {:else}
         <div class="flex aspect-square w-full items-center justify-center rounded-lg bg-gradient-to-br from-white/10 to-white/5 text-xl font-bold text-white/40">
           {initials(song.title)}

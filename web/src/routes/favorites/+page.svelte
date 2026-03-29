@@ -80,7 +80,7 @@
     {#if songs.length >= 4}
       <div class="grid h-full w-full grid-cols-2 grid-rows-2">
         {#each songs.slice(0, 4) as song (song.id)}
-          <img class="h-full w-full object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+          <img class="h-full w-full object-cover" src={song.coverArtUrl} alt={song.title} />
         {/each}
       </div>
       <div class="absolute inset-0 bg-gradient-to-br from-black/10 via-transparent to-black/45"></div>

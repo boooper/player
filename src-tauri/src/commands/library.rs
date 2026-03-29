@@ -19,9 +19,9 @@ fn is_local(p: &ActiveProfile) -> bool {
     p.server_type == "local"
 }
 
-/// Only Jellyfin/Emby omit auth from image URLs, so we must proxy-download artwork
-/// for those servers. Plex embeds X-Plex-Token and Subsonic embeds its token as
-/// query params, so the webview can load those images directly.
+/// Jellyfin/Emby omit auth from image URLs so the webview cannot load them directly —
+/// proxy those through the Rust backend. Subsonic and Plex embed auth as query params
+/// so the webview can load cover art directly without proxying.
 fn needs_artwork_proxy(p: &ActiveProfile) -> bool {
     is_jf(p)
 }

@@ -311,11 +311,11 @@
     {/if}
 
     {#if loading}
-      <div class="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <div class="aspect-square animate-pulse rounded-[28px] bg-white/6"></div>
-        <div class="space-y-3">
+      <div class="grid grid-cols-[160px_minmax(0,1fr)] gap-4 lg:grid-cols-[196px_minmax(0,1fr)]">
+        <div class="aspect-square animate-pulse rounded-2xl bg-white/6"></div>
+        <div class="space-y-1">
           {#each Array(5) as _, index (index)}
-            <div class="h-[72px] animate-pulse rounded-[22px] bg-white/5"></div>
+            <div class="h-14 animate-pulse rounded-lg bg-white/5"></div>
           {/each}
         </div>
       </div>
@@ -339,8 +339,8 @@
         </div>
       </div>
     {:else if spotlightAlbum}
-      <div class="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <div class="group relative overflow-hidden rounded-[28px]">
+      <div class="grid grid-cols-[160px_minmax(0,1fr)] gap-4 lg:grid-cols-[196px_minmax(0,1fr)]">
+        <div class="group relative overflow-hidden rounded-2xl">
           <button
             type="button"
             class="block w-full text-left"
@@ -351,17 +351,17 @@
               <img
                 src={spotlightAlbum.coverArtUrl}
                 alt={spotlightAlbum.name}
-                class="aspect-square w-full rounded-[28px] object-cover shadow-[0_26px_60px_rgba(0,0,0,0.38)] transition duration-300 group-hover:scale-[1.015]"
+                class="aspect-square w-full rounded-2xl object-cover shadow-lg transition duration-300 group-hover:scale-[1.015]"
               />
             {:else}
-              <div class="flex aspect-square w-full items-center justify-center rounded-[28px] bg-white/6 text-5xl font-semibold text-white/45">
+              <div class="flex aspect-square w-full items-center justify-center rounded-2xl bg-white/6 text-4xl font-semibold text-white/45">
                 {initials(spotlightAlbum.name)}
               </div>
             {/if}
           </button>
           <button
             type="button"
-            class="absolute bottom-4 right-4 flex size-11 items-center justify-center rounded-full border border-white/10 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:scale-105"
+            class="absolute bottom-2 right-2 grid size-9 translate-y-1 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100"
             onclick={(event) => {
               event.stopPropagation();
               playAlbum(spotlightAlbum);
@@ -369,7 +369,7 @@
             aria-label={spotlightIsActive && $isPlaying ? `Pause ${spotlightAlbum.name}` : `Play ${spotlightAlbum.name}`}
           >
             {#if albumLoadingId === spotlightAlbum.id}
-              <span class="block size-4 animate-spin rounded-full border-2 border-white/80 border-t-transparent"></span>
+              <span class="block size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
             {:else if spotlightIsActive && $isPlaying}
               <Pause class="size-4" fill="currentColor" />
             {:else}
@@ -378,15 +378,15 @@
           </button>
         </div>
 
-        <div class="flex min-w-0 flex-col justify-start pt-1">
+        <div class="flex min-w-0 flex-col justify-start">
           {#if spotlightLoading && !spotlightSongs.length}
-            <div class="space-y-3">
+            <div class="space-y-1">
               {#each Array(5) as _, index (index)}
-                <div class="h-[72px] animate-pulse rounded-[22px] bg-white/5"></div>
+                <div class="h-14 animate-pulse rounded-lg bg-white/5"></div>
               {/each}
             </div>
           {:else}
-            <div class="space-y-1">
+            <div class="space-y-0.5">
               {#each spotlightSongs as song, index (song.id)}
                 <SongRow {song} {index} onplay={() => playSpotlightSong(song, index)} />
               {/each}

@@ -14,7 +14,7 @@ pub struct AppState {
     pub http: reqwest::Client,
     #[cfg(desktop)]
     pub cast_actor: Mutex<Option<CastActorHandle>>,
-    pub playback: playback_engine::PlaybackHandle,
+    pub playback: Option<playback_engine::PlaybackHandle>,
     pub playback_cache: playback_engine::DiskCache,
     pub artwork_cache: playback_engine::DiskCache,
     pub lyrics_cache: playback_engine::DiskCache,
@@ -26,6 +26,32 @@ pub struct AppState {
 //   - cpal::Stream (inside PlaybackHandle) is !Send, hence the unsafe impls
 unsafe impl Send for AppState {}
 unsafe impl Sync for AppState {}
+
+/// On Android, initialize rustls-platform-verifier with the JVM so that
+/// reqwest can make HTTPS connections using the device's certificate store.
+/// This is called automatically by the Android runtime when the .so is loaded.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn JNI_OnLoad(
+    vm: jni::JavaVM,
+    _res: *mut std::ffi::c_void,
+) -> jni::sys::jint {
+    let mut env = vm.get_env().expect("Cannot get JNI env during init");
+    // Retrieve the application context to pass to the platform verifier.
+    let context = env
+        .call_static_method(
+            "android/app/ActivityThread",
+            "currentApplication",
+            "()Landroid/app/Application;",
+            &[],
+        )
+        .expect("Failed to get current application")
+        .l()
+        .expect("Expected JObject from currentApplication");
+    rustls_platform_verifier::android::init_hosted(&mut env, context)
+        .expect("Failed to init rustls-platform-verifier");
+    jni::JNIVersion::V6.into()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -64,8 +90,13 @@ pub fn run() {
                 http: reqwest::Client::new(),
                 #[cfg(desktop)]
                 cast_actor: Mutex::new(None),
-                playback: playback_engine::PlaybackHandle::new()
-                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
+                playback: {
+                    let result = playback_engine::PlaybackHandle::new();
+                    #[cfg(desktop)]
+                    { Some(result.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?) }
+                    #[cfg(mobile)]
+                    { result.map_err(|e| log::warn!("Audio init deferred — will retry on first play: {e}")).ok() }
+                },
                 playback_cache: playback_engine::DiskCache::new(cache_dir.join("audio"))
                     .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
                 artwork_cache: playback_engine::DiskCache::new(cache_dir.join("artwork"))

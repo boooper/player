@@ -3,26 +3,23 @@
 //! Authentication: `X-Emby-Authorization` header with the API key stored in `profile.password`.
 //! The `username` field is the display name; user ID is fetched from `/Users/Me` when needed.
 
-use jellyfin_sdk::JellyfinClient;
 use serde_json::Value;
 use crate::commands::profiles::ActiveProfile;
 use crate::commands::media::{AlbumDetail, AlbumFull, Album, Playlist, PlaylistDetail, PlaylistMeta, Song};
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
+// ── Auth / URL helpers ────────────────────────────────────────────────────────
 
-fn client_from_profile(p: &ActiveProfile) -> Result<JellyfinClient, String> {
-    JellyfinClient::builder(&p.url)
-        .map_err(|e| e.to_string())?
-        .token(&p.password)
-        .client_name("madrify")
-        .device_name("Desktop")
-        .device_id("madrify-desktop")
-        .client_version(env!("CARGO_PKG_VERSION"))
-        .build()
-        .map_err(|e| e.to_string())
+fn auth_header(p: &ActiveProfile) -> String {
+    format!(
+        "MediaBrowser Client=\"madrify\", Device=\"Desktop\", DeviceId=\"madrify-desktop\", Version=\"{}\", Token=\"{}\"",
+        env!("CARGO_PKG_VERSION"),
+        p.password
+    )
 }
 
-// ── URL helpers ───────────────────────────────────────────────────────────────
+fn endpoint(p: &ActiveProfile, path: &str) -> String {
+    format!("{}/{}", p.url.trim_end_matches('/'), path.trim_start_matches('/'))
+}
 
 pub(crate) fn cover_url(p: &ActiveProfile, item_id: &str, size: u32) -> String {
     if item_id.is_empty() {
@@ -41,7 +38,6 @@ fn stream_url(p: &ActiveProfile, id: &str) -> String {
     if id.is_empty() {
         return String::new();
     }
-    // Embed the API key as a query param so the browser's <audio> element can load it
     format!(
         "{}/Items/{}/Download?api_key={}",
         p.url.trim_end_matches('/'),
@@ -52,44 +48,70 @@ fn stream_url(p: &ActiveProfile, id: &str) -> String {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+async fn check_json(resp: reqwest::Response) -> Result<Value, String> {
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Jellyfin error {status}: {body}"));
+    }
+    resp.json::<Value>().await.map_err(|e| e.to_string())
+}
+
+async fn check_unit(resp: reqwest::Response) -> Result<(), String> {
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Jellyfin error {status}: {body}"));
+    }
+    Ok(())
+}
+
 pub(crate) async fn get(
-    _http: &reqwest::Client,
+    http: &reqwest::Client,
     p: &ActiveProfile,
     path: &str,
     params: &[(&str, &str)],
 ) -> Result<Value, String> {
-    let client = client_from_profile(p)?;
-    let req = client
-        .request(reqwest::Method::GET, path)
-        .map_err(|e| e.to_string())?
-        .query(params);
-    client.send_json::<Value>(req).await.map_err(|e| e.to_string())
-}
-
-async fn post_empty(_http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
-    let client = client_from_profile(p)?;
-    let req = client
-        .request(reqwest::Method::POST, path)
-        .map_err(|e| e.to_string())?
-        .header("Content-Length", "0");
-    client.send_unit(req).await.map_err(|e| e.to_string())
-}
-
-async fn post_json(_http: &reqwest::Client, p: &ActiveProfile, path: &str, body: &Value) -> Result<Value, String> {
-    let client = client_from_profile(p)?;
-    let req = client
-        .request(reqwest::Method::POST, path)
-        .map_err(|e| e.to_string())?
-        .json(body);
-    client.send_json::<Value>(req).await.map_err(|e| e.to_string())
-}
-
-async fn delete(_http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
-    let client = client_from_profile(p)?;
-    let req = client
-        .request(reqwest::Method::DELETE, path)
+    let resp = http
+        .get(endpoint(p, path))
+        .header("Authorization", auth_header(p))
+        .query(params)
+        .send()
+        .await
         .map_err(|e| e.to_string())?;
-    client.send_unit(req).await.map_err(|e| e.to_string())
+    check_json(resp).await
+}
+
+async fn post_empty(http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
+    let resp = http
+        .post(endpoint(p, path))
+        .header("Authorization", auth_header(p))
+        .header("Content-Length", "0")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    check_unit(resp).await
+}
+
+async fn post_json(http: &reqwest::Client, p: &ActiveProfile, path: &str, body: &Value) -> Result<Value, String> {
+    let resp = http
+        .post(endpoint(p, path))
+        .header("Authorization", auth_header(p))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    check_json(resp).await
+}
+
+async fn delete(http: &reqwest::Client, p: &ActiveProfile, path: &str) -> Result<(), String> {
+    let resp = http
+        .delete(endpoint(p, path))
+        .header("Authorization", auth_header(p))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    check_unit(resp).await
 }
 
 // ── User ID (needed for favourite endpoints) ──────────────────────────────────
@@ -140,6 +162,7 @@ fn jartist_id(v: &Value) -> String {
         .unwrap_or("")
         .to_string()
 }
+
 fn j_audio_format(v: &Value) -> Option<String> {
     v.get("Container")
         .and_then(|value| value.as_str())
@@ -154,6 +177,7 @@ fn j_audio_format(v: &Value) -> Option<String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
 }
+
 fn j_bitrate_kbps(v: &Value) -> Option<u32> {
     let bits_per_second = v
         .get("Bitrate")
@@ -175,7 +199,6 @@ fn j_bitrate_kbps(v: &Value) -> Option<u32> {
 pub(crate) fn map_song(v: &Value, p: &ActiveProfile) -> Song {
     let id = js(v, "Id");
     let album_id = js(v, "AlbumId");
-    // Prefer the song's own image; fall back to album cover
     let cover_id = if v
         .get("ImageTags")
         .and_then(|t| t.get("Primary"))
@@ -233,6 +256,10 @@ const SONG_FIELDS: &str =
     "Artists,ArtistItems,Album,AlbumId,ImageTags,RunTimeTicks,AlbumPrimaryImageTag,Container,Bitrate,MediaSources";
 const ALBUM_FIELDS: &str =
     "Artists,ArtistItems,ChildCount,RunTimeTicks,ImageTags,ProductionYear";
+
+pub(crate) async fn ping(http: &reqwest::Client, p: &ActiveProfile) -> Result<bool, String> {
+    get(http, p, "/System/Ping", &[]).await.map(|_| true)
+}
 
 pub(crate) async fn search(
     http: &reqwest::Client,
@@ -412,12 +439,12 @@ pub(crate) async fn album_list(
 ) -> Result<Vec<Album>, String> {
     let cnt = count.to_string();
     let (sort_by, sort_order) = match kind {
-        "newest"   => ("DateCreated", "Descending"),
-        "random"   => ("Random",      "Ascending"),
-        "frequent" => ("PlayCount",   "Descending"),
-        "recent"   => ("DatePlayed",  "Descending"),
+        "newest"   => ("DateCreated",     "Descending"),
+        "random"   => ("Random",          "Ascending"),
+        "frequent" => ("PlayCount",       "Descending"),
+        "recent"   => ("DatePlayed",      "Descending"),
         "highest"  => ("CommunityRating", "Descending"),
-        _          => ("DateCreated", "Descending"),
+        _          => ("DateCreated",     "Descending"),
     };
     let json = get(http, p, "/Items", &[
         ("IncludeItemTypes", "MusicAlbum"),
@@ -517,21 +544,11 @@ pub(crate) async fn rename_playlist(
         return Err("Playlist name is required.".to_string());
     }
 
-    let body = serde_json::json!({
-        "Name": name.trim()
-    });
+    let body = serde_json::json!({ "Name": name.trim() });
     post_json(http, p, &format!("/Playlists/{}", playlist_id), &body).await?;
     Ok(())
 }
 
-/// Returns true if the server responds successfully to a ping.
-pub(crate) async fn ping(http: &reqwest::Client, p: &ActiveProfile) -> Result<bool, String> {
-    let client = client_from_profile(p)?;
-    let _ = http;
-    client.system().ping().await.map(|_| true).map_err(|e| e.to_string())
-}
-
-/// Playlists and starred song counts for library stats.
 pub(crate) async fn library_counts(
     http: &reqwest::Client,
     p: &ActiveProfile,
@@ -551,7 +568,7 @@ pub(crate) async fn library_counts(
         get(http, p, "/Items", pl_params),
         get(http, p, "/Items", starred_params)
     );
-    let pl_items = jitems(&pl_resp.unwrap_or(serde_json::Value::Null));
+    let pl_items = jitems(&pl_resp.unwrap_or(Value::Null));
     let playlist_count = pl_items.len() as i64;
     let total_songs: i64 = pl_items
         .iter()

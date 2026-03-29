@@ -27,6 +27,7 @@
   } = $props();
 
   const isActive = $derived($queue[$currentIndex]?.id === song.id);
+  let imgFailed = $state(false);
 
   function handleClick() {
     if (isActive) {
@@ -63,8 +64,8 @@
     {/if}
 
     <!-- Cover art -->
-    {#if song.coverArtUrl}
-      <img class="h-10 w-10 shrink-0 rounded-md object-cover shadow-sm" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+    {#if song.coverArtUrl && !imgFailed}
+      <img class="h-10 w-10 shrink-0 rounded-md object-cover shadow-sm" src={song.coverArtUrl} alt={song.title} onerror={() => imgFailed = true} />
       {:else}
       <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md" style="background: linear-gradient(135deg, color-mix(in srgb, var(--color-muted) 10%, transparent) 0%, color-mix(in srgb, var(--color-muted) 5%, transparent) 100%);">
         <span class="text-xs font-bold text-muted-foreground/70">{initials(song.title)}</span>

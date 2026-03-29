@@ -124,7 +124,6 @@
                 class="aspect-square w-full rounded-md object-cover shadow-md"
                 src={album.coverArtUrl}
                 alt={album.name}
-                loading="lazy"
               />
             {:else}
               <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 shadow-md">

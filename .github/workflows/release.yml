@@ -53,12 +53,7 @@ jobs:
         id: changelog
         shell: bash
         run: |
-          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${{ needs.tag.outputs.new_tag }}$" | head -1)
-          if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD")
-          else
-            NOTES=$(git log --pretty=format:"- %s" "HEAD~10..HEAD")
-          fi
+          NOTES=$(git log -1 --pretty=format:"%s%n%n%b" HEAD)
           {
             echo 'notes<<NOTES_EOF'
             echo "$NOTES"

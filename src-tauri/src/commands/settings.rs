@@ -114,7 +114,7 @@ pub fn clear_database(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
-    state.playback.clear_cached_tracks()?;
+    if let Some(ph) = &state.playback { ph.clear_cached_tracks()?; }
     state.playback_cache.clear()?;
     state.artwork_cache.clear()?;
     Ok(())

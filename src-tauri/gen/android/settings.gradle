@@ -1,3 +1,34 @@
 include ':app'
 
 apply from: 'tauri.settings.gradle'
+
+// Add local Maven repo for rustls-platform-verifier Android AAR (bundled with crate, not on Maven Central)
+import groovy.json.JsonSlurper
+
+def rustlsMavenPath = null
+try {
+    def process = new ProcessBuilder(["cargo", "metadata", "--format-version", "1", "--filter-platform", "aarch64-linux-android"])
+        .directory(new File(settingsDir, "../../../"))
+        .start()
+    def output = process.inputStream.text
+    process.waitFor()
+    def json = new JsonSlurper().parseText(output)
+    def pkg = json.packages.find { it.name == "rustls-platform-verifier-android" }
+    if (pkg) {
+        def manifestFile = new File(pkg.manifest_path)
+        rustlsMavenPath = new File(manifestFile.parentFile, "maven").absolutePath
+    }
+} catch (e) {
+    println("Warning: Could not find rustls-platform-verifier-android: ${e.message}")
+}
+
+if (rustlsMavenPath) {
+    gradle.allprojects { project ->
+        project.repositories {
+            maven {
+                url = new File(rustlsMavenPath).toURI()
+                metadataSources { artifact() }
+            }
+        }
+    }
+}

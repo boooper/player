@@ -260,11 +260,11 @@
                 triggerClass="block w-full"
               >
                 <button
-                  class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-accent"
+                  class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-white/6"
                   onclick={() => startQueue([song], 0, { type: 'artist', name: relatedArtist, href: relatedArtistHref })}
                 >
                   {#if song.coverArtUrl}
-                    <img class="size-9 rounded object-cover shrink-0" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+                    <img class="size-9 rounded object-cover shrink-0" src={song.coverArtUrl} alt={song.title} />
                   {:else}
                     <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(song.title)}</span>
                   {/if}
@@ -447,7 +447,7 @@
                 in:fly={{ y: 12, opacity: 0.15, duration: 220, easing: cubicOut }}
                 out:fade={{ duration: 150 }}
                 data-queue-index={item.index}
-                class="rounded-md transition-colors {dragOverIndex === item.index && dragFromIndex !== item.index ? 'ring-1 ring-primary/50 bg-primary/5' : ''} {dragFromIndex === item.index ? 'opacity-40' : ''}"
+                class="rounded-md transition-colors {dragOverIndex === item.index && dragFromIndex !== item.index ? 'ring-1 ring-primary/50 bg-primary/5' : ''} {dragFromIndex === item.index ? 'ring-1 ring-white/10 bg-white/5' : ''}"
               >
                 <SongContextMenu
                   song={item.song}
@@ -455,7 +455,7 @@
                   onremove={() => removeFromQueue(item.index)}
                   triggerClass="block w-full"
                 >
-                  <div class="flex w-full items-center gap-1 rounded-md pr-2 transition hover:bg-accent">
+                  <div class="flex w-full items-center gap-1 rounded-md pr-2 transition hover:bg-white/6">
                     <span
                       role="button"
                       tabindex="-1"
@@ -478,7 +478,7 @@
                       onclick={() => playFromUpNext(item.index)}
                     >
                       {#if item.song.coverArtUrl}
-                        <img class="size-9 rounded object-cover shrink-0" src={item.song.coverArtUrl} alt={item.song.title} loading="lazy" />
+                        <img class="size-9 rounded object-cover shrink-0" src={item.song.coverArtUrl} alt={item.song.title} />
                       {:else}
                         <span class="grid size-9 shrink-0 place-items-center rounded bg-secondary text-[10px] font-semibold">{initials(item.song.title)}</span>
                       {/if}

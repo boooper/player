@@ -306,9 +306,9 @@
           {lyricsProvider}
         </Select.Trigger>
         <Select.Content>
-          <Select.Item value="auto" label="Automatic (Musixmatch → Genius fallback)" />
+          <Select.Item value="auto" label="Automatic (Musixmatch → LRCLIB fallback)" />
           <Select.Item value="musixmatch" label="Musixmatch" />
-          <Select.Item value="genius" label="Genius" />
+          <Select.Item value="lrclib" label="LRCLIB" />
         </Select.Content>
       </Select.Root>
     </div>

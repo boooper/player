@@ -115,7 +115,7 @@
         >
           <div class="size-24 shrink-0 overflow-hidden rounded-full shadow-md ring-1 ring-white/10">
             {#if artist.imageUrl}
-              <img src={artist.imageUrl} alt={artist.name} class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
+              <img src={artist.imageUrl} alt={artist.name} class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
             {:else}
               <div class="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-600 to-slate-800">
                 {#if loading}

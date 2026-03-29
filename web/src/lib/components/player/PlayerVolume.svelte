@@ -110,7 +110,8 @@
 <style>
   .player-volume-group {
     display: flex;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     max-width: 11rem;
     align-items: center;
     gap: 0.5rem;

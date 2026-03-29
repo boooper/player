@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Allow cleartext (HTTP) traffic to any host.
+    This is intentional: users configure their own media server addresses,
+    which are typically plain HTTP on local networks (Navidrome, Jellyfin, Plex, etc.)
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- Trust user-installed certificates (e.g. self-signed Jellyfin/Navidrome certs) -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

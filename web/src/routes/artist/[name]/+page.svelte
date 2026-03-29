@@ -416,7 +416,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
               {/if}
             </span>
             {#if sub.coverArtUrl}
-              <img class="size-10 shrink-0 rounded object-cover" src={sub.coverArtUrl} alt={sub.title} loading="lazy" />
+              <img class="size-10 shrink-0 rounded object-cover" src={sub.coverArtUrl} alt={sub.title} />
             {:else}
               <div class="grid size-10 shrink-0 place-items-center rounded bg-secondary text-xs font-bold">{initials(sub.title)}</div>
             {/if}
@@ -468,7 +468,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
               <a href="/album/{encodeURIComponent(album.id)}" class="absolute inset-0 z-10 rounded-2xl" aria-label="Open {album.name}"></a>
               <div class="relative w-full">
                 {#if album.coverArtUrl}
-                  <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+                  <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} />
                 {:else}
                   <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
                 {/if}
@@ -504,7 +504,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
                   <a href="/album/{encodeURIComponent(album.id)}" class="absolute inset-0 z-10 rounded-2xl" aria-label="Open {album.name}"></a>
                   <div class="relative w-full">
                     {#if album.coverArtUrl}
-                      <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} loading="lazy" />
+                      <img class="aspect-square w-full rounded-md object-cover shadow-md" src={album.coverArtUrl} alt={album.name} />
                     {:else}
                       <div class="grid aspect-square w-full place-items-center rounded-md bg-gradient-to-br from-slate-600 to-slate-800 text-xl font-bold">{initials(album.name)}</div>
                     {/if}

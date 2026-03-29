@@ -39,11 +39,10 @@ struct SubsonicClient {
     base_url: String,
     username: String,
     auth: SubsonicAuth,
-    http: reqwest::Client,
 }
 
 impl SubsonicClient {
-    fn new(http: &reqwest::Client, p: &ActiveProfile) -> Self {
+    fn new(p: &ActiveProfile) -> Self {
         let auth = if p.server_type == "subsonic_legacy" || p.password.starts_with("enc:") {
             SubsonicAuth::Plain(decode_legacy_password(&p.password))
         } else {
@@ -53,7 +52,6 @@ impl SubsonicClient {
             base_url: p.url.trim_end_matches('/').to_string(),
             username: p.username.clone(),
             auth,
-            http: http.clone(),
         }
     }
 
@@ -110,14 +108,13 @@ impl SubsonicClient {
         self.build_url("stream", &[("id", id)])
     }
 
-    async fn call(&self, endpoint: &str, params: &[(&str, &str)]) -> Result<Value, String> {
+    async fn call(&self, http: &reqwest::Client, endpoint: &str, params: &[(&str, &str)]) -> Result<Value, String> {
         let url = self.build_url(endpoint, params);
-        self.fetch(&url).await
+        self.fetch(http, &url).await
     }
 
-    async fn fetch(&self, url: &str) -> Result<Value, String> {
-        let resp = self
-            .http
+    async fn fetch(&self, http: &reqwest::Client, url: &str) -> Result<Value, String> {
+        let resp = http
             .get(url)
             .send()
             .await
@@ -313,7 +310,7 @@ fn map_album_detail(client: &SubsonicClient, v: &Value) -> AlbumDetail {
 }
 
 pub(crate) async fn ping(http: &reqwest::Client, p: &ActiveProfile) -> Result<bool, String> {
-    SubsonicClient::new(http, p).call("ping", &[]).await.map(|_| true)
+    SubsonicClient::new(p).call(http, "ping", &[]).await.map(|_| true)
 }
 
 pub(crate) async fn search(
@@ -322,10 +319,10 @@ pub(crate) async fn search(
     query: &str,
     count: u32,
 ) -> Result<Vec<Song>, String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     let count_str = count.to_string();
     let resp = client
-        .call("search3", &[("query", query), ("artistCount", "0"), ("albumCount", "0"), ("songCount", &count_str)])
+        .call(http, "search3", &[("query", query), ("artistCount", "0"), ("albumCount", "0"), ("songCount", &count_str)])
         .await?;
     Ok(resp
         .get("searchResult3")
@@ -341,9 +338,9 @@ pub(crate) async fn similar(
     song_id: &str,
     count: u32,
 ) -> Result<Vec<Song>, String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     let count_str = count.to_string();
-    let resp = client.call("getSimilarSongs2", &[("id", song_id), ("count", &count_str)]).await?;
+    let resp = client.call(http, "getSimilarSongs2", &[("id", song_id), ("count", &count_str)]).await?;
     Ok(resp
         .get("similarSongs2")
         .and_then(|r| r.get("song"))
@@ -353,8 +350,8 @@ pub(crate) async fn similar(
 }
 
 pub(crate) async fn playlists(http: &reqwest::Client, p: &ActiveProfile) -> Result<Vec<Playlist>, String> {
-    let client = SubsonicClient::new(http, p);
-    let resp = client.call("getPlaylists", &[]).await?;
+    let client = SubsonicClient::new(p);
+    let resp = client.call(http, "getPlaylists", &[]).await?;
     Ok(resp
         .get("playlists")
         .and_then(|r| r.get("playlist"))
@@ -368,8 +365,8 @@ pub(crate) async fn playlist(
     p: &ActiveProfile,
     id: &str,
 ) -> Result<PlaylistDetail, String> {
-    let client = SubsonicClient::new(http, p);
-    let resp = client.call("getPlaylist", &[("id", id)]).await?;
+    let client = SubsonicClient::new(p);
+    let resp = client.call(http, "getPlaylist", &[("id", id)]).await?;
     let pl = resp.get("playlist").ok_or_else(|| "Missing playlist in response".to_string())?;
     Ok(map_playlist_detail(&client, pl))
 }
@@ -380,10 +377,10 @@ pub(crate) async fn artist_albums(
     query: &str,
     count: u32,
 ) -> Result<Vec<Album>, String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     let count_str = count.to_string();
     let resp = client
-        .call("search3", &[("query", query), ("artistCount", "0"), ("albumCount", &count_str), ("songCount", "0")])
+        .call(http, "search3", &[("query", query), ("artistCount", "0"), ("albumCount", &count_str), ("songCount", "0")])
         .await?;
     Ok(resp
         .get("searchResult3")
@@ -398,8 +395,8 @@ pub(crate) async fn album_songs(
     p: &ActiveProfile,
     id: &str,
 ) -> Result<Vec<Song>, String> {
-    let client = SubsonicClient::new(http, p);
-    let resp = client.call("getAlbum", &[("id", id)]).await?;
+    let client = SubsonicClient::new(p);
+    let resp = client.call(http, "getAlbum", &[("id", id)]).await?;
     let album = resp.get("album").ok_or_else(|| "Missing album in response".to_string())?;
     let album_id = get_str(album, "id");
     Ok(album
@@ -424,8 +421,8 @@ pub(crate) async fn album(
     p: &ActiveProfile,
     id: &str,
 ) -> Result<AlbumDetail, String> {
-    let client = SubsonicClient::new(http, p);
-    let resp = client.call("getAlbum", &[("id", id)]).await?;
+    let client = SubsonicClient::new(p);
+    let resp = client.call(http, "getAlbum", &[("id", id)]).await?;
     let album = resp.get("album").ok_or_else(|| "Missing album in response".to_string())?;
     Ok(map_album_detail(&client, album))
 }
@@ -436,9 +433,9 @@ pub(crate) async fn album_list(
     kind: &str,
     count: u32,
 ) -> Result<Vec<Album>, String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     let count_str = count.to_string();
-    let resp = client.call("getAlbumList2", &[("type", kind), ("size", &count_str)]).await?;
+    let resp = client.call(http, "getAlbumList2", &[("type", kind), ("size", &count_str)]).await?;
     Ok(resp
         .get("albumList2")
         .and_then(|r| r.get("album"))
@@ -448,8 +445,8 @@ pub(crate) async fn album_list(
 }
 
 pub(crate) async fn starred(http: &reqwest::Client, p: &ActiveProfile) -> Result<Vec<Song>, String> {
-    let client = SubsonicClient::new(http, p);
-    let resp = client.call("getStarred2", &[]).await?;
+    let client = SubsonicClient::new(p);
+    let resp = client.call(http, "getStarred2", &[]).await?;
     Ok(resp
         .get("starred2")
         .and_then(|r| r.get("song"))
@@ -464,9 +461,9 @@ pub(crate) async fn star(
     id: &str,
     unstar: bool,
 ) -> Result<(), String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     let endpoint = if unstar { "unstar" } else { "star" };
-    client.call(endpoint, &[("id", id)]).await.map(|_| ())
+    client.call(http, endpoint, &[("id", id)]).await.map(|_| ())
 }
 
 pub(crate) async fn add_to_playlist(
@@ -475,9 +472,9 @@ pub(crate) async fn add_to_playlist(
     playlist_id: &str,
     song_id: &str,
 ) -> Result<(), String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     client
-        .call("updatePlaylist", &[("playlistId", playlist_id), ("songIdToAdd", song_id)])
+        .call(http, "updatePlaylist", &[("playlistId", playlist_id), ("songIdToAdd", song_id)])
         .await
         .map(|_| ())
 }
@@ -488,7 +485,7 @@ pub(crate) async fn create_playlist(
     name: &str,
     song_ids: &[String],
 ) -> Result<Playlist, String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
 
     // Build URL manually to support multiple songId params
     let base = format!("{}/rest/createPlaylist", client.base_url);
@@ -506,7 +503,7 @@ pub(crate) async fn create_playlist(
         }
     }
 
-    let resp = client.fetch(url.as_str()).await?;
+    let resp = client.fetch(http, url.as_str()).await?;
     let pl = resp.get("playlist").ok_or_else(|| "Missing playlist in response".to_string())?;
     Ok(map_playlist_detail(&client, pl).playlist.into())
 }
@@ -517,9 +514,9 @@ pub(crate) async fn rename_playlist(
     playlist_id: &str,
     name: &str,
 ) -> Result<(), String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
     client
-        .call("updatePlaylist", &[("playlistId", playlist_id), ("name", name)])
+        .call(http, "updatePlaylist", &[("playlistId", playlist_id), ("name", name)])
         .await
         .map(|_| ())
 }
@@ -529,8 +526,8 @@ pub(crate) async fn delete_playlist(
     p: &ActiveProfile,
     playlist_id: &str,
 ) -> Result<(), String> {
-    let client = SubsonicClient::new(http, p);
-    client.call("deletePlaylist", &[("id", playlist_id)]).await.map(|_| ())
+    let client = SubsonicClient::new(p);
+    client.call(http, "deletePlaylist", &[("id", playlist_id)]).await.map(|_| ())
 }
 
 pub(crate) async fn materialize_song(
@@ -538,8 +535,7 @@ pub(crate) async fn materialize_song(
     p: &ActiveProfile,
     song_id: &str,
 ) -> Result<(), String> {
-    let client = SubsonicClient::new(http, p);
-    let url = client.build_url("stream", &[("id", song_id), ("maxBitRate", "320")]);
+    let url = SubsonicClient::new(p).build_url("stream", &[("id", song_id), ("maxBitRate", "320")]);
     http.get(&url).send().await.map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -547,10 +543,10 @@ pub(crate) async fn library_counts(
     http: &reqwest::Client,
     p: &ActiveProfile,
 ) -> Result<(i64, i64, i64), String> {
-    let client = SubsonicClient::new(http, p);
+    let client = SubsonicClient::new(p);
 
-    let pl_resp = client.call("getPlaylists", &[]).await?;
-    let starred_resp = client.call("getStarred2", &[]).await?;
+    let pl_resp = client.call(http, "getPlaylists", &[]).await?;
+    let starred_resp = client.call(http, "getStarred2", &[]).await?;
 
     let playlists = pl_resp
         .get("playlists")

@@ -17,7 +17,6 @@ android {
     compileSdk = 36
     namespace = "com.madrify.player"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.madrify.player"
         minSdk = 26
         targetSdk = 36
@@ -26,7 +25,6 @@ android {
     }
     buildTypes {
         getByName("debug") {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
@@ -58,6 +56,8 @@ rust {
 }
 
 dependencies {
+    // Required by rustls-platform-verifier — Android AAR bundled locally in the Rust crate (not on Maven Central)
+    implementation("rustls:rustls-platform-verifier:latest.release")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")

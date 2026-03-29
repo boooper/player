@@ -86,7 +86,7 @@ async fn finish_inflight(inflight: &AsyncMutex<HashMap<String, Arc<Notify>>>, so
 }
 
 fn playback_handle<'a>(state: &'a State<'_, AppState>) -> Result<&'a PlaybackHandle, String> {
-    Ok(&state.playback)
+    state.playback.as_ref().ok_or_else(|| "Audio engine not initialized".to_string())
 }
 
 pub async fn load_track_payload(

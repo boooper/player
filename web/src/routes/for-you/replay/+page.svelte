@@ -87,7 +87,7 @@
       <div class="grid h-full w-full grid-cols-2 grid-rows-2">
         {#each songs.slice(0, 4) as song (song.id)}
           {#if song.coverArtUrl}
-            <img class="h-full w-full object-cover" src={song.coverArtUrl} alt={song.title} loading="lazy" />
+            <img class="h-full w-full object-cover" src={song.coverArtUrl} alt={song.title} />
           {:else}
             <div class="h-full w-full bg-gradient-to-br from-slate-600 to-slate-800"></div>
           {/if}

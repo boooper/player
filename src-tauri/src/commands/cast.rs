@@ -99,46 +99,54 @@ impl CastActor {
         port: u16,
         name: String,
     ) -> Result<CastActorHandle, String> {
-        // rustls 0.23 requires an explicit process-level crypto provider when
-        // multiple backends (ring, aws-lc-rs) are present.  Ignore the error
-        // if one is already installed (e.g. from a previous session).
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let device =
-            CastDevice::connect_without_host_verification(addr.clone(), port)
-                .map_err(|e| format!("Cast connect: {e}"))?;
-
-        // Open the virtual connection to the receiver platform.
-        device
-            .connection
-            .connect("receiver-0".to_string())
-            .map_err(|e| format!("Cast CONNECT: {e}"))?;
-
-        // Launch the Default Media Receiver app (or reuse it if already running).
-        let app = device
-            .receiver
-            .launch_app(&CastDeviceApp::DefaultMediaReceiver)
-            .map_err(|e| format!("Cast LAUNCH: {e}"))?;
-
-        let transport_id = app.transport_id.clone();
-        let session_id   = app.session_id.clone();
-
-        // Open the virtual connection to the media transport.
-        device
-            .connection
-            .connect(transport_id.clone())
-            .map_err(|e| format!("Cast CONNECT transport: {e}"))?;
-
         let (tx, rx) = std::sync::mpsc::channel::<CastActorCmd>();
+        // init_tx reports success/failure back to the calling thread.
+        let (init_tx, init_rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
-        let actor = CastActor {
-            device,
-            transport_id,
-            session_id,
-            media_session_id: 0,
-        };
+        let addr_thread = addr.clone();
+        std::thread::spawn(move || {
+            // Build CastDevice on this thread so it never needs to be Send.
+            // rustls 0.23 requires an explicit process-level crypto provider.
+            let _ = rustls::crypto::ring::default_provider().install_default();
 
-        std::thread::spawn(move || actor.run(rx));
+            let device = match CastDevice::connect_without_host_verification(addr_thread, port) {
+                Ok(d)  => d,
+                Err(e) => { init_tx.send(Err(format!("Cast connect: {e}"))).ok(); return; }
+            };
+
+            if let Err(e) = device.connection.connect("receiver-0".to_string()) {
+                init_tx.send(Err(format!("Cast CONNECT: {e}"))).ok();
+                return;
+            }
+
+            let app = match device.receiver.launch_app(&CastDeviceApp::DefaultMediaReceiver) {
+                Ok(a)  => a,
+                Err(e) => { init_tx.send(Err(format!("Cast LAUNCH: {e}"))).ok(); return; }
+            };
+
+            let transport_id = app.transport_id.clone();
+            let session_id   = app.session_id.clone();
+
+            if let Err(e) = device.connection.connect(transport_id.clone()) {
+                init_tx.send(Err(format!("Cast CONNECT transport: {e}"))).ok();
+                return;
+            }
+
+            init_tx.send(Ok(())).ok();
+
+            let actor = CastActor {
+                device,
+                transport_id,
+                session_id,
+                media_session_id: 0,
+            };
+            actor.run(rx);
+        });
+
+        // Block until the actor signals that the device is ready (or failed).
+        init_rx
+            .recv()
+            .map_err(|_| "Cast actor thread exited unexpectedly".to_string())??;
 
         Ok(CastActorHandle { tx, device_name: name, device_addr: addr, device_port: port })
     }

@@ -16,6 +16,7 @@
   } = $props();
 
   let loading = $state(false);
+  let imgFailed = $state(false);
 
   const artistHref = $derived(`/artist/${encodeURIComponent(name)}`);
   const isActive = $derived($playingFrom.href === artistHref);
@@ -45,8 +46,8 @@
 <div class="artist-card group relative flex w-full flex-col items-center gap-2 rounded-xl p-3">
   <div class="relative">
     <button class="block" onclick={() => goto(artistHref)} aria-label="Go to {name}">
-      {#if image}
-        <img class="h-16 w-16 rounded-full object-cover shadow-md ring-2 ring-white/5" src={image} alt={name} loading="lazy" />
+      {#if image && !imgFailed}
+        <img class="h-16 w-16 rounded-full object-cover shadow-md ring-2 ring-white/5" src={image} alt={name} onerror={() => imgFailed = true} />
       {:else}
         <div class="flex h-16 w-16 items-center justify-center rounded-full bg-card text-base font-bold text-muted-foreground ring-2 ring-border/10">
           {initials(name)}
