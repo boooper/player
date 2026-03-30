@@ -220,6 +220,11 @@ pub(crate) fn map_song(v: &Value, p: &ActiveProfile) -> Song {
         duration: jduration(v),
         audio_format: j_audio_format(v),
         bitrate_kbps: j_bitrate_kbps(v),
+        genre: v.get("Genres")
+            .and_then(|g| g.as_array())
+            .and_then(|a| a.first())
+            .and_then(|g| g.as_str())
+            .map(|s| s.to_string()),
     }
 }
 

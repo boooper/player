@@ -24,6 +24,7 @@ pub struct Song {
     pub duration: f64,
     pub audio_format: Option<String>,
     pub bitrate_kbps: Option<u32>,
+    pub genre: Option<String>,
 }
 
 #[derive(Serialize, Clone)]

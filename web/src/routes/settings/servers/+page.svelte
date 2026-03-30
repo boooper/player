@@ -6,14 +6,10 @@
   const settings = useSettingsContext();
 </script>
 
-<div class="space-y-8">
-  <div class="page-section">
-    <ServiceStatusSection refreshKey={settings.statsRefreshKey} />
-  </div>
-  <div class="page-section">
-    <ServersSection
-      bind:profiles={settings.profiles}
-      onHealthChange={settings.refreshStats}
-    />
-  </div>
+<div class="space-y-6">
+  <ServiceStatusSection refreshKey={settings.statsRefreshKey} />
+  <ServersSection
+    bind:profiles={settings.profiles}
+    onHealthChange={settings.refreshStats}
+  />
 </div>

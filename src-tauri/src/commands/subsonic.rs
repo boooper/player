@@ -197,6 +197,7 @@ fn map_song(client: &SubsonicClient, v: &Value) -> Song {
             .and_then(Value::as_u64)
             .and_then(|b| u32::try_from(b).ok())
             .filter(|&b| b > 0),
+        genre: get_opt_str(v, "genre"),
     }
 }
 

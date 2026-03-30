@@ -165,6 +165,7 @@ async fn resolve_library_song_id(
         duration: 0.0,
         audio_format: None,
         bitrate_kbps: None,
+        genre: None,
     };
 
     let resolved = resolve_playback_song(state, &lookup_song).await?;

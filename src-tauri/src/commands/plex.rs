@@ -443,6 +443,10 @@ fn map_song(node: Node<'_, '_>, p: &ActiveProfile) -> Song {
             .map(ToOwned::to_owned)
             .filter(|value| !value.is_empty()),
         bitrate_kbps: media.and_then(|media_node| attr_u32(media_node, "bitrate")),
+        genre: node.attribute("parentGenre")
+            .or_else(|| node.attribute("Genre"))
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned),
     }
 }
 

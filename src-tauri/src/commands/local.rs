@@ -244,6 +244,7 @@ fn read_song(root: &Path, file: &Path) -> Option<(Song, Option<String>, SystemTi
             .filter(|ext| !ext.is_empty())
             .map(ToOwned::to_owned),
         bitrate_kbps: None,
+        genre: None,
     };
 
     Some((song, year, modified))

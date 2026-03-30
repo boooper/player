@@ -2,7 +2,8 @@ import { fromStore } from 'svelte/store';
 import { currentTime, duration, addRecentlyPlayedSong } from '$lib/stores/player';
 import { lfmNowPlaying, lfmScrobble, type Song } from '$lib/servers';
 import { lbzNowPlaying, lbzScrobble } from '$lib/providers/recommendation/listenbrainz';
-import { recordPlay } from '$lib/servers/play-history';
+import { recordPlay, cacheSongGenre } from '$lib/servers/play-history';
+import { getArtistInfo } from '$lib/data/metadata';
 
 type PlayerScrobbleControllerOptions = {
   getCurrentTrack: () => Song | null;
@@ -79,6 +80,16 @@ export function createPlayerScrobbleController(options: PlayerScrobbleController
       durationSecs: track.duration ?? (dur > 0 ? dur : undefined),
       completedFraction: dur > 0 ? Math.min(t / dur, 1) : 0.5,
     });
+    if (track.genre) {
+      cacheSongGenre(track.id, track.artist, track.genre);
+    } else {
+      getArtistInfo(track.artist)
+        .then((info) => {
+          const genre = info?.genre || info?.tags?.[0];
+          if (genre) cacheSongGenre(track.id, track.artist, genre);
+        })
+        .catch(() => undefined);
+    }
 
     if (options.getLastFmConnected()) {
       lfmScrobble(track.artist, track.title, scrobbleStartTime, track.album || undefined, track.duration || undefined);

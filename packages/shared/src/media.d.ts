@@ -17,6 +17,7 @@ export declare type Song = {
   duration: number;
   audioFormat?: string;
   bitrateKbps?: number;
+  genre?: string;
 };
 
 export declare type Album = {

@@ -655,6 +655,7 @@ pub async fn cast_play(
             duration: 0.0,
             audio_format: None,
             bitrate_kbps: None,
+            genre: None,
         };
         let resolved = crate::commands::library::resolve_playback_song(&state, &stub).await?;
         (resolved.stream_url, resolved.title, resolved.artist, resolved.cover_art_url)
