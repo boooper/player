@@ -35,7 +35,43 @@ class SettingsController {
   eqBands = $state<EqBandValues>(DEFAULT_EQ_BANDS);
   discordRpcEnabled = $state(true);
   saving = $state(false);
+  savedRecently = $state(false);
   statsRefreshKey = $state(0);
+
+  // Non-reactive — guards against saving before initial load completes
+  private _loaded = false;
+  private _saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private _savedRecentlyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    $effect(() => {
+      // Track all auto-saveable state
+      void [
+        this.lastFmApiKey,
+        this.lastFmSharedSecret,
+        this.recommendationProvider,
+        this.metadataProvider,
+        this.lyricsProvider,
+        this.listenBrainzUsername,
+        this.listenBrainzToken,
+        this.crossfadeSeconds,
+        this.eqEnabled,
+        this.eqPreset,
+        ...this.eqFrequencies,
+        ...this.eqBands,
+        this.discordRpcEnabled,
+      ];
+
+      if (!this._loaded) return;
+
+      if (this._saveTimer !== null) clearTimeout(this._saveTimer);
+      this._saveTimer = setTimeout(() => void this.save(), 800);
+
+      return () => {
+        if (this._saveTimer !== null) clearTimeout(this._saveTimer);
+      };
+    });
+  }
 
   initialize = async () => {
     let currentPlatform = 'unknown';
@@ -55,12 +91,8 @@ class SettingsController {
 
   loadInitialSettings = async () => {
     const profilesPromise = fetchProfiles()
-      .then((profiles) => {
-        this.profiles = profiles;
-      })
-      .catch(() => {
-        toast.error('Failed to load servers');
-      });
+      .then((profiles) => { this.profiles = profiles; })
+      .catch(() => { toast.error('Failed to load servers'); });
 
     const settingsPromise = (async () => {
       try {
@@ -107,6 +139,7 @@ class SettingsController {
     })();
 
     await Promise.all([profilesPromise, settingsPromise]);
+    this._loaded = true;
   };
 
   save = async () => {
@@ -152,13 +185,15 @@ class SettingsController {
         this.lastFmSharedSecretConfigured = true;
         this.lastFmSharedSecret = '';
       }
-
       if (this.listenBrainzToken.trim()) {
         this.listenBrainzTokenConfigured = true;
         this.listenBrainzToken = '';
       }
 
-      toast.success('Settings saved');
+      this.savedRecently = true;
+      if (this._savedRecentlyTimer !== null) clearTimeout(this._savedRecentlyTimer);
+      this._savedRecentlyTimer = setTimeout(() => { this.savedRecently = false; }, 2000);
+
       this.statsRefreshKey += 1;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err) || 'Failed to save settings');
@@ -167,9 +202,7 @@ class SettingsController {
     }
   };
 
-  refreshStats = () => {
-    this.statsRefreshKey += 1;
-  };
+  refreshStats = () => { this.statsRefreshKey += 1; };
 
   handleCleared = () => {
     backendSettings.set(defaultBackendSettings);

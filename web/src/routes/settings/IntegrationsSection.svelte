@@ -3,11 +3,7 @@
   import { toast } from 'svelte-sonner';
   import { backendSettings } from '$lib/stores/backend-settings';
   import { openUrl } from '$lib/tauri';
-  import {
-    lfmBeginAuth,
-    lfmCompleteAuth,
-    lfmDisconnect,
-  } from '$lib/servers';
+  import { lfmBeginAuth, lfmCompleteAuth, lfmDisconnect } from '$lib/servers';
   import * as Select from '$lib/components/ui/select';
 
   const META_LABELS: Record<string, string> = {
@@ -17,6 +13,11 @@
     audiodb: 'TheAudioDB only',
   };
   const REC_LABELS: Record<string, string> = { lastfm: 'Last.fm', listenbrainz: 'ListenBrainz' };
+  const LYRICS_LABELS: Record<string, string> = {
+    auto: 'Automatic',
+    musixmatch: 'Musixmatch',
+    lrclib: 'LRCLIB',
+  };
 
   let {
     isMobile = false,
@@ -58,9 +59,7 @@
   $effect(() => {
     backendSettings.update((s) => ({ ...s, lastFmConnected: lfmConnected, lastFmUsername: lfmUsername }));
   });
-
   $effect(() => {
-    // Keep backendSettings in sync for the lyrics provider when changed in this section.
     backendSettings.update((s) => ({ ...s, lyricsProvider }));
   });
 
@@ -115,8 +114,6 @@
   }
 </script>
 
-<!-- ── Last.fm credentials ─────────────────────────────────────────────── -->
-{#if !isMobile}
 <section class="rounded-xl border border-border/70 bg-card">
   <div class="border-b border-border/60 px-5 py-4">
     <div class="flex items-center gap-2">
@@ -124,20 +121,20 @@
       <h2 class="font-semibold">Last.fm</h2>
     </div>
     <p class="mt-0.5 text-xs text-muted-foreground">
-      Required for recommendations, mixes, and artist info.
-      Get a free API key at
+      Powers recommendations, mixes, and scrobbling. Get a free API key at
       <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer" class="text-primary underline-offset-2 hover:underline">last.fm/api</a>.
     </p>
   </div>
+
+  {#if !isMobile}
   <!-- svelte-ignore a11y_no_redundant_roles -->
-  <form class="space-y-5 px-5 py-5" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
-    <!-- Hidden username field satisfies browser accessibility requirement for password forms -->
+  <form class="divide-y divide-border/40 px-5" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
     <input type="text" name="username" autocomplete="username" aria-hidden="true" class="sr-only" tabindex="-1" />
 
     <!-- API Key -->
-    <div class="space-y-1.5">
-      <label class="text-sm font-medium" for="lfm-key">API Key</label>
-      <div class="relative">
+    <div class="flex items-center gap-4 py-4">
+      <label class="w-32 shrink-0 text-sm font-medium" for="lfm-key">API Key</label>
+      <div class="relative flex-1">
         <input
           id="lfm-key"
           type={showApiKey ? 'text' : 'password'}
@@ -158,12 +155,12 @@
     </div>
 
     <!-- Shared Secret -->
-    <div class="space-y-1.5">
-      <label class="text-sm font-medium" for="lfm-secret">
-        Shared Secret
-        <span class="ml-1.5 text-xs font-normal text-muted-foreground">Required for scrobbling &amp; account linking</span>
-      </label>
-      <div class="relative">
+    <div class="flex items-center gap-4 py-4">
+      <div class="w-32 shrink-0">
+        <p class="text-sm font-medium">Shared Secret</p>
+        <p class="text-[11px] text-muted-foreground">For scrobbling</p>
+      </div>
+      <div class="relative flex-1">
         <input
           id="lfm-secret"
           type={showSharedSecret ? 'text' : 'password'}
@@ -183,12 +180,11 @@
       </div>
     </div>
 
-    <!-- Account Connection -->
-    <div class="space-y-3 rounded-lg border border-border/60 bg-secondary/20 px-4 py-4">
-      <p class="text-sm font-medium">Account</p>
-
+    <!-- Account -->
+    <div class="flex items-center gap-4 py-4">
+      <p class="w-32 shrink-0 text-sm font-medium">Account</p>
       {#if lfmConnected}
-        <div class="flex items-center justify-between gap-3">
+        <div class="flex flex-1 items-center justify-between gap-3">
           <div class="flex items-center gap-2.5 text-sm">
             <div class="flex size-7 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
               <User class="size-3.5" />
@@ -209,10 +205,10 @@
         </div>
 
       {:else if lfmAuthState === 'pending' || lfmAuthState === 'completing'}
-        <div class="space-y-3">
-          <div class="flex items-start gap-2.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-600 dark:text-amber-400">
+        <div class="flex-1 space-y-2">
+          <div class="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
             <ExternalLink class="mt-0.5 size-3.5 shrink-0" />
-            <span>Authorize the app in your browser, then click the button below.</span>
+            <span>Authorize the app in your browser, then click below.</span>
           </div>
           <div class="flex gap-2">
             <button
@@ -220,111 +216,88 @@
               onclick={completeLastFmAuth}
               disabled={lfmAuthState === 'completing'}
             >
-              {#if lfmAuthState === 'completing'}
-                <Loader2 class="size-4 animate-spin" />
-                Verifying…
-              {:else}
-                <Link class="size-4" />
-                I've Authorized — Connect
-              {/if}
+              {#if lfmAuthState === 'completing'}<Loader2 class="size-4 animate-spin" />Verifying…
+              {:else}<Link class="size-4" />I've Authorized — Connect{/if}
             </button>
             <button
               class="rounded-md border border-border/70 px-3 py-2 text-sm text-muted-foreground transition hover:bg-secondary"
               onclick={cancelLastFmAuth}
               disabled={lfmAuthState === 'completing'}
-            >
-              Cancel
-            </button>
+            >Cancel</button>
           </div>
         </div>
 
       {:else}
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-xs text-muted-foreground">
-            Link your Last.fm account to enable scrobbling and personalised recommendations based on your listening history.
-          </p>
+        <div class="flex flex-1 items-center justify-between gap-3">
+          <p class="text-xs text-muted-foreground">Link your account to enable scrobbling and personalised recommendations.</p>
           <button
             class="flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
             onclick={connectLastFm}
             disabled={lfmConnecting || (!lastFmSharedSecretConfigured && !lastFmSharedSecret.trim())}
           >
-            {#if lfmConnecting}
-              <Loader2 class="size-4 animate-spin" />
-              Opening…
-            {:else}
-              <Link class="size-4" />
-              Connect Account
-            {/if}
+            {#if lfmConnecting}<Loader2 class="size-4 animate-spin" />Opening…
+            {:else}<Link class="size-4" />Connect{/if}
           </button>
         </div>
         {#if !lastFmSharedSecretConfigured && !lastFmSharedSecret.trim()}
-          <p class="text-xs text-amber-500">Enter and save your shared secret above before connecting.</p>
+          <p class="text-xs text-amber-500">Save your shared secret before connecting.</p>
         {/if}
       {/if}
     </div>
   </form>
-</section>
-{/if}
+  {/if}
 
-<!-- ── Providers ──────────────────────────────────────────────────────── -->
-<section class="rounded-xl border border-border/70 bg-card">
-  <div class="border-b border-border/60 px-5 py-4">
-    <h2 class="font-semibold">Providers</h2>
-    <p class="mt-0.5 text-xs text-muted-foreground">Choose which data sources power metadata and recommendations.</p>
-  </div>
-  <div class="grid grid-cols-2 gap-4 px-5 py-5">
-    <div class="space-y-1.5">
-      <p class="text-sm font-medium">Metadata Provider</p>
-      <Select.Root type="single" bind:value={metadataProvider}>
-        <Select.Trigger class="w-full">
-          {META_LABELS[metadataProvider] ?? metadataProvider}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Item value="local" label="Local library first" />
-          <Select.Item value="both" label="Both (Last.fm + TheAudioDB)" />
-          <Select.Item value="lastfm" label="Last.fm only" />
-          <Select.Item value="audiodb" label="TheAudioDB only" />
-        </Select.Content>
-      </Select.Root>
-    </div>
-    <div class="space-y-1.5">
-      <p class="text-sm font-medium">Recommendation Provider</p>
-      <Select.Root type="single" bind:value={recommendationProvider}>
-        <Select.Trigger class="w-full">
-          {REC_LABELS[recommendationProvider] ?? recommendationProvider}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Item value="lastfm" label="Last.fm" />
-          <Select.Item value="listenbrainz" label="ListenBrainz" />
-        </Select.Content>
-      </Select.Root>
-    </div>
-    <div class="space-y-1.5">
-      <p class="text-sm font-medium">Lyrics Provider</p>
-      <Select.Root type="single" bind:value={lyricsProvider}>
-        <Select.Trigger class="w-full">
-          {lyricsProvider}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Item value="auto" label="Automatic (Musixmatch → LRCLIB fallback)" />
-          <Select.Item value="musixmatch" label="Musixmatch" />
-          <Select.Item value="lrclib" label="LRCLIB" />
-        </Select.Content>
-      </Select.Root>
+  <!-- Providers -->
+  <div class="border-t border-border/60 px-5 py-4">
+    <p class="mb-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Providers</p>
+    <div class="grid grid-cols-3 gap-4">
+      <div class="space-y-1.5">
+        <p class="text-sm font-medium">Metadata</p>
+        <Select.Root type="single" bind:value={metadataProvider}>
+          <Select.Trigger class="w-full">{META_LABELS[metadataProvider] ?? metadataProvider}</Select.Trigger>
+          <Select.Content>
+            <Select.Item value="local" label="Local library first" />
+            <Select.Item value="both" label="Both (Last.fm + TheAudioDB)" />
+            <Select.Item value="lastfm" label="Last.fm only" />
+            <Select.Item value="audiodb" label="TheAudioDB only" />
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="space-y-1.5">
+        <p class="text-sm font-medium">Recommendations</p>
+        <Select.Root type="single" bind:value={recommendationProvider}>
+          <Select.Trigger class="w-full">{REC_LABELS[recommendationProvider] ?? recommendationProvider}</Select.Trigger>
+          <Select.Content>
+            <Select.Item value="lastfm" label="Last.fm" />
+            <Select.Item value="listenbrainz" label="ListenBrainz" />
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="space-y-1.5">
+        <p class="text-sm font-medium">Lyrics</p>
+        <Select.Root type="single" bind:value={lyricsProvider}>
+          <Select.Trigger class="w-full">{LYRICS_LABELS[lyricsProvider] ?? lyricsProvider}</Select.Trigger>
+          <Select.Content>
+            <Select.Item value="auto" label="Automatic" />
+            <Select.Item value="musixmatch" label="Musixmatch" />
+            <Select.Item value="lrclib" label="LRCLIB" />
+          </Select.Content>
+        </Select.Root>
+      </div>
     </div>
   </div>
 
   {#if recommendationProvider === 'listenbrainz'}
-  <form class="border-t border-border/60 px-5 py-5" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
-    <div class="space-y-4">
+  <form class="border-t border-border/60 px-5 py-4" autocomplete="off" onsubmit={(e) => e.preventDefault()}>
+    <p class="mb-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">ListenBrainz</p>
+    <div class="grid grid-cols-2 gap-4">
       <div class="space-y-1.5">
-        <label class="text-sm font-medium" for="lbz-username">ListenBrainz Username</label>
-        <p class="text-xs text-muted-foreground">Your <a href="https://listenbrainz.org" class="text-primary underline-offset-2 hover:underline">listenbrainz.org</a> username. Used to fetch personalised recommendations.</p>
+        <label class="text-sm font-medium" for="lbz-username">Username</label>
         <input
           id="lbz-username"
           type="text"
           bind:value={listenBrainzUsername}
-          placeholder="e.g. your_listenbrainz_username"
+          placeholder="Your listenbrainz.org username"
           autocomplete="username"
           class="w-full rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
@@ -332,9 +305,8 @@
       <div class="space-y-1.5">
         <label class="text-sm font-medium" for="lbz-token">
           User Token
-          <span class="ml-1.5 text-xs font-normal text-muted-foreground">Required for scrobbling</span>
+          <span class="ml-1 text-xs font-normal text-muted-foreground">for scrobbling</span>
         </label>
-        <p class="text-xs text-muted-foreground">Find your token at <a href="https://listenbrainz.org/profile/" class="text-primary underline-offset-2 hover:underline">listenbrainz.org/profile</a>. Scrobbles are submitted alongside any Last.fm scrobbles.</p>
         <input
           id="lbz-token"
           type="password"

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Loader2, Save, Settings, Server, AudioLines, PlugZap, ShieldAlert, BarChart2, Heart } from '@lucide/svelte';
+  import { Check, Loader2, Settings, Server, AudioLines, PlugZap, ShieldAlert, BarChart2, Heart } from '@lucide/svelte';
   import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
   import { setSettingsContext } from './context.svelte.js';
 
@@ -39,19 +39,15 @@
       </div>
     </div>
 
-    <button
-      class="flex items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-      onclick={settings.save}
-      disabled={settings.saving}
-    >
+    <div class="flex h-8 items-center gap-1.5 text-sm text-muted-foreground transition-opacity duration-300 {settings.saving || settings.savedRecently ? 'opacity-100' : 'opacity-0'}">
       {#if settings.saving}
-        <Loader2 class="size-4 animate-spin" />
-        Saving...
-      {:else}
-        <Save class="size-4" />
-        Save Changes
+        <Loader2 class="size-3.5 animate-spin" />
+        Saving…
+      {:else if settings.savedRecently}
+        <Check class="size-3.5 text-emerald-500" />
+        <span class="text-emerald-500">Saved</span>
       {/if}
-    </button>
+    </div>
   </div>
 
   <Tabs value={currentSection} class="gap-4">

@@ -1,25 +1,37 @@
 <script lang="ts">
-  import { Download, Gamepad2, Loader2 } from '@lucide/svelte';
+  import { Download, Gamepad2, Loader2, Power } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import PlaybackSection from '../PlaybackSection.svelte';
   import DangerZoneSection from '../DangerZoneSection.svelte';
   import { useSettingsContext } from '../context.svelte.js';
   import { checkForAppUpdate, installAppUpdate, type AppUpdateInfo } from '$lib/updater';
+  import { setAutostart } from '$lib/servers';
 
   const settings = useSettingsContext();
   let updateInfo = $state<AppUpdateInfo | null>(null);
   let updateChecking = $state(false);
   let updateInstalling = $state(false);
   let updaterUnavailable = $state(false);
+  let autostartLoading = $state(false);
+
+  async function toggleAutostart() {
+    autostartLoading = true;
+    try {
+      const next = !settings.autostartEnabled;
+      await setAutostart(next);
+      settings.autostartEnabled = next;
+    } catch {
+      toast.error('Failed to update launch at login');
+    } finally {
+      autostartLoading = false;
+    }
+  }
 
   async function handleCheckForUpdates() {
     updateChecking = true;
     updaterUnavailable = false;
     try {
       updateInfo = await checkForAppUpdate();
-      if (!updateInfo) {
-        toast.success('You are already on the latest version');
-      }
+      if (!updateInfo) toast.success('You are already on the latest version');
     } catch (error) {
       updaterUnavailable = true;
       toast.error(error instanceof Error ? error.message : String(error));
@@ -48,30 +60,42 @@
 </script>
 
 <div class="space-y-8">
+
   {#if !settings.isMobile}
-    <div class="page-section">
-      <PlaybackSection
-        bind:autostartEnabled={settings.autostartEnabled}
-        bind:crossfadeSeconds={settings.crossfadeSeconds}
-        bind:eqEnabled={settings.eqEnabled}
-        bind:eqPreset={settings.eqPreset}
-        bind:eqBands={settings.eqBands}
-        showPlayback={false}
-        showEqualizer={false}
-      />
-    </div>
-  {/if}
-  {#if !settings.isMobile}
+  <!-- Application + Discord combined -->
   <section class="page-section rounded-xl border border-border/70 bg-card">
     <div class="border-b border-border/60 px-5 py-4">
       <div class="flex items-center gap-2">
-        <Gamepad2 class="size-4 text-muted-foreground" />
-        <h2 class="font-semibold">Discord</h2>
+        <Power class="size-4 text-muted-foreground" />
+        <h2 class="font-semibold">Application</h2>
       </div>
-      <p class="mt-0.5 text-xs text-muted-foreground">Desktop rich presence integration.</p>
+      <p class="mt-0.5 text-xs text-muted-foreground">System and integration settings.</p>
     </div>
-    <div class="px-5 py-5">
-      <label class="flex cursor-pointer items-center gap-3" for="discord-rpc-toggle">
+    <div class="divide-y divide-border/40 px-5">
+      <!-- Autostart -->
+      <label class="flex cursor-pointer items-center gap-3 py-4" for="autostart-toggle">
+        <input
+          id="autostart-toggle"
+          type="checkbox"
+          class="sr-only"
+          checked={settings.autostartEnabled}
+          onchange={toggleAutostart}
+          disabled={autostartLoading}
+        />
+        <div
+          aria-hidden="true"
+          class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors {settings.autostartEnabled ? 'bg-primary' : 'bg-input'}"
+        >
+          <span class="pointer-events-none inline-block h-4 w-4 translate-x-0 rounded-full bg-background shadow ring-0 transition-transform {settings.autostartEnabled ? 'translate-x-4' : ''}"></span>
+        </div>
+        <div>
+          <p class="text-sm font-medium">Launch at login</p>
+          <p class="text-xs text-muted-foreground">Automatically start Player when you log in.</p>
+        </div>
+      </label>
+
+      <!-- Discord RPC -->
+      <label class="flex cursor-pointer items-center gap-3 py-4" for="discord-rpc-toggle">
         <input
           id="discord-rpc-toggle"
           type="checkbox"
@@ -85,12 +109,14 @@
           <span class="pointer-events-none inline-block h-4 w-4 translate-x-0 rounded-full bg-background shadow ring-0 transition-transform {settings.discordRpcEnabled ? 'translate-x-4' : ''}"></span>
         </div>
         <div>
-          <p class="text-sm font-medium">Enable Discord RPC</p>
-          <p class="text-xs text-muted-foreground">Show the currently playing track in Discord rich presence.</p>
+          <p class="text-sm font-medium">Discord rich presence</p>
+          <p class="text-xs text-muted-foreground">Show the currently playing track in Discord.</p>
         </div>
       </label>
     </div>
   </section>
+
+  <!-- Updates -->
   <section class="page-section rounded-xl border border-border/70 bg-card">
     <div class="border-b border-border/60 px-5 py-4">
       <div class="flex items-center gap-2">
@@ -103,17 +129,13 @@
       <div class="flex items-center justify-between gap-4">
         <div class="min-w-0">
           <p class="text-sm font-medium">
-            {#if updateInfo}
-              Update {updateInfo.version} available
-            {:else}
-              Check for updates
-            {/if}
+            {#if updateInfo}Update {updateInfo.version} available{:else}Check for updates{/if}
           </p>
           <p class="text-xs text-muted-foreground">
             {#if updaterUnavailable}
               Updater is not configured in this build.
             {:else if !updateInfo}
-              Looks for the latest Madrify release from GitHub Releases.
+              Looks for the latest release from GitHub Releases.
             {/if}
           </p>
         </div>
@@ -123,13 +145,8 @@
             onclick={handleInstallUpdate}
             disabled={updateInstalling || updateChecking}
           >
-            {#if updateInstalling}
-              <Loader2 class="size-4 animate-spin" />
-              Installing...
-            {:else}
-              <Download class="size-4" />
-              Install {updateInfo.version}
-            {/if}
+            {#if updateInstalling}<Loader2 class="size-4 animate-spin" />Installing...
+            {:else}<Download class="size-4" />Install {updateInfo.version}{/if}
           </button>
         {:else}
           <button
@@ -137,13 +154,8 @@
             onclick={handleCheckForUpdates}
             disabled={updateChecking || updateInstalling}
           >
-            {#if updateChecking}
-              <Loader2 class="size-4 animate-spin" />
-              Checking...
-            {:else}
-              <Download class="size-4" />
-              Check now
-            {/if}
+            {#if updateChecking}<Loader2 class="size-4 animate-spin" />Checking...
+            {:else}<Download class="size-4" />Check now{/if}
           </button>
         {/if}
       </div>
@@ -160,6 +172,7 @@
     </div>
   </section>
   {/if}
+
   <div class="page-section">
     <DangerZoneSection onCacheCleared={settings.refreshStats} onCleared={settings.handleCleared} />
   </div>
