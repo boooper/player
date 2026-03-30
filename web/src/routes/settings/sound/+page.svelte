@@ -1,12 +1,12 @@
 <script lang="ts">
-  import ApplicationSection from '../ApplicationSection.svelte';
+  import PlaybackSection from '../PlaybackSection.svelte';
   import { useSettingsContext } from '../context.svelte.js';
 
   const settings = useSettingsContext();
 </script>
 
 <div class="page-section">
-  <ApplicationSection
+  <PlaybackSection
     bind:autostartEnabled={settings.autostartEnabled}
     bind:crossfadeSeconds={settings.crossfadeSeconds}
     bind:eqEnabled={settings.eqEnabled}

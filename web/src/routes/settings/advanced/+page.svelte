@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Download, Gamepad2, Loader2 } from '@lucide/svelte';
   import { toast } from 'svelte-sonner';
-  import ApplicationSection from '../ApplicationSection.svelte';
+  import PlaybackSection from '../PlaybackSection.svelte';
   import DangerZoneSection from '../DangerZoneSection.svelte';
   import { useSettingsContext } from '../context.svelte.js';
   import { checkForAppUpdate, installAppUpdate, type AppUpdateInfo } from '$lib/updater';
@@ -50,14 +50,14 @@
 <div class="space-y-8">
   {#if !settings.isMobile}
     <div class="page-section">
-      <ApplicationSection
-      bind:autostartEnabled={settings.autostartEnabled}
-      bind:crossfadeSeconds={settings.crossfadeSeconds}
-      bind:eqEnabled={settings.eqEnabled}
-      bind:eqPreset={settings.eqPreset}
-      bind:eqBands={settings.eqBands}
-      showPlayback={false}
-      showEqualizer={false}
+      <PlaybackSection
+        bind:autostartEnabled={settings.autostartEnabled}
+        bind:crossfadeSeconds={settings.crossfadeSeconds}
+        bind:eqEnabled={settings.eqEnabled}
+        bind:eqPreset={settings.eqPreset}
+        bind:eqBands={settings.eqBands}
+        showPlayback={false}
+        showEqualizer={false}
       />
     </div>
   {/if}

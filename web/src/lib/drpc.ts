@@ -1,5 +1,5 @@
-import { derived } from 'svelte/store';
-import { queue, currentIndex, isPlaying } from './stores/player';
+import { derived, get } from 'svelte/store';
+import { queue, currentIndex, isPlaying, currentTime, duration } from './stores/player';
 import { isTauri } from './tauri';
 import type { Song } from './servers';
 import { getArtistArtwork } from './discovery';
@@ -38,7 +38,6 @@ async function drpcStart() {
 async function syncActivity(
   song: Song | null,
   playing: boolean,
-  startedAt: number | null,
   isAborted: () => boolean
 ) {
   if (!song) {
@@ -86,11 +85,26 @@ async function syncActivity(
     .setState(`by ${song.artist}${song.album ? ` — ${song.album}` : ''}`)
     .setAssets(assets);
 
-  if (playing && startedAt !== null) {
-    activity.setTimestamps(new Timestamps(startedAt));
+  if (playing) {
+    const positionSec = get(currentTime);
+    const totalSec = song.duration > 0 ? song.duration : get(duration);
+    const now = Date.now();
+    const start = now - positionSec * 1000;
+    const end = totalSec > 0 ? start + totalSec * 1000 : undefined;
+    activity.setTimestamps(new Timestamps(start, end));
   }
 
+  if (isAborted()) return;
   await setActivity(activity);
+}
+
+export async function stopDrpc(): Promise<void> {
+  if (!started) return;
+  const { clearActivity, stop } = await import('tauri-plugin-drpc');
+  await clearActivity().catch((e) => console.warn('[drpc] clearActivity failed:', e));
+  await stop().catch((e) => console.warn('[drpc] stop failed:', e));
+  started = false;
+  startPromise = null;
 }
 
 /**
@@ -105,7 +119,7 @@ export function initDrpc(): () => void {
   let aborted = false;
   let latestSong: Song | null = null;
   let latestPlaying = false;
-  let latestStartedAt: number | null = null;
+  let lastObservedTime = 0;
   let syncing = false;
   let pending = false;
 
@@ -119,7 +133,7 @@ export function initDrpc(): () => void {
       try {
         await drpcStart();
         if (aborted) break;
-        await syncActivity(latestSong, latestPlaying, latestStartedAt, () => aborted);
+        await syncActivity(latestSong, latestPlaying, () => aborted);
       } catch (error) {
         console.error(error);
       }
@@ -128,31 +142,33 @@ export function initDrpc(): () => void {
   }
 
   const unsubSong = currentSong.subscribe((v) => {
-    const previousId = latestSong?.id ?? null;
     latestSong = v;
-    if (v?.id !== previousId) {
-      latestStartedAt = latestPlaying && v ? Date.now() : null;
-    }
     sync();
   });
 
   const unsubPlaying = isPlaying.subscribe((value) => {
-    const wasPlaying = latestPlaying;
     latestPlaying = value;
-    if (latestSong) {
-      if (value && !wasPlaying) {
-        latestStartedAt = Date.now();
-      } else if (!value) {
-        latestStartedAt = null;
-      }
-    }
     sync();
+  });
+
+  const unsubTime = currentTime.subscribe((t) => {
+    if (!latestPlaying) {
+      lastObservedTime = t;
+      return;
+    }
+    const delta = t - lastObservedTime;
+    // Backward seek or forward jump >3s = user seeked
+    if (delta < -0.5 || delta > 3) {
+      sync();
+    }
+    lastObservedTime = t;
   });
 
   return () => {
     aborted = true;
     unsubPlaying();
     unsubSong();
+    unsubTime();
     if (started || startPromise) {
       import('tauri-plugin-drpc')
         .then(async ({ clearActivity, stop }) => {
@@ -160,8 +176,8 @@ export function initDrpc(): () => void {
           await stop().catch((e) => console.warn('[drpc] stop failed:', e));
         })
         .catch((e) => console.warn('[drpc] cleanup import failed:', e));
+      started = false;
+      startPromise = null;
     }
-    started = false;
-    startPromise = null;
   };
 }

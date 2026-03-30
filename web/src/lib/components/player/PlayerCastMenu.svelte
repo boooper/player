@@ -34,7 +34,7 @@
 </script>
 
 <DropdownMenu onOpenChange={(open) => { if (open && !castActive && !discovering) onDiscover(); }}>
-  <DropdownMenuTrigger>
+  <DropdownMenuTrigger tooltip={castActive ? 'Stop casting' : 'Cast to device'}>
     {#snippet child({ props })}
       <Button
         {...props}

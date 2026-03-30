@@ -58,7 +58,7 @@
 {#snippet disc3Icon()}<Disc3 class="size-4 shrink-0" />{/snippet}
 
 <DropdownMenu>
-  <DropdownMenuTrigger>
+  <DropdownMenuTrigger tooltip={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle'}>
     {#snippet child({ props })}
       <Button
         {...props}

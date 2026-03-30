@@ -291,7 +291,7 @@ const artistHref = $derived(`/artist/${encodeURIComponent(data.name)}`);
         </button>
         <!-- Shuffle dropdown -->
         <DropdownMenu>
-          <DropdownMenuTrigger>
+          <DropdownMenuTrigger tooltip={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle'}>
             {#snippet child({ props })}
               <button
                 {...props}

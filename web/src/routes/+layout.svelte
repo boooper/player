@@ -12,7 +12,7 @@
   import { getArtistArtworkMap } from '$lib/discovery';
   import { withTimeout } from '$lib/utils';
   import { openUrl, isTauri, initTauriWindow, startDragging, minimizeWindow, toggleMaximizeWindow, closeWindow, getOsPlatform, watchMaximized } from '$lib/tauri';
-  import { initDrpc } from '$lib/drpc';
+  import { initDrpc, stopDrpc } from '$lib/drpc';
   import {
     fetchAppSettings,
     getActiveServerType,
@@ -356,6 +356,7 @@
       document.removeEventListener('click', handleExternalLink);
       document.removeEventListener('keydown', handleKeydown);
       cleanupDrpc();
+      void stopDrpc();
       drpcReady = false;
     };
   });

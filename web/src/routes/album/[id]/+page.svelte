@@ -190,7 +190,7 @@
             {/if}
           </button>
           <DropdownMenu>
-            <DropdownMenuTrigger>
+            <DropdownMenuTrigger tooltip={$smartShuffleMode ? 'Smart Shuffle on' : $shuffleEnabled ? 'Shuffle on' : 'Shuffle'}>
               {#snippet child({ props })}
                 <button
                   {...props}

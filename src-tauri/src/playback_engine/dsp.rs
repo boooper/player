@@ -1,11 +1,11 @@
 use biquad::{Coefficients, DirectForm1, ToHertz, Type};
 
-pub const EQ_FREQUENCIES: [f32; 5] = [60.0, 230.0, 910.0, 3600.0, 14000.0];
-pub const EQ_BANDS: usize = 5;
+pub const EQ_FREQUENCIES: [f32; 9] = [60.0, 170.0, 310.0, 600.0, 1000.0, 3000.0, 6000.0, 12000.0, 16000.0];
+pub const EQ_BANDS: usize = 9;
 const EQ_Q: f32 = 1.0;
 
-pub fn normalize_eq_bands(bands: &[f32]) -> [f32; EQ_BANDS] {
-    let mut normalized = [0.0; EQ_BANDS];
+pub fn normalize_eq_bands(bands: &[f32]) -> [f32; 9] {
+    let mut normalized = [0.0; 9];
     for (index, slot) in normalized.iter_mut().enumerate() {
         *slot = bands.get(index).copied().unwrap_or(0.0).clamp(-12.0, 12.0);
     }
@@ -15,7 +15,7 @@ pub fn normalize_eq_bands(bands: &[f32]) -> [f32; EQ_BANDS] {
 pub fn build_filter_bank(
     sample_rate: u32,
     channels: u16,
-    bands: [f32; EQ_BANDS],
+    bands: [f32; 9],
 ) -> Result<Vec<Vec<DirectForm1<f32>>>, String> {
     let mut bank = Vec::with_capacity(channels as usize);
     for _ in 0..channels as usize {

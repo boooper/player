@@ -1,5 +1,5 @@
 <script lang="ts">
-  import LastFmSection from '../LastFmSection.svelte';
+  import IntegrationsSection from '../IntegrationsSection.svelte';
   import { useSettingsContext } from '../context.svelte.js';
 
   const settings = useSettingsContext();
@@ -7,7 +7,7 @@
 
 <div class="space-y-8">
   <div class="page-section">
-    <LastFmSection
+    <IntegrationsSection
       isMobile={settings.isMobile}
       bind:lastFmApiKey={settings.lastFmApiKey}
       bind:lastFmSharedSecret={settings.lastFmSharedSecret}

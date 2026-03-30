@@ -1,5 +1,5 @@
 <script lang="ts">
-  import StatsSection from '../StatsSection.svelte';
+  import ServiceStatusSection from '../ServiceStatusSection.svelte';
   import ServersSection from '../ServersSection.svelte';
   import { useSettingsContext } from '../context.svelte.js';
 
@@ -8,7 +8,7 @@
 
 <div class="space-y-8">
   <div class="page-section">
-    <StatsSection refreshKey={settings.statsRefreshKey} />
+    <ServiceStatusSection refreshKey={settings.statsRefreshKey} />
   </div>
   <div class="page-section">
     <ServersSection
