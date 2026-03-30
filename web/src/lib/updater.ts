@@ -1,4 +1,4 @@
-import { check } from '@tauri-apps/plugin-updater';
+import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { isTauri } from '$lib/tauri';
 
@@ -9,8 +9,10 @@ export type AppUpdateInfo = {
   date?: string | null;
 };
 
-function normalizeUpdate(update: Awaited<ReturnType<typeof check>>): AppUpdateInfo | null {
-  if (!update) return null;
+// Cached update object so install doesn't need to re-check
+let pendingUpdate: Update | null = null;
+
+function normalizeUpdate(update: Update): AppUpdateInfo {
   return {
     version: update.version,
     currentVersion: update.currentVersion,
@@ -21,16 +23,22 @@ function normalizeUpdate(update: Awaited<ReturnType<typeof check>>): AppUpdateIn
 
 export async function checkForAppUpdate(): Promise<AppUpdateInfo | null> {
   if (!isTauri()) return null;
-  return normalizeUpdate(await check());
+  pendingUpdate = await check();
+  return pendingUpdate ? normalizeUpdate(pendingUpdate) : null;
 }
 
 export async function installAppUpdate(): Promise<AppUpdateInfo | null> {
   if (!isTauri()) return null;
 
-  const update = await check();
-  if (!update) return null;
+  // Reuse cached update from checkForAppUpdate; fall back to a fresh check
+  if (!pendingUpdate) {
+    pendingUpdate = await check();
+  }
+  if (!pendingUpdate) return null;
 
-  await update.downloadAndInstall();
+  const info = normalizeUpdate(pendingUpdate);
+  await pendingUpdate.downloadAndInstall();
+  pendingUpdate = null;
   await relaunch();
-  return normalizeUpdate(update);
+  return info;
 }
