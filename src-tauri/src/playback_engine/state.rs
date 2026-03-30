@@ -6,7 +6,7 @@ use std::{
 use biquad::DirectForm1;
 
 use super::{
-    dsp::{build_filter_bank, EQ_BANDS},
+    dsp::{build_filter_bank, EQ_BANDS, EQ_FREQUENCIES},
     types::{PlaybackStatus, TrackPayload},
 };
 
@@ -29,6 +29,7 @@ pub struct PlaybackState {
     ended: bool,
     volume: f32,
     eq_enabled: bool,
+    eq_frequencies: [f32; EQ_BANDS],
     eq_bands: [f32; EQ_BANDS],
     eq_filters: Vec<Vec<DirectForm1<f32>>>,
     output_channels: u16,
@@ -48,8 +49,9 @@ impl PlaybackState {
             ended: false,
             volume: 0.8,
             eq_enabled: false,
+            eq_frequencies: EQ_FREQUENCIES,
             eq_bands: [0.0; EQ_BANDS],
-            eq_filters: build_filter_bank(output_sample_rate, output_channels, [0.0; EQ_BANDS])?,
+            eq_filters: build_filter_bank(output_sample_rate, output_channels, EQ_FREQUENCIES, [0.0; EQ_BANDS])?,
             output_channels,
             output_sample_rate,
             crossfade: None,
@@ -69,6 +71,7 @@ impl PlaybackState {
             ended: self.ended,
             track_id: self.track.as_ref().map(|track| track.song.id.clone()),
             eq_enabled: self.eq_enabled,
+            eq_frequencies: self.eq_frequencies,
             eq_bands: self.eq_bands,
             volume: self.volume,
         }
@@ -144,8 +147,12 @@ impl PlaybackState {
     }
 
     fn reset_filters(&mut self) -> Result<(), String> {
-        self.eq_filters =
-            build_filter_bank(self.output_sample_rate, self.output_channels, self.eq_bands)?;
+        self.eq_filters = build_filter_bank(
+            self.output_sample_rate,
+            self.output_channels,
+            self.eq_frequencies,
+            self.eq_bands,
+        )?;
         Ok(())
     }
 
@@ -277,8 +284,9 @@ impl PlaybackState {
         self.volume = volume.clamp(0.0, 1.0);
     }
 
-    pub fn set_eq(&mut self, enabled: bool, bands: [f32; EQ_BANDS]) -> Result<(), String> {
+    pub fn set_eq(&mut self, enabled: bool, frequencies: [f32; EQ_BANDS], bands: [f32; EQ_BANDS]) -> Result<(), String> {
         self.eq_enabled = enabled;
+        self.eq_frequencies = frequencies;
         self.eq_bands = bands;
         self.reset_filters()
     }

@@ -2,7 +2,7 @@
   import { SlidersHorizontal, Power, AudioLines } from '@lucide/svelte';
   import { Slider } from '$lib/components/ui';
   import { toast } from 'svelte-sonner';
-  import { DEFAULT_EQ_BANDS, EQ_PRESETS, findEqPresetId, normalizeEqBands, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
+  import { DEFAULT_EQ_BANDS, DEFAULT_EQ_FREQUENCIES, EQ_PRESETS, findEqPresetId, normalizeEqBands, type EqBandValues, type EqFrequencyValues, type EqPresetId } from '$lib/audio/equalizer';
   import EqGraph from '$lib/components/ui/eq-graph/eq-graph.svelte';
   import { setAutostart } from '$lib/servers';
   import * as Select from '$lib/components/ui/select';
@@ -12,6 +12,7 @@
     crossfadeSeconds = $bindable(4),
     eqEnabled = $bindable(false),
     eqPreset = $bindable<EqPresetId>('flat'),
+    eqFrequencies = $bindable<EqFrequencyValues>(DEFAULT_EQ_FREQUENCIES),
     eqBands = $bindable<EqBandValues>(DEFAULT_EQ_BANDS),
     title = 'Application',
     description = 'System-level application behaviour.',
@@ -24,6 +25,7 @@
     crossfadeSeconds: number;
     eqEnabled: boolean;
     eqPreset: EqPresetId;
+    eqFrequencies: EqFrequencyValues;
     eqBands: EqBandValues;
     title?: string;
     description?: string;
@@ -54,12 +56,14 @@
     const preset = EQ_PRESETS.find((item) => item.id === nextPreset);
     if (!preset) return;
     eqPreset = preset.id;
+    eqFrequencies = [...preset.frequencies] as EqFrequencyValues;
     eqBands = [...preset.bands] as EqBandValues;
   }
 
-  function onEqBandsChange(next: EqBandValues) {
-    eqBands = next;
-    eqPreset = findEqPresetId(eqBands);
+  function onEqChange(nextFrequencies: EqFrequencyValues, nextBands: EqBandValues) {
+    eqFrequencies = nextFrequencies;
+    eqBands = nextBands;
+    eqPreset = findEqPresetId(eqBands, eqFrequencies);
   }
 </script>
 
@@ -164,7 +168,7 @@
         </div>
 
         <div class="mt-4">
-          <EqGraph bind:bands={eqBands} enabled={eqEnabled} onchange={onEqBandsChange} />
+          <EqGraph bind:frequencies={eqFrequencies} bind:bands={eqBands} enabled={eqEnabled} onchange={onEqChange} />
         </div>
       </div>
     {/if}

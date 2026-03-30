@@ -88,6 +88,7 @@
   const lastFmApiKey = $derived($backendSettings.lastFmApiKey);
   const lastFmConnected = $derived($backendSettings.lastFmConnected);
   const eqEnabled = $derived($backendSettings.eqEnabled ?? false);
+  const eqFrequencies = $derived($backendSettings.eqFrequencies);
   const eqBands = $derived(normalizeEqBands($backendSettings.eqBands));
 
   // ── Track derivations ─────────────────────────────────────────────────────
@@ -116,6 +117,7 @@
   createPlayerEqController({
     getCastActive: () => castActive,
     getEqEnabled: () => eqEnabled,
+    getEqFrequencies: () => eqFrequencies,
     getEqBands: () => eqBands
   });
 

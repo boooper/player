@@ -22,6 +22,7 @@ pub struct PlaybackStatus {
     pub ended: bool,
     pub track_id: Option<String>,
     pub eq_enabled: bool,
+    pub eq_frequencies: [f32; EQ_BANDS],
     pub eq_bands: [f32; EQ_BANDS],
     pub volume: f32,
 }

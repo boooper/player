@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{
-    playback_engine::{load_track_payload, normalize_eq_bands, PlaybackStatus},
+    playback_engine::{load_track_payload, normalize_eq_bands, normalize_eq_frequencies, PlaybackStatus},
     AppState,
 };
 
@@ -124,9 +124,10 @@ pub fn playback_set_volume(state: State<'_, AppState>, volume: f32) -> Result<()
 pub fn playback_set_eq(
     state: State<'_, AppState>,
     enabled: bool,
+    frequencies: Vec<f32>,
     bands: Vec<f32>,
 ) -> Result<(), String> {
-    playback_handle(&state)?.set_eq(enabled, normalize_eq_bands(&bands))
+    playback_handle(&state)?.set_eq(enabled, normalize_eq_frequencies(&frequencies), normalize_eq_bands(&bands))
 }
 
 #[tauri::command]

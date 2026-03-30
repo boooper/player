@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
+import { DEFAULT_EQ_BANDS, DEFAULT_EQ_FREQUENCIES, type EqBandValues, type EqFrequencyValues, type EqPresetId } from '$lib/audio/equalizer';
 
 export type BackendSettings = {
   lastFmApiKey: string;
@@ -12,6 +12,7 @@ export type BackendSettings = {
   crossfadeSeconds: number;
   eqEnabled: boolean;
   eqPreset: EqPresetId;
+  eqFrequencies: EqFrequencyValues;
   eqBands: EqBandValues;
   discordRpcEnabled: boolean;
   lyricsProvider?: string;
@@ -28,6 +29,7 @@ export const defaultBackendSettings: BackendSettings = {
   crossfadeSeconds: 4,
   eqEnabled: false,
   eqPreset: 'flat',
+  eqFrequencies: DEFAULT_EQ_FREQUENCIES,
   eqBands: DEFAULT_EQ_BANDS,
   discordRpcEnabled: true,
   lyricsProvider: 'auto',

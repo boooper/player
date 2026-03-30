@@ -11,6 +11,7 @@
     bind:crossfadeSeconds={settings.crossfadeSeconds}
     bind:eqEnabled={settings.eqEnabled}
     bind:eqPreset={settings.eqPreset}
+    bind:eqFrequencies={settings.eqFrequencies}
     bind:eqBands={settings.eqBands}
     title="Sound"
     description={settings.isMobile

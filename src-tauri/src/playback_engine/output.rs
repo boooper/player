@@ -113,9 +113,10 @@ impl PlaybackHandle {
     pub fn set_eq(
         &self,
         enabled: bool,
+        frequencies: [f32; super::dsp::EQ_BANDS],
         bands: [f32; super::dsp::EQ_BANDS],
     ) -> Result<(), String> {
-        self.with_state(|state| state.set_eq(enabled, bands))
+        self.with_state(|state| state.set_eq(enabled, frequencies, bands))
     }
 
     pub fn status(&self) -> Result<PlaybackStatus, String> {

@@ -23,6 +23,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "EQ_ENABLED",
     "EQ_PRESET",
     "EQ_BANDS",
+    "EQ_FREQUENCIES",
     "DISCORD_RPC_ENABLED",
     "LYRICS_PROVIDER",
 ];

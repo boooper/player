@@ -1,4 +1,4 @@
-import { normalizeEqBands, type EqBandValues } from '$lib/audio/equalizer';
+import { normalizeEqBands, normalizeEqFrequencies, type EqBandValues, type EqFrequencyValues } from '$lib/audio/equalizer';
 import type { Song } from './types';
 import type { DesktopPlaybackStatus } from './types';
 import { invoke } from './shared';
@@ -44,8 +44,8 @@ export async function desktopPlaybackSetVolume(volume: number): Promise<void> {
   await invoke('playback_set_volume', { volume });
 }
 
-export async function desktopPlaybackSetEq(enabled: boolean, bands: EqBandValues): Promise<void> {
-  await invoke('playback_set_eq', { enabled, bands: normalizeEqBands(bands) });
+export async function desktopPlaybackSetEq(enabled: boolean, frequencies: EqFrequencyValues, bands: EqBandValues): Promise<void> {
+  await invoke('playback_set_eq', { enabled, frequencies: normalizeEqFrequencies(frequencies), bands: normalizeEqBands(bands) });
 }
 
 export async function desktopPlaybackStatus(): Promise<DesktopPlaybackStatus> {

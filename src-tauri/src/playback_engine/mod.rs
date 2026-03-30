@@ -7,7 +7,7 @@ pub mod state;
 pub mod types;
 
 pub use cache::DiskCache;
-pub use dsp::normalize_eq_bands;
+pub use dsp::{normalize_eq_bands, normalize_eq_frequencies};
 pub use loader::load_track_payload;
 pub use output::PlaybackHandle;
 pub use types::{PlaybackStatus, TrackPayload};

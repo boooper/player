@@ -1,5 +1,5 @@
 import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart';
-import { DEFAULT_EQ_BANDS, findEqPresetId, normalizeEqBands, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
+import { DEFAULT_EQ_BANDS, DEFAULT_EQ_FREQUENCIES, findEqPresetId, normalizeEqBands, normalizeEqFrequencies, type EqBandValues, type EqFrequencyValues, type EqPresetId } from '$lib/audio/equalizer';
 import type { AppSettingsPayload } from './types';
 import { invoke } from './shared';
 
@@ -14,8 +14,15 @@ export async function fetchAppSettings(): Promise<AppSettingsPayload> {
   } catch {
     rawEqBands = DEFAULT_EQ_BANDS;
   }
+  let rawEqFrequencies: number[] = DEFAULT_EQ_FREQUENCIES;
+  try {
+    rawEqFrequencies = JSON.parse(s.EQ_FREQUENCIES ?? JSON.stringify(DEFAULT_EQ_FREQUENCIES));
+  } catch {
+    rawEqFrequencies = DEFAULT_EQ_FREQUENCIES;
+  }
   const eqBands = normalizeEqBands(rawEqBands);
-  const eqPreset = (s.EQ_PRESET as EqPresetId | undefined) ?? findEqPresetId(eqBands);
+  const eqFrequencies = normalizeEqFrequencies(rawEqFrequencies);
+  const eqPreset = (s.EQ_PRESET as EqPresetId | undefined) ?? findEqPresetId(eqBands, eqFrequencies);
   return {
     lastFmApiKey: s.LASTFM_API_KEY ?? '',
     lastFmSharedSecretConfigured: Boolean(s.LASTFM_SHARED_SECRET),
@@ -27,6 +34,7 @@ export async function fetchAppSettings(): Promise<AppSettingsPayload> {
     crossfadeSeconds: isNaN(rawCrossfade) ? 4 : Math.max(0, Math.min(12, rawCrossfade)),
     eqEnabled: s.EQ_ENABLED === 'true',
     eqPreset,
+    eqFrequencies,
     eqBands,
     discordRpcEnabled: s.DISCORD_RPC_ENABLED !== 'false',
     lyricsProvider: s.LYRICS_PROVIDER || 'auto',
@@ -55,6 +63,7 @@ export async function updateAppSettings(data: {
   crossfadeSeconds: number;
   eqEnabled: boolean;
   eqPreset: EqPresetId;
+  eqFrequencies: EqFrequencyValues;
   eqBands: EqBandValues;
   discordRpcEnabled: boolean;
   listenBrainzToken?: string;
@@ -69,6 +78,7 @@ export async function updateAppSettings(data: {
     CROSSFADE_SECONDS: String(Math.max(0, Math.min(12, data.crossfadeSeconds))),
     EQ_ENABLED: String(data.eqEnabled),
     EQ_PRESET: data.eqPreset,
+    EQ_FREQUENCIES: JSON.stringify(normalizeEqFrequencies(data.eqFrequencies)),
     EQ_BANDS: JSON.stringify(normalizeEqBands(data.eqBands)),
     DISCORD_RPC_ENABLED: String(data.discordRpcEnabled),
   };

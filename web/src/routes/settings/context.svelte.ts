@@ -3,7 +3,7 @@ import { toast } from 'svelte-sonner';
 import { platform } from '@tauri-apps/plugin-os';
 import { backendSettings, defaultBackendSettings } from '$lib/stores/backend-settings';
 import { requestLibraryRefresh } from '$lib/stores/ui-state';
-import { DEFAULT_EQ_BANDS, type EqBandValues, type EqPresetId } from '$lib/audio/equalizer';
+import { DEFAULT_EQ_BANDS, DEFAULT_EQ_FREQUENCIES, type EqBandValues, type EqFrequencyValues, type EqPresetId } from '$lib/audio/equalizer';
 import {
   fetchAppSettings,
   fetchLastFmStatus,
@@ -31,6 +31,7 @@ class SettingsController {
   crossfadeSeconds = $state(4);
   eqEnabled = $state(false);
   eqPreset = $state<EqPresetId>('flat');
+  eqFrequencies = $state<EqFrequencyValues>(DEFAULT_EQ_FREQUENCIES);
   eqBands = $state<EqBandValues>(DEFAULT_EQ_BANDS);
   discordRpcEnabled = $state(true);
   saving = $state(false);
@@ -78,6 +79,7 @@ class SettingsController {
         this.crossfadeSeconds = settings.crossfadeSeconds;
         this.eqEnabled = settings.eqEnabled;
         this.eqPreset = settings.eqPreset;
+        this.eqFrequencies = settings.eqFrequencies;
         this.eqBands = settings.eqBands;
         this.discordRpcEnabled = settings.discordRpcEnabled;
         this.lfmConnected = lfmStatus.connected;
@@ -94,6 +96,7 @@ class SettingsController {
           crossfadeSeconds: this.crossfadeSeconds,
           eqEnabled: this.eqEnabled,
           eqPreset: this.eqPreset,
+          eqFrequencies: this.eqFrequencies,
           eqBands: this.eqBands,
           discordRpcEnabled: this.discordRpcEnabled,
           lyricsProvider: this.lyricsProvider,
@@ -119,6 +122,7 @@ class SettingsController {
         crossfadeSeconds: this.crossfadeSeconds,
         eqEnabled: this.eqEnabled,
         eqPreset: this.eqPreset,
+        eqFrequencies: this.eqFrequencies,
         eqBands: this.eqBands,
         discordRpcEnabled: this.discordRpcEnabled,
         listenBrainzToken: this.listenBrainzToken,
@@ -136,6 +140,7 @@ class SettingsController {
         crossfadeSeconds: this.crossfadeSeconds,
         eqEnabled: this.eqEnabled,
         eqPreset: this.eqPreset,
+        eqFrequencies: this.eqFrequencies,
         eqBands: this.eqBands,
         discordRpcEnabled: this.discordRpcEnabled,
         lyricsProvider: this.lyricsProvider,
@@ -182,6 +187,7 @@ class SettingsController {
     this.crossfadeSeconds = defaultBackendSettings.crossfadeSeconds;
     this.eqEnabled = defaultBackendSettings.eqEnabled;
     this.eqPreset = defaultBackendSettings.eqPreset;
+    this.eqFrequencies = defaultBackendSettings.eqFrequencies;
     this.eqBands = defaultBackendSettings.eqBands;
     this.discordRpcEnabled = defaultBackendSettings.discordRpcEnabled;
     this.lyricsProvider = defaultBackendSettings.lyricsProvider ?? 'auto';

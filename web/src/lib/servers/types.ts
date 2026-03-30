@@ -1,5 +1,5 @@
 import type { ServiceStatus } from '@player/shared';
-import type { EqBandValues, EqPresetId } from '$lib/audio/equalizer';
+import type { EqBandValues, EqFrequencyValues, EqPresetId } from '$lib/audio/equalizer';
 
 export type { Song, Album, Playlist, AlbumDetail, PlaylistDetail } from '@player/shared';
 
@@ -23,6 +23,7 @@ export type AppSettingsPayload = {
   crossfadeSeconds: number;
   eqEnabled: boolean;
   eqPreset: EqPresetId;
+  eqFrequencies: EqFrequencyValues;
   eqBands: EqBandValues;
   discordRpcEnabled: boolean;
   lyricsProvider?: string;
@@ -97,6 +98,7 @@ export type DesktopPlaybackStatus = {
   ended: boolean;
   trackId: string | null;
   eqEnabled: boolean;
+  eqFrequencies: EqFrequencyValues;
   eqBands: EqBandValues;
   volume: number;
 };
