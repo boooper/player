@@ -231,7 +231,7 @@ export function createPlayerDesktopController(options: PlayerDesktopControllerOp
     if (!isCrossfade) options.setIsBuffering(true);
     loadPending = autoplay && !isCrossfade;
     isPlaying.set(autoplay);
-    if (!isCrossfade && autoplay) shouldAutoplay.set(false);
+    if (autoplay) shouldAutoplay.set(false);
     crossfadeInFlight = isCrossfade;
     desktopPlaybackLoad(track as Parameters<typeof desktopPlaybackLoad>[0], autoplay, crossfadeMs)
       .then(() => {

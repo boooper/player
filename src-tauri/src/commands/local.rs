@@ -61,8 +61,8 @@ fn field_score(field: &str, needle_normalized: &str, needle_words: &[String]) ->
         return 0.0;
     }
 
-    // For each query word, find the best-matching field word (handles per-word typos)
-    needle_words
+    // Score each query word against its best-matching field word.
+    let mut per_word: Vec<f64> = needle_words
         .iter()
         .map(|nw| {
             field_words
@@ -70,8 +70,14 @@ fn field_score(field: &str, needle_normalized: &str, needle_words: &[String]) ->
                 .map(|fw| strsim::jaro_winkler(nw, fw))
                 .fold(0.0_f64, f64::max)
         })
-        .sum::<f64>()
-        / needle_words.len() as f64
+        .collect();
+
+    // Take only the top min(field_words, query_words) scores so that extra
+    // "context" words in the query (e.g. "she knows to much mac miller") don't
+    // dilute the average against a shorter field ("she knows mac miller").
+    per_word.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let effective = field_words.len().min(needle_words.len());
+    per_word[..effective].iter().sum::<f64>() / effective as f64
 }
 
 fn supported_extension(path: &Path) -> bool {
@@ -404,9 +410,13 @@ pub async fn search(profile: &ActiveProfile, query: &str, count: u32) -> Result<
     let mut scored: Vec<(f64, Song)> = songs
         .into_iter()
         .filter_map(|song| {
+            let title_artist = format!("{} {}", song.title, song.artist);
+            let artist_title = format!("{} {}", song.artist, song.title);
             let score = field_score(&song.title, &needle, &needle_words)
                 .max(field_score(&song.artist, &needle, &needle_words))
-                .max(field_score(&song.album, &needle, &needle_words));
+                .max(field_score(&song.album, &needle, &needle_words))
+                .max(field_score(&title_artist, &needle, &needle_words))
+                .max(field_score(&artist_title, &needle, &needle_words));
 
             if score >= FUZZY_THRESHOLD {
                 Some((score, song))

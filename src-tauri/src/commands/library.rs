@@ -1,10 +1,86 @@
 #[cfg(desktop)]
 use std::collections::HashMap;
+use std::collections::HashSet;
 use futures::future::join_all;
 use tauri::State;
 use url::Url;
 use crate::{AppState, commands::profiles::{get_active_profile, ActiveProfile}};
 use super::media::{Song, Album, Playlist, PlaylistDetail, AlbumDetail, SearchBundle};
+
+/// Score how well a song's title+artist covers the query words (simple containment).
+/// Used to re-rank merged multi-query server results.
+fn cross_field_score(song: &Song, query_words: &[&str]) -> f64 {
+    if query_words.is_empty() { return 0.0; }
+    let combined = format!("{} {}", song.title, song.artist).to_lowercase();
+    let matched = query_words.iter().filter(|&&w| combined.contains(w)).count();
+    matched as f64 / query_words.len() as f64
+}
+
+/// For a multi-word query, run the full query plus a title-biased and artist-biased
+/// sub-query in parallel, then merge, deduplicate, and re-rank client-side.
+async fn server_search_songs(
+    http: &reqwest::Client,
+    p: &ActiveProfile,
+    query: &str,
+    count: u32,
+) -> Result<Vec<Song>, String> {
+    let words: Vec<&str> = query.split_whitespace().collect();
+
+    // Simple case: short queries go straight to the server.
+    if words.len() < 3 {
+        return if is_jf(p) {
+            crate::commands::jellyfin::search(http, p, query, count).await
+        } else if is_plex(p) {
+            crate::commands::plex::search(http, p, query, count).await
+        } else {
+            crate::commands::subsonic::search(http, p, query, count).await
+        };
+    }
+
+    let mid = words.len() / 2;
+    let first_half = words[..mid].join(" ");
+    let second_half = words[mid..].join(" ");
+    let fetch_count = count * 2; // fetch more to have room after dedup + re-rank
+    let fetch_str = fetch_count.to_string();
+    let count_str = count.to_string();
+
+    macro_rules! do_search {
+        ($q:expr, $cnt:expr) => {
+            async {
+                let q: &str = $q;
+                let c: &str = $cnt;
+                if is_jf(p) { crate::commands::jellyfin::search(http, p, q, c.parse().unwrap_or(count)).await }
+                else if is_plex(p) { crate::commands::plex::search(http, p, q, c.parse().unwrap_or(count)).await }
+                else { crate::commands::subsonic::search(http, p, q, c.parse().unwrap_or(count)).await }
+            }
+        };
+    }
+
+    let (full, first, second) = tokio::join!(
+        do_search!(query, &count_str),
+        do_search!(&first_half, &fetch_str),
+        do_search!(&second_half, &fetch_str)
+    );
+
+    let mut all: Vec<Song> = full.unwrap_or_default();
+    let mut seen: HashSet<String> = all.iter().map(|s| s.id.clone()).collect();
+    for song in first.unwrap_or_default().into_iter().chain(second.unwrap_or_default()) {
+        if seen.insert(song.id.clone()) {
+            all.push(song);
+        }
+    }
+
+    // Re-rank by how well the song's title+artist covers the query words.
+    let lc_words: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
+    let lc_refs: Vec<&str> = lc_words.iter().map(String::as_str).collect();
+    let mut scored: Vec<(f64, Song)> = all
+        .into_iter()
+        .map(|song| (cross_field_score(&song, &lc_refs), song))
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(scored.into_iter().take(count as usize).map(|(_, s)| s).collect())
+}
 
 
 fn is_jf(p: &ActiveProfile) -> bool {
@@ -183,13 +259,7 @@ pub async fn library_search(
     let p = get_active_profile(&state)?;
     if is_local(&p) { return crate::commands::local::search(&p, &query, count.unwrap_or(20)).await; }
     let proxy = needs_artwork_proxy(&p);
-    let songs = if is_jf(&p) {
-        crate::commands::jellyfin::search(&state.http, &p, &query, count.unwrap_or(20)).await?
-    } else if is_plex(&p) {
-        crate::commands::plex::search(&state.http, &p, &query, count.unwrap_or(20)).await?
-    } else {
-        crate::commands::subsonic::search(&state.http, &p, &query, count.unwrap_or(20)).await?
-    };
+    let songs = server_search_songs(&state.http, &p, &query, count.unwrap_or(20)).await?;
     Ok(cache_song_covers(&state, songs, proxy).await)
 }
 
@@ -211,14 +281,8 @@ pub async fn library_search_bundle(
     let songs_fut = async {
         if is_local(&p) {
             crate::commands::local::search(&p, &query, song_limit).await
-        } else if is_jf(&p) {
-            let songs = crate::commands::jellyfin::search(&state.http, &p, &query, song_limit).await?;
-            Ok(cache_song_covers(&state, songs, proxy).await)
-        } else if is_plex(&p) {
-            let songs = crate::commands::plex::search(&state.http, &p, &query, song_limit).await?;
-            Ok(cache_song_covers(&state, songs, proxy).await)
         } else {
-            let songs = crate::commands::subsonic::search(&state.http, &p, &query, song_limit).await?;
+            let songs = server_search_songs(&state.http, &p, &query, song_limit).await?;
             Ok(cache_song_covers(&state, songs, proxy).await)
         }
     };
