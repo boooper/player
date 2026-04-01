@@ -9,6 +9,11 @@
   <PlaybackSection
     bind:autostartEnabled={settings.autostartEnabled}
     bind:crossfadeSeconds={settings.crossfadeSeconds}
+    bind:gaplessEnabled={settings.gaplessEnabled}
+    bind:normalizationEnabled={settings.normalizationEnabled}
+    bind:normalizationMode={settings.normalizationMode}
+    bind:loudnessCompensationEnabled={settings.loudnessCompensationEnabled}
+    bind:smartCrossfadeEnabled={settings.smartCrossfadeEnabled}
     bind:eqEnabled={settings.eqEnabled}
     bind:eqPreset={settings.eqPreset}
     bind:eqFrequencies={settings.eqFrequencies}

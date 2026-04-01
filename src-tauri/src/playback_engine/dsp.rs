@@ -20,6 +20,23 @@ pub fn normalize_eq_frequencies(frequencies: &[f32]) -> [f32; EQ_BANDS] {
     normalized
 }
 
+/// Computes per-band loudness compensation gains (dB) based on the current volume.
+/// At lower volumes the human ear perceives less bass and treble (equal-loudness /
+/// Fletcher-Munson effect), so we boost those frequencies to compensate.
+pub fn compute_loudness_compensation(volume: f32) -> [f32; EQ_BANDS] {
+    // Maximum per-band boosts (dB) applied at the lowest perceptible volume.
+    // Mapped to EQ_FREQUENCIES: [60, 170, 310, 600, 1000, 3000, 6000, 12000, 16000]
+    const MAX_COMP: [f32; EQ_BANDS] = [9.0, 5.0, 2.0, 1.0, 0.0, 0.0, 1.0, 3.0, 5.0];
+    // Strength: 0.0 at vol=1.0 (reference), 1.0 at vol≈0.01 (−40 dB)
+    let db_down = -20.0 * volume.max(0.001_f32).log10();
+    let strength = (db_down / 40.0).clamp(0.0, 1.0);
+    let mut comp = [0.0_f32; EQ_BANDS];
+    for (c, max) in comp.iter_mut().zip(MAX_COMP.iter()) {
+        *c = max * strength;
+    }
+    comp
+}
+
 pub fn build_filter_bank(
     sample_rate: u32,
     channels: u16,

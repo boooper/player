@@ -29,6 +29,11 @@ class SettingsController {
   isMobile = $state(false);
   autostartEnabled = $state(false);
   crossfadeSeconds = $state(4);
+  gaplessEnabled = $state(true);
+  normalizationEnabled = $state(false);
+  normalizationMode = $state<'lufs' | 'rms'>('lufs');
+  loudnessCompensationEnabled = $state(false);
+  smartCrossfadeEnabled = $state(false);
   eqEnabled = $state(false);
   eqPreset = $state<EqPresetId>('flat');
   eqFrequencies = $state<EqFrequencyValues>(DEFAULT_EQ_FREQUENCIES);
@@ -55,6 +60,11 @@ class SettingsController {
         this.listenBrainzUsername,
         this.listenBrainzToken,
         this.crossfadeSeconds,
+        this.gaplessEnabled,
+        this.normalizationEnabled,
+        this.normalizationMode,
+        this.loudnessCompensationEnabled,
+        this.smartCrossfadeEnabled,
         this.eqEnabled,
         this.eqPreset,
         ...this.eqFrequencies,
@@ -109,6 +119,11 @@ class SettingsController {
         this.listenBrainzTokenConfigured = settings.listenBrainzTokenConfigured;
         this.lyricsProvider = settings.lyricsProvider ?? 'auto';
         this.crossfadeSeconds = settings.crossfadeSeconds;
+        this.gaplessEnabled = settings.gaplessEnabled;
+        this.normalizationEnabled = settings.normalizationEnabled;
+        this.normalizationMode = settings.normalizationMode;
+        this.loudnessCompensationEnabled = settings.loudnessCompensationEnabled;
+        this.smartCrossfadeEnabled = settings.smartCrossfadeEnabled;
         this.eqEnabled = settings.eqEnabled;
         this.eqPreset = settings.eqPreset;
         this.eqFrequencies = settings.eqFrequencies;
@@ -126,6 +141,11 @@ class SettingsController {
           listenBrainzUsername: this.listenBrainzUsername,
           listenBrainzToken: '',
           crossfadeSeconds: this.crossfadeSeconds,
+          gaplessEnabled: this.gaplessEnabled,
+          normalizationEnabled: this.normalizationEnabled,
+          normalizationMode: this.normalizationMode,
+          loudnessCompensationEnabled: this.loudnessCompensationEnabled,
+          smartCrossfadeEnabled: this.smartCrossfadeEnabled,
           eqEnabled: this.eqEnabled,
           eqPreset: this.eqPreset,
           eqFrequencies: this.eqFrequencies,
@@ -153,6 +173,11 @@ class SettingsController {
         lyricsProvider: this.lyricsProvider,
         listenBrainzUsername: this.listenBrainzUsername,
         crossfadeSeconds: this.crossfadeSeconds,
+        gaplessEnabled: this.gaplessEnabled,
+        normalizationEnabled: this.normalizationEnabled,
+        normalizationMode: this.normalizationMode,
+        loudnessCompensationEnabled: this.loudnessCompensationEnabled,
+        smartCrossfadeEnabled: this.smartCrossfadeEnabled,
         eqEnabled: this.eqEnabled,
         eqPreset: this.eqPreset,
         eqFrequencies: this.eqFrequencies,
@@ -171,6 +196,11 @@ class SettingsController {
         listenBrainzUsername: this.listenBrainzUsername,
         listenBrainzToken: this.listenBrainzToken,
         crossfadeSeconds: this.crossfadeSeconds,
+        gaplessEnabled: this.gaplessEnabled,
+        normalizationEnabled: this.normalizationEnabled,
+        normalizationMode: this.normalizationMode,
+        loudnessCompensationEnabled: this.loudnessCompensationEnabled,
+        smartCrossfadeEnabled: this.smartCrossfadeEnabled,
         eqEnabled: this.eqEnabled,
         eqPreset: this.eqPreset,
         eqFrequencies: this.eqFrequencies,
@@ -218,6 +248,11 @@ class SettingsController {
     this.recommendationProvider = defaultBackendSettings.recommendationProvider;
     this.metadataProvider = defaultBackendSettings.metadataProvider;
     this.crossfadeSeconds = defaultBackendSettings.crossfadeSeconds;
+    this.gaplessEnabled = defaultBackendSettings.gaplessEnabled;
+    this.normalizationEnabled = defaultBackendSettings.normalizationEnabled;
+    this.normalizationMode = defaultBackendSettings.normalizationMode;
+    this.loudnessCompensationEnabled = defaultBackendSettings.loudnessCompensationEnabled;
+    this.smartCrossfadeEnabled = defaultBackendSettings.smartCrossfadeEnabled;
     this.eqEnabled = defaultBackendSettings.eqEnabled;
     this.eqPreset = defaultBackendSettings.eqPreset;
     this.eqFrequencies = defaultBackendSettings.eqFrequencies;

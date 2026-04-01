@@ -104,10 +104,32 @@ impl PlaybackHandle {
     }
 
     pub fn set_volume(&self, volume: f32) -> Result<(), String> {
+        self.with_state(|state| state.set_volume(volume))
+    }
+
+    pub fn set_loudness_compensation(&self, enabled: bool) -> Result<(), String> {
+        self.with_state(|state| state.set_loudness_compensation(enabled))
+    }
+
+    pub fn set_normalization(&self, enabled: bool) -> Result<(), String> {
         self.with_state(|state| {
-            state.set_volume(volume);
+            state.set_normalization(enabled);
             Ok(())
         })
+    }
+
+    pub fn set_normalization_mode(&self, mode: super::state::NormalizationMode) -> Result<(), String> {
+        self.with_state(|state| {
+            state.set_normalization_mode(mode);
+            Ok(())
+        })
+    }
+
+    pub fn normalization_mode(&self) -> Result<super::state::NormalizationMode, String> {
+        self.state
+            .lock()
+            .map(|state| state.normalization_mode())
+            .map_err(|e| e.to_string())
     }
 
     pub fn set_eq(
@@ -198,20 +220,40 @@ where
     }
 
     let channels = state.output_channels();
-    let Some(track) = state.current_track() else {
+    let Some(mut track) = state.current_track() else {
         write_silence(output);
         state.clear_playing();
         return;
     };
 
-    let total_frames = track.samples.len() / channels;
+    let norm_enabled = state.normalization_enabled();
+    let mut incoming_norm = if norm_enabled { track.norm_gain } else { 1.0 };
+    let outgoing_norm = if norm_enabled { state.crossfade_outgoing_norm_gain() } else { 1.0 };
+
     for frame in output.chunks_mut(channels) {
+        let total_frames = track.samples.len() / channels;
+
         if state.current_frame_index() >= total_frames {
-            state.mark_ended();
-            for sample in frame.iter_mut() {
-                *sample = T::from_sample(0.0);
+            // Try gapless: swap in the preloaded track and keep going.
+            if state.advance_to_preloaded_if_ready() {
+                if let Some(next_track) = state.current_track() {
+                    track = next_track;
+                    incoming_norm = if norm_enabled { track.norm_gain } else { 1.0 };
+                    // Fall through to output the first frame of the new track.
+                } else {
+                    // advance succeeded but track is somehow gone — silence.
+                    for sample in frame.iter_mut() {
+                        *sample = T::from_sample(0.0);
+                    }
+                    continue;
+                }
+            } else {
+                state.mark_ended();
+                for sample in frame.iter_mut() {
+                    *sample = T::from_sample(0.0);
+                }
+                continue;
             }
-            continue;
         }
 
         let Some(input_frame) = samples_for_frame(&track.samples, state.current_frame_index(), channels) else {
@@ -223,15 +265,17 @@ where
         };
 
         let volume = state.volume();
-        let eq_enabled = state.eq_enabled();
+        let filter_active = state.filter_active();
         for (channel, sample) in frame.iter_mut().enumerate() {
-            let incoming = input_frame[channel];
+            let incoming = input_frame[channel] * incoming_norm;
             let mixed = match state.crossfade_outgoing_sample(channel) {
-                Some((outgoing, progress)) => incoming * progress + outgoing * (1.0 - progress),
+                Some((outgoing, progress)) => {
+                    incoming * progress + outgoing * outgoing_norm * (1.0 - progress)
+                }
                 None => incoming,
             };
             let mut value = mixed * volume;
-            if eq_enabled {
+            if filter_active {
                 value = state.filters_mut()[channel]
                     .iter_mut()
                     .fold(value, |acc, filter| biquad::Biquad::run(filter, acc));

@@ -10,6 +10,11 @@ export type BackendSettings = {
   listenBrainzUsername: string;
   listenBrainzToken: string;
   crossfadeSeconds: number;
+  gaplessEnabled: boolean;
+  normalizationEnabled: boolean;
+  normalizationMode: 'lufs' | 'rms';
+  loudnessCompensationEnabled: boolean;
+  smartCrossfadeEnabled: boolean;
   eqEnabled: boolean;
   eqPreset: EqPresetId;
   eqFrequencies: EqFrequencyValues;
@@ -27,6 +32,11 @@ export const defaultBackendSettings: BackendSettings = {
   listenBrainzUsername: '',
   listenBrainzToken: '',
   crossfadeSeconds: 4,
+  gaplessEnabled: true,
+  normalizationEnabled: false,
+  normalizationMode: 'lufs' as const,
+  loudnessCompensationEnabled: false,
+  smartCrossfadeEnabled: false,
   eqEnabled: false,
   eqPreset: 'flat',
   eqFrequencies: DEFAULT_EQ_FREQUENCIES,

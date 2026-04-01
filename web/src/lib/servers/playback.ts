@@ -48,6 +48,18 @@ export async function desktopPlaybackSetEq(enabled: boolean, frequencies: EqFreq
   await invoke('playback_set_eq', { enabled, frequencies: normalizeEqFrequencies(frequencies), bands: normalizeEqBands(bands) });
 }
 
+export async function desktopPlaybackSetNormalization(enabled: boolean): Promise<void> {
+  await invoke('playback_set_normalization', { enabled });
+}
+
+export async function desktopPlaybackSetNormalizationMode(mode: 'lufs' | 'rms'): Promise<void> {
+  await invoke('playback_set_normalization_mode', { mode });
+}
+
+export async function desktopPlaybackSetLoudnessCompensation(enabled: boolean): Promise<void> {
+  await invoke('playback_set_loudness_compensation', { enabled });
+}
+
 export async function desktopPlaybackStatus(): Promise<DesktopPlaybackStatus> {
   return invoke<DesktopPlaybackStatus>('playback_status');
 }

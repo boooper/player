@@ -11,7 +11,7 @@ use crate::{
     AppState,
 };
 
-use super::{decode::decode_audio, output::PlaybackHandle};
+use super::{decode::{compute_norm_gain, decode_audio, estimate_bpm, find_natural_end_frame}, output::PlaybackHandle};
 
 fn is_local_stream(stream_url: &str) -> bool {
     if let Ok(url) = Url::parse(stream_url) {
@@ -144,9 +144,19 @@ pub async fn load_track_payload(
                 .await
                 .map_err(|e| e.to_string())??;
 
+            let norm_target = playback_handle(state)?.normalization_mode()
+                .map(|m| m.target_dbfs())
+                .unwrap_or(-18.0);
+            let norm_gain = compute_norm_gain(&samples, norm_target);
+            let natural_end_frame = find_natural_end_frame(&samples, output_channels as usize, output_sample_rate);
+            let smart_end_secs = natural_end_frame as f64 / output_sample_rate as f64;
+            let bpm = estimate_bpm(&samples, output_channels as usize, output_sample_rate);
             let payload = TrackPayload {
                 song: requested_song.clone(),
                 samples: Arc::new(samples),
+                norm_gain,
+                smart_end_secs,
+                bpm,
             };
             playback_handle(state)?.cache_track(payload.clone())?;
             Ok(payload)

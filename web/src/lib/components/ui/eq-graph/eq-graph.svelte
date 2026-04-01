@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { tweened } from 'svelte/motion';
+  import { cubicOut } from 'svelte/easing';
   import { EQ_MAX_GAIN, EQ_MIN_GAIN, normalizeEqBands, normalizeEqFrequencies, type EqBandValues, type EqFrequencyValues } from '$lib/audio/equalizer';
 
   let {
@@ -61,7 +63,20 @@
     })
   );
 
-  const linePoints = $derived(points.map((p) => `${p.x},${p.y}`).join(' '));
+  // Tweened y-positions for the SVG line — animates on preset changes, instant during drag
+  const displayYs = tweened<number[]>(
+    frequencies.map((_, index) => gainToY(bands[index])),
+    { duration: 250, easing: cubicOut }
+  );
+
+  $effect(() => {
+    const ys = points.map((p) => p.y);
+    displayYs.set(ys, { duration: activeDragIndex !== null ? 0 : 250 });
+  });
+
+  const linePoints = $derived(
+    points.map((p, i) => `${p.x},${$displayYs[i] ?? p.y}`).join(' ')
+  );
 
   function updateGain(index: number, gain: number) {
     const nextBands = [...bands] as EqBandValues;
@@ -215,23 +230,25 @@
           </svg>
 
           {#each points as point, index (point.freq)}
+            {@const isActive = activeDragIndex === index}
             <button
               type="button"
-              class="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 cursor-move items-center justify-center rounded-full transition disabled:cursor-not-allowed"
+              class="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 cursor-move items-center justify-center rounded-full disabled:cursor-not-allowed {activeDragIndex === null ? 'transition-[top] duration-200 ease-out' : ''}"
               style={`left: ${point.x}%; top: ${(point.y / plotHeight) * 100}%;`}
               onpointerdown={(event) => startDrag(index, event)}
               onpointerup={stopDrag}
               disabled={!enabled}
               aria-label={`Band ${index + 1} EQ`}
             >
-              <span class="flex h-3.5 w-3.5 rounded-full border border-primary/70 bg-primary shadow-[0_0_0_5px_color-mix(in_srgb,var(--primary)_18%,transparent)]"></span>
+              <span class="flex rounded-full border border-primary/70 bg-primary transition-[height,width,box-shadow] duration-150 {isActive ? 'h-4 w-4 shadow-[0_0_0_7px_color-mix(in_srgb,var(--primary)_28%,transparent)]' : 'h-3.5 w-3.5 shadow-[0_0_0_5px_color-mix(in_srgb,var(--primary)_18%,transparent)]'}"></span>
             </button>
           {/each}
         </div>
       </div>
 
       <!-- Knobs -->
-      <div class="grid grid-cols-9 rounded-b-[24px] border border-t-0 border-border/40 bg-card/60 px-8 py-4 {enabled ? '' : 'opacity-50'}">
+      <div class="overflow-x-auto rounded-b-[24px] border border-t-0 border-border/40 bg-card/60 {enabled ? '' : 'opacity-50'}">
+      <div class="grid grid-cols-9 min-w-[480px] px-8 py-4">
         {#each points as point, index (point.freq)}
           {@const fillPath = knobFillPath(index, point.freq)}
           <div class="flex flex-col items-center gap-1">
@@ -273,6 +290,7 @@
             <p class="text-[10px] font-semibold tabular-nums text-primary">{point.gain > 0 ? '+' : ''}{point.gain.toFixed(0)} dB</p>
           </div>
         {/each}
+      </div>
       </div>
 
 </div>

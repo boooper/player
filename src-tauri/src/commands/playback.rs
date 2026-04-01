@@ -2,6 +2,7 @@ use tauri::State;
 
 use crate::{
     playback_engine::{load_track_payload, normalize_eq_bands, normalize_eq_frequencies, PlaybackStatus},
+    playback_engine::state::NormalizationMode,
     AppState,
 };
 
@@ -118,6 +119,22 @@ pub fn playback_seek(state: State<'_, AppState>, position: f64) -> Result<(), St
 #[tauri::command]
 pub fn playback_set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
     playback_handle(&state)?.set_volume(volume)
+}
+
+#[tauri::command]
+pub fn playback_set_normalization(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    playback_handle(&state)?.set_normalization(enabled)
+}
+
+#[tauri::command]
+pub fn playback_set_normalization_mode(state: State<'_, AppState>, mode: String) -> Result<(), String> {
+    let norm_mode = if mode == "rms" { NormalizationMode::Rms } else { NormalizationMode::Lufs };
+    playback_handle(&state)?.set_normalization_mode(norm_mode)
+}
+
+#[tauri::command]
+pub fn playback_set_loudness_compensation(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    playback_handle(&state)?.set_loudness_compensation(enabled)
 }
 
 #[tauri::command]

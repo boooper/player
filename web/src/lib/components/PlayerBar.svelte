@@ -127,6 +127,11 @@
     getSeekDragging: () => seekDragging,
     getIsBuffering: () => isBuffering,
     getCrossfadeSeconds: () => $backendSettings.crossfadeSeconds ?? 4,
+    getGaplessEnabled: () => $backendSettings.gaplessEnabled ?? true,
+    getNormalizationEnabled: () => $backendSettings.normalizationEnabled ?? false,
+    getNormalizationMode: () => $backendSettings.normalizationMode ?? 'lufs',
+    getLoudnessCompensationEnabled: () => $backendSettings.loudnessCompensationEnabled ?? false,
+    getSmartCrossfadeEnabled: () => $backendSettings.smartCrossfadeEnabled ?? false,
     setIsBuffering: (v) => { isBuffering = v; },
     onRestoreCastSession: () => castController.restoreSession()
   });

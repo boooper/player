@@ -31,6 +31,49 @@ fn normalize(value: &str) -> String {
         .collect()
 }
 
+fn normalize_words(value: &str) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
+    value
+        .trim()
+        .to_lowercase()
+        .nfd()
+        .filter(|c| !unicode_normalization::char::is_combining_mark(*c))
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .map(String::from)
+        .collect()
+}
+
+fn field_score(field: &str, needle_normalized: &str, needle_words: &[String]) -> f64 {
+    let norm_field = normalize(field);
+
+    if norm_field.contains(needle_normalized) {
+        return 1.0;
+    }
+
+    if needle_words.is_empty() {
+        return 0.0;
+    }
+
+    let field_words = normalize_words(field);
+    if field_words.is_empty() {
+        return 0.0;
+    }
+
+    // For each query word, find the best-matching field word (handles per-word typos)
+    needle_words
+        .iter()
+        .map(|nw| {
+            field_words
+                .iter()
+                .map(|fw| strsim::jaro_winkler(nw, fw))
+                .fold(0.0_f64, f64::max)
+        })
+        .sum::<f64>()
+        / needle_words.len() as f64
+}
+
 fn supported_extension(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_lowercase()),
@@ -351,20 +394,31 @@ pub async fn search(profile: &ActiveProfile, query: &str, count: u32) -> Result<
     let (songs, _) = scan_local_library(&root_path(profile))?;
     let needle = normalize(query);
 
-    let filtered = if needle.is_empty() {
-        songs
-    } else {
-        songs
-            .into_iter()
-            .filter(|song| {
-                normalize(&song.title).contains(&needle)
-                    || normalize(&song.artist).contains(&needle)
-                    || normalize(&song.album).contains(&needle)
-            })
-            .collect()
-    };
+    if needle.is_empty() {
+        return Ok(songs.into_iter().take(count as usize).collect());
+    }
 
-    Ok(filtered.into_iter().take(count as usize).collect())
+    let needle_words = normalize_words(query);
+    const FUZZY_THRESHOLD: f64 = 0.82;
+
+    let mut scored: Vec<(f64, Song)> = songs
+        .into_iter()
+        .filter_map(|song| {
+            let score = field_score(&song.title, &needle, &needle_words)
+                .max(field_score(&song.artist, &needle, &needle_words))
+                .max(field_score(&song.album, &needle, &needle_words));
+
+            if score >= FUZZY_THRESHOLD {
+                Some((score, song))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(scored.into_iter().take(count as usize).map(|(_, s)| s).collect())
 }
 
 pub async fn similar(_profile: &ActiveProfile, _song_id: &str, _count: u32) -> Result<Vec<Song>, String> {

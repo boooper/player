@@ -10,6 +10,11 @@
   let {
     autostartEnabled = $bindable(false),
     crossfadeSeconds = $bindable(4),
+    gaplessEnabled = $bindable(true),
+    normalizationEnabled = $bindable(false),
+    normalizationMode = $bindable<'lufs' | 'rms'>('lufs'),
+    loudnessCompensationEnabled = $bindable(false),
+    smartCrossfadeEnabled = $bindable(false),
     eqEnabled = $bindable(false),
     eqPreset = $bindable<EqPresetId>('flat'),
     eqFrequencies = $bindable<EqFrequencyValues>(DEFAULT_EQ_FREQUENCIES),
@@ -23,6 +28,11 @@
   }: {
     autostartEnabled: boolean;
     crossfadeSeconds: number;
+    gaplessEnabled: boolean;
+    normalizationEnabled: boolean;
+    normalizationMode: 'lufs' | 'rms';
+    loudnessCompensationEnabled: boolean;
+    smartCrossfadeEnabled: boolean;
     eqEnabled: boolean;
     eqPreset: EqPresetId;
     eqFrequencies: EqFrequencyValues;
@@ -38,6 +48,25 @@
   const HeaderIcon = $derived(icon === 'sound' ? AudioLines : Power);
 
   let autostartLoading = $state(false);
+  // Remember the last crossfade duration so switching away and back doesn't lose it.
+  let lastCrossfadeSeconds = $state(crossfadeSeconds > 0 ? crossfadeSeconds : 4);
+
+  const transitionMode = $derived(
+    crossfadeSeconds > 0 ? 'crossfade' : gaplessEnabled ? 'gapless' : 'off'
+  );
+
+  function setTransitionMode(mode: string) {
+    if (mode === 'crossfade') {
+      gaplessEnabled = false;
+      crossfadeSeconds = lastCrossfadeSeconds;
+    } else if (mode === 'gapless') {
+      gaplessEnabled = true;
+      crossfadeSeconds = 0;
+    } else {
+      gaplessEnabled = false;
+      crossfadeSeconds = 0;
+    }
+  }
 
   async function toggleAutostart() {
     autostartLoading = true;
@@ -101,25 +130,131 @@
 
     {#if showPlayback}
       <div class="{showAutostart ? 'mt-5 border-t border-border/60 pt-5' : ''}">
+
+        <!-- Track transitions -->
         <div class="flex items-center justify-between gap-4">
           <div>
-            <p class="text-sm font-medium">Crossfade</p>
-            <p class="text-xs text-muted-foreground">Overlap duration between tracks during local playback.</p>
+            <p class="text-sm font-medium">Track transitions</p>
+            <p class="text-xs text-muted-foreground">
+              {#if transitionMode === 'crossfade'}Blend the end of one track into the next.
+              {:else if transitionMode === 'gapless'}Seamlessly connect tracks with no silence.
+              {:else}Tracks play one after another with a brief pause.{/if}
+            </p>
           </div>
-          <span class="min-w-12 text-right text-sm font-semibold tabular-nums">{crossfadeSeconds.toFixed(1)}s</span>
+          <Select.Root type="single" value={transitionMode} onValueChange={setTransitionMode}>
+            <Select.Trigger class="w-36 shrink-0">
+              {transitionMode === 'crossfade' ? 'Crossfade' : transitionMode === 'gapless' ? 'Gapless' : 'Off'}
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value="off">Off</Select.Item>
+              <Select.Item value="gapless">Gapless</Select.Item>
+              <Select.Item value="crossfade">Crossfade</Select.Item>
+            </Select.Content>
+          </Select.Root>
         </div>
 
+        {#if transitionMode === 'crossfade'}
+          <div class="mt-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-xs text-muted-foreground">Duration</p>
+              <span class="text-xs font-semibold tabular-nums text-muted-foreground">{crossfadeSeconds.toFixed(1)}s</span>
+            </div>
+            <Slider
+              class="mt-2 h-2 w-full cursor-pointer appearance-none rounded-full bg-input accent-primary"
+              type="multiple"
+              min={0.5}
+              max={12}
+              step={0.5}
+              value={[crossfadeSeconds]}
+              onValueChange={(value) => {
+                crossfadeSeconds = value[0] ?? 0.5;
+                lastCrossfadeSeconds = crossfadeSeconds;
+              }}
+              aria-label="Crossfade duration"
+            />
+          </div>
 
-         <Slider
-          class="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full bg-input accent-primary"
-          type="multiple"
-          min={0}
-          max={12}
-          step={0.5}
-          value={[crossfadeSeconds]}
-          onValueChange={(value) => { crossfadeSeconds = value[0] ?? 0; }}
-          aria-label="Crossfade duration"
-        />
+          <label class="mt-4 flex cursor-pointer items-center gap-3" for="smart-crossfade-toggle">
+            <input
+              id="smart-crossfade-toggle"
+              type="checkbox"
+              class="sr-only"
+              checked={smartCrossfadeEnabled}
+              onchange={() => { smartCrossfadeEnabled = !smartCrossfadeEnabled; }}
+            />
+            <div
+              aria-hidden="true"
+              class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors {smartCrossfadeEnabled ? 'bg-primary' : 'bg-input'}"
+            >
+              <span class="pointer-events-none inline-block h-4 w-4 translate-x-0 rounded-full bg-background shadow ring-0 transition-transform {smartCrossfadeEnabled ? 'translate-x-4' : ''}"></span>
+            </div>
+            <div>
+              <p class="text-sm font-medium">Smart crossfade</p>
+              <p class="text-xs text-muted-foreground">Trigger at the natural fade-out instead of a fixed time.</p>
+            </div>
+          </label>
+        {/if}
+
+        <!-- Loudness -->
+        <div class="mt-5 border-t border-border/60 pt-5">
+          <label class="flex cursor-pointer items-center gap-3" for="normalization-toggle">
+            <input
+              id="normalization-toggle"
+              type="checkbox"
+              class="sr-only"
+              checked={normalizationEnabled}
+              onchange={() => { normalizationEnabled = !normalizationEnabled; }}
+            />
+            <div
+              aria-hidden="true"
+              class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors {normalizationEnabled ? 'bg-primary' : 'bg-input'}"
+            >
+              <span class="pointer-events-none inline-block h-4 w-4 translate-x-0 rounded-full bg-background shadow ring-0 transition-transform {normalizationEnabled ? 'translate-x-4' : ''}"></span>
+            </div>
+            <div class="flex flex-1 items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-medium">Volume normalization</p>
+                <p class="text-xs text-muted-foreground">Match loudness across tracks.</p>
+              </div>
+              {#if normalizationEnabled}
+                <Select.Root
+                  type="single"
+                  value={normalizationMode}
+                  onValueChange={(v) => { if (v === 'lufs' || v === 'rms') normalizationMode = v; }}
+                >
+                  <Select.Trigger class="w-44 shrink-0">
+                    {normalizationMode === 'rms' ? '–18 dB RMS (legacy)' : '–14 LUFS (modern)'}
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Item value="lufs">–14 LUFS <span class="text-muted-foreground">(modern)</span></Select.Item>
+                    <Select.Item value="rms">–18 dB RMS <span class="text-muted-foreground">(legacy)</span></Select.Item>
+                  </Select.Content>
+                </Select.Root>
+              {/if}
+            </div>
+          </label>
+
+          <label class="mt-4 flex cursor-pointer items-center gap-3" for="loudness-compensation-toggle">
+            <input
+              id="loudness-compensation-toggle"
+              type="checkbox"
+              class="sr-only"
+              checked={loudnessCompensationEnabled}
+              onchange={() => { loudnessCompensationEnabled = !loudnessCompensationEnabled; }}
+            />
+            <div
+              aria-hidden="true"
+              class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors {loudnessCompensationEnabled ? 'bg-primary' : 'bg-input'}"
+            >
+              <span class="pointer-events-none inline-block h-4 w-4 translate-x-0 rounded-full bg-background shadow ring-0 transition-transform {loudnessCompensationEnabled ? 'translate-x-4' : ''}"></span>
+            </div>
+            <div>
+              <p class="text-sm font-medium">Loudness compensation</p>
+              <p class="text-xs text-muted-foreground">Boost bass and treble at low volumes (Fletcher-Munson).</p>
+            </div>
+          </label>
+        </div>
+
       </div>
     {/if}
 

@@ -21,6 +21,11 @@ export type AppSettingsPayload = {
   listenBrainzTokenConfigured: boolean;
   volume: number;
   crossfadeSeconds: number;
+  gaplessEnabled: boolean;
+  normalizationEnabled: boolean;
+  normalizationMode: 'lufs' | 'rms';
+  loudnessCompensationEnabled: boolean;
+  smartCrossfadeEnabled: boolean;
   eqEnabled: boolean;
   eqPreset: EqPresetId;
   eqFrequencies: EqFrequencyValues;
@@ -97,10 +102,18 @@ export type DesktopPlaybackStatus = {
   duration: number;
   ended: boolean;
   trackId: string | null;
+  /** Set when the engine gaplessly advanced to the preloaded track. */
+  gaplessAdvancedTo: string | null;
   eqEnabled: boolean;
   eqFrequencies: EqFrequencyValues;
   eqBands: EqBandValues;
   volume: number;
+  /** Natural end of the current track in seconds (where audio fades to silence). Null when no track loaded. */
+  smartCrossfadePoint: number | null;
+  /** Estimated BPM of the currently loaded track. Null when no track is loaded. */
+  currentTrackBpm: number | null;
+  /** Estimated BPM of the preloaded (next) track. Null when not yet preloaded. */
+  preloadedTrackBpm: number | null;
 };
 
 export type SearchBundlePayload = {

@@ -32,6 +32,11 @@ export async function fetchAppSettings(): Promise<AppSettingsPayload> {
     listenBrainzTokenConfigured: Boolean(s.LISTENBRAINZ_TOKEN),
     volume: isNaN(rawVol) ? 0.8 : Math.max(0, Math.min(1, rawVol)),
     crossfadeSeconds: isNaN(rawCrossfade) ? 4 : Math.max(0, Math.min(12, rawCrossfade)),
+    gaplessEnabled: s.GAPLESS_ENABLED !== 'false',
+    normalizationEnabled: s.NORMALIZATION_ENABLED === 'true',
+    normalizationMode: s.NORMALIZATION_MODE === 'rms' ? 'rms' : 'lufs',
+    loudnessCompensationEnabled: s.LOUDNESS_COMPENSATION_ENABLED === 'true',
+    smartCrossfadeEnabled: s.SMART_CROSSFADE_ENABLED === 'true',
     eqEnabled: s.EQ_ENABLED === 'true',
     eqPreset,
     eqFrequencies,
@@ -61,6 +66,11 @@ export async function updateAppSettings(data: {
   lyricsProvider?: string;
   listenBrainzUsername: string;
   crossfadeSeconds: number;
+  gaplessEnabled?: boolean;
+  normalizationEnabled?: boolean;
+  normalizationMode?: 'lufs' | 'rms';
+  loudnessCompensationEnabled?: boolean;
+  smartCrossfadeEnabled?: boolean;
   eqEnabled: boolean;
   eqPreset: EqPresetId;
   eqFrequencies: EqFrequencyValues;
@@ -76,6 +86,11 @@ export async function updateAppSettings(data: {
     ...(data.lyricsProvider ? { LYRICS_PROVIDER: data.lyricsProvider } : {}),
     LISTENBRAINZ_USERNAME: data.listenBrainzUsername,
     CROSSFADE_SECONDS: String(Math.max(0, Math.min(12, data.crossfadeSeconds))),
+    GAPLESS_ENABLED: String(data.gaplessEnabled ?? true),
+    NORMALIZATION_ENABLED: String(data.normalizationEnabled ?? false),
+    NORMALIZATION_MODE: data.normalizationMode ?? 'lufs',
+    LOUDNESS_COMPENSATION_ENABLED: String(data.loudnessCompensationEnabled ?? false),
+    SMART_CROSSFADE_ENABLED: String(data.smartCrossfadeEnabled ?? false),
     EQ_ENABLED: String(data.eqEnabled),
     EQ_PRESET: data.eqPreset,
     EQ_FREQUENCIES: JSON.stringify(normalizeEqFrequencies(data.eqFrequencies)),

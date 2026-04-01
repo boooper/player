@@ -6,9 +6,26 @@ use std::{
 use biquad::DirectForm1;
 
 use super::{
-    dsp::{build_filter_bank, EQ_BANDS, EQ_FREQUENCIES},
+    dsp::{build_filter_bank, compute_loudness_compensation, EQ_BANDS, EQ_FREQUENCIES},
     types::{PlaybackStatus, TrackPayload},
 };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NormalizationMode {
+    /// Target –14 dBFS (matches streaming services' LUFS target).
+    Lufs,
+    /// Target –18 dBFS (legacy RMS).
+    Rms,
+}
+
+impl NormalizationMode {
+    pub fn target_dbfs(self) -> f32 {
+        match self {
+            NormalizationMode::Lufs => -14.0,
+            NormalizationMode::Rms => -18.0,
+        }
+    }
+}
 
 const CACHE_LIMIT: usize = 3;
 
@@ -17,6 +34,8 @@ struct CrossfadeState {
     outgoing_frame: usize,
     duration_frames: usize,
     elapsed_frames: usize,
+    /// norm_gain of the track that is fading out.
+    outgoing_norm_gain: f32,
 }
 
 pub struct PlaybackState {
@@ -27,6 +46,13 @@ pub struct PlaybackState {
     frame_index: usize,
     playing: bool,
     ended: bool,
+    /// Song ID of the track the engine autonomously advanced to for gapless
+    /// playback. Reported in `snapshot()` so the frontend can sync the queue.
+    /// Cleared by an explicit `load()` or `stop()`.
+    gapless_next_id: Option<String>,
+    normalization_enabled: bool,
+    normalization_mode: NormalizationMode,
+    loudness_compensation: bool,
     volume: f32,
     eq_enabled: bool,
     eq_frequencies: [f32; EQ_BANDS],
@@ -47,6 +73,10 @@ impl PlaybackState {
             frame_index: 0,
             playing: false,
             ended: false,
+            gapless_next_id: None,
+            normalization_enabled: false,
+            normalization_mode: NormalizationMode::Lufs,
+            loudness_compensation: false,
             volume: 0.8,
             eq_enabled: false,
             eq_frequencies: EQ_FREQUENCIES,
@@ -70,10 +100,14 @@ impl PlaybackState {
                 .unwrap_or(0.0),
             ended: self.ended,
             track_id: self.track.as_ref().map(|track| track.song.id.clone()),
+            gapless_advanced_to: self.gapless_next_id.clone(),
             eq_enabled: self.eq_enabled,
             eq_frequencies: self.eq_frequencies,
             eq_bands: self.eq_bands,
             volume: self.volume,
+            smart_crossfade_point: self.track.as_ref().map(|t| t.smart_end_secs),
+            current_track_bpm: self.track.as_ref().map(|t| t.bpm),
+            preloaded_track_bpm: self.preloaded.as_ref().map(|t| t.bpm),
         }
     }
 
@@ -105,8 +139,34 @@ impl PlaybackState {
         self.eq_enabled
     }
 
+    /// True when any filter processing should run (user EQ or loudness compensation).
+    pub fn filter_active(&self) -> bool {
+        self.eq_enabled || self.loudness_compensation
+    }
+
     pub fn volume(&self) -> f32 {
         self.volume
+    }
+
+    pub fn normalization_enabled(&self) -> bool {
+        self.normalization_enabled
+    }
+
+    pub fn set_normalization(&mut self, enabled: bool) {
+        self.normalization_enabled = enabled;
+    }
+
+    pub fn normalization_mode(&self) -> NormalizationMode {
+        self.normalization_mode
+    }
+
+    pub fn set_normalization_mode(&mut self, mode: NormalizationMode) {
+        self.normalization_mode = mode;
+    }
+
+    /// Returns the norm_gain of the outgoing crossfade track, or 1.0.
+    pub fn crossfade_outgoing_norm_gain(&self) -> f32 {
+        self.crossfade.as_ref().map(|cf| cf.outgoing_norm_gain).unwrap_or(1.0)
     }
 
     pub fn filters_mut(&mut self) -> &mut [Vec<DirectForm1<f32>>] {
@@ -142,16 +202,45 @@ impl PlaybackState {
         self.ended = true;
     }
 
+    /// If a preloaded track is waiting, swap it in as the current track and
+    /// start playing it immediately — no gap in audio output.
+    /// Returns `true` if the switch happened, `false` if there was nothing to
+    /// switch to (caller should fall back to `mark_ended`).
+    /// NOTE: EQ filters are intentionally NOT reset so the IIR state flows
+    /// continuously across the track boundary.
+    pub fn advance_to_preloaded_if_ready(&mut self) -> bool {
+        let Some(next) = self.preloaded.take() else {
+            return false;
+        };
+        self.gapless_next_id = Some(next.song.id.clone());
+        self.track = Some(next);
+        self.frame_index = 0;
+        self.ended = false;
+        self.crossfade = None;
+        // playing stays true — we keep the audio stream running without a stop
+        true
+    }
+
     pub fn clear_playing(&mut self) {
         self.playing = false;
     }
 
     fn reset_filters(&mut self) -> Result<(), String> {
+        let effective_bands = if self.loudness_compensation {
+            let comp = compute_loudness_compensation(self.volume);
+            let mut bands = self.eq_bands;
+            for (b, c) in bands.iter_mut().zip(comp.iter()) {
+                *b = (*b + c).clamp(-12.0, 12.0);
+            }
+            bands
+        } else {
+            self.eq_bands
+        };
         self.eq_filters = build_filter_bank(
             self.output_sample_rate,
             self.output_channels,
             self.eq_frequencies,
-            self.eq_bands,
+            effective_bands,
         )?;
         Ok(())
     }
@@ -162,6 +251,7 @@ impl PlaybackState {
         self.frame_index = 0;
         self.playing = autoplay;
         self.ended = false;
+        self.gapless_next_id = None;
         self.crossfade = None;
         self.reset_filters()
     }
@@ -181,6 +271,7 @@ impl PlaybackState {
                     outgoing_frame: self.frame_index,
                     duration_frames,
                     elapsed_frames: 0,
+                    outgoing_norm_gain: current.norm_gain,
                 });
             }
         }
@@ -189,6 +280,7 @@ impl PlaybackState {
         self.frame_index = 0;
         self.playing = autoplay;
         self.ended = false;
+        self.gapless_next_id = None;
         self.reset_filters()
     }
 
@@ -265,6 +357,7 @@ impl PlaybackState {
         self.frame_index = 0;
         self.playing = false;
         self.ended = false;
+        self.gapless_next_id = None;
         self.crossfade = None;
         self.reset_filters()
     }
@@ -280,8 +373,17 @@ impl PlaybackState {
         Ok(())
     }
 
-    pub fn set_volume(&mut self, volume: f32) {
+    pub fn set_volume(&mut self, volume: f32) -> Result<(), String> {
         self.volume = volume.clamp(0.0, 1.0);
+        if self.loudness_compensation {
+            self.reset_filters()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_loudness_compensation(&mut self, enabled: bool) -> Result<(), String> {
+        self.loudness_compensation = enabled;
+        self.reset_filters()
     }
 
     pub fn set_eq(&mut self, enabled: bool, frequencies: [f32; EQ_BANDS], bands: [f32; EQ_BANDS]) -> Result<(), String> {
